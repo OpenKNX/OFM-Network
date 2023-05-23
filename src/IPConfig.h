@@ -58,18 +58,27 @@ void IPConfigModule::setup()
         Ethernet.init(PIN_SS_);
         logInfoP("Initialized ");
 
+        // uint8_t NoOfElem = 30;
+        // uint8_t *FriendlyName;
+        // uint32_t length;
+        // knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, &FriendlyName, length);
+        // wenn leer dann default-wert ( oder doch nur wenn "entladen")
+        // Ethernet.setHostname()
+
         uint8_t NoOfElem = 1;
         uint8_t *data;
         uint32_t length;
         knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PID_IP_ASSIGNMENT_METHOD, NoOfElem, 1, &data, length);
+        
         uint8_t EthernetState = 1;
-
         switch(*data)
         {
             case 1: // manually see 2.5.6 of 03_08_03
             {
                 logInfoP("Use Static IP");
+                
                 Ethernet.begin(mac, GetIpProperty(PID_IP_ADDRESS), IPAddress(0), GetIpProperty(PID_DEFAULT_GATEWAY), GetIpProperty(PID_SUBNET_MASK));
+                Ethernet.setDnsServerIP(IPAddress(8,8,8,8));    // use Google DNS unless we get a param for that
                 // ToDo: set PID_CURRENT_IP_ASSIGNMENT_METHOD to 1
                 break;
             }
@@ -83,45 +92,24 @@ void IPConfigModule::setup()
             }
         }
 
+
         if(EthernetState)
         {
-            logInfoP("Connected! IP address: %s", Ethernet.localIP().toString());
+            logInfoP("Connected! IP address: %s", Ethernet.localIP().toString().c_str());
         }
         else
         {
 
         }
-
-        if ((Ethernet.getChip() == w5500) || (Ethernet.getChip() == w6100) || (Ethernet.getAltChip() == w5100s))
+        if(Ethernet.getChip() == noChip)
         {
-            if (Ethernet.getChip() == w6100)
-                logInfoP("W6100 => ");
-            else if (Ethernet.getChip() == w5500)
-                logInfoP("W5500 => ");
-            else
-                logInfoP("W5100S => ");
-
-            logInfoP("Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
-
-            // Serial.print(F("Speed: "));
-            // Serial.print(Ethernet.speedReport());
-            // Serial.print(F(", Duplex: "));
-            // Serial.print(Ethernet.duplexReport());
-            // Serial.print(F(", Link status: "));
-            // Serial.println(Ethernet.linkReport());
+            logErrorP("Error communicating with Ethernet chip");
         }
-
-        // todo PID_IP_ASSIGNMENT_METHOD
-
-        // Serial.println("KNX Properties:");
-        // Serial.print(F("PID_IP_ADDRESS: "));
-        // Serial.println(GetIpProperty(PID_IP_ADDRESS));
-        // Serial.print(F("PID_SUBNET_MASK: "));
-        // Serial.println(GetIpProperty(PID_SUBNET_MASK));
-        // Serial.print(F("PID_DEFAULT_GATEWAY: "));
-        // Serial.println(GetIpProperty(PID_DEFAULT_GATEWAY));
+        else
+        {
+            logInfoP("Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
+        }
     }
-    // end Ethernet stuff
 }
 
 void IPConfigModule::loop()
