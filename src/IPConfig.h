@@ -15,7 +15,7 @@ class IPConfigModule : public OpenKNX::Module
         IPAddress GetIpProperty(uint8_t PropertyId);
         void SetIpProperty(uint8_t PropertyId, IPAddress IPAddress);
         uint8_t GetByteProperty(uint8_t PropertyId);
-        void SetByteProperty(uint8_t PropertyId, uint8_t date);
+        void SetByteProperty(uint8_t PropertyId, uint8_t value);
 };
 
 //Give your Module a name
@@ -42,7 +42,8 @@ void IPConfigModule::init()
     pushInt(knx.platform().uniqueSerialNumber(), serialBytes);
     byte mac[] = {0x60, 0x4A, 0x7B, serialBytes[1], serialBytes[2], serialBytes[3]};
 
-    logHexTraceP("MAC-Address: ", mac, 6);
+    logTraceP("MAC: ");
+    logHexTraceP(mac, 6);
 
     randomSeed(millis());
 
