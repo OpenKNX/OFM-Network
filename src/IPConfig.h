@@ -54,7 +54,7 @@ void IPConfigModule::init()
     byte mac[] = {0x60, 0x4A, 0x7B, serialBytes[1], serialBytes[2], serialBytes[3]};
 
     logInfoP("MAC: ");
-    logHexTraceP(mac, 6);
+    logHexInfoP(mac, 6);
 
     randomSeed(millis());
 
@@ -252,7 +252,7 @@ bool IPConfigModule::HasInformations()
 void IPConfigModule::showInformations()
 {
 #ifndef RP2040WIFI
-    openknx.logger.log("IP-Address: %s", Ethernet.localIP().toString().c_str());
+    openknx.logger.log("IP-Addressr", Ethernet.localIP().toString().c_str());
 #else
     openknx.logger.log("IP-Address:", WiFi.localIP().toString().c_str());
 #endif
