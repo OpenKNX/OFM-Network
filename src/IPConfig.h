@@ -53,21 +53,21 @@ void IPConfigModule::init()
     pushInt(knx.platform().uniqueSerialNumber(), serialBytes);
     byte mac[] = {0x60, 0x4A, 0x7B, serialBytes[1], serialBytes[2], serialBytes[3]};
 
-    logTraceP("MAC: ");
+    logInfoP("MAC: ");
     logHexTraceP(mac, 6);
 
     randomSeed(millis());
 
     SPIClassRP2040 *spi;
-    if(ETHERNET_GENERIC_USING_SPI2)
+    if(USING_SPI2)
     {
         spi = &SPI1;
-        logTraceP("Using SPI1 for Ethernet");
+        logInfoP("Using SPI1 for Ethernet");
     }
     else
     {
         spi = &SPI;
-        logTraceP("Using SPI for Ethernet");
+        logInfoP("Using SPI for Ethernet");
     }
 
     pinMode(PIN_SS_, OUTPUT);
@@ -77,7 +77,7 @@ void IPConfigModule::init()
     spi->setSCK(PIN_SCK_);
     spi->setCS(PIN_SS_);
 
-    logTraceP("Ethernet SPI GPIO: RX/MISO: %d, TX/MOSI: %d, SCK/SCLK: %d, CSn/SS: %d", PIN_MISO_, PIN_MOSI_, PIN_SCK_, PIN_SS_);
+    logInfoP("Ethernet SPI GPIO: RX/MISO: %d, TX/MOSI: %d, SCK/SCLK: %d, CSn/SS: %d", PIN_MISO_, PIN_MOSI_, PIN_SCK_, PIN_SS_);
 
     Ethernet.init(PIN_SS_);
 
@@ -95,7 +95,7 @@ void IPConfigModule::init()
         Ethernet.setHostname(MAIN_OrderNumber);
     }
 
-    logTraceP("HostName: %s", Ethernet.hostName());
+    logInfoP("HostName: %s", Ethernet.hostName());
 
     //uint8_t NoOfElem = 1;
     //uint8_t *data;
