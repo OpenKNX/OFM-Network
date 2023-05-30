@@ -59,7 +59,7 @@ void IPConfigModule::init()
     randomSeed(millis());
 
     SPIClassRP2040 *spi;
-    if(USING_SPI2)
+    if(ETHERNET_GENERIC_USING_SPI2)
     {
         spi = &SPI1;
         logTraceP("Using SPI1 for Ethernet");
