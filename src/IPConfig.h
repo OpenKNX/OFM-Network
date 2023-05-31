@@ -121,6 +121,7 @@ void IPConfigModule::init()
             logInfoP("Use DHCP");
             EthernetState = Ethernet.begin(mac);
             // ToDo: set PID_CURRENT_IP_ASSIGNMENT_METHOD to 4
+            // set PID_DHCP_BOOTP_SERVER = 63,
             break;
         }
     }
@@ -252,7 +253,8 @@ bool IPConfigModule::HasInformations()
 void IPConfigModule::showInformations()
 {
 #ifndef RP2040WIFI
-    openknx.logger.log("IP-Addressr", Ethernet.localIP().toString().c_str());
+    openknx.logger.log("IP-Address", Ethernet.localIP().toString().c_str());
+    openknx.logger.log("LAN-Port", "Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
 #else
     openknx.logger.log("IP-Address:", WiFi.localIP().toString().c_str());
 #endif
