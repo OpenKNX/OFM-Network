@@ -13,9 +13,8 @@ class IPConfigModule : public OpenKNX::Module
 		const std::string version() override;
         void init() override;
         void loop() override;
-        bool HasInformations() override;
         void showInformations() override;
-        void processSerialInput(uint8_t) override;
+        bool processCommand(const std::string cmd, bool debugKo);
         void showHelp() override;
 
 	private:
@@ -245,32 +244,28 @@ void IPConfigModule::SetByteProperty(uint8_t PropertyId, uint8_t value)
     knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PropertyId, NoOfElem, 1, data, 0);
 }
 
-bool IPConfigModule::HasInformations()
-{
-    return true;
-}
 
 void IPConfigModule::showInformations()
 {
 #ifndef RP2040WIFI
-    openknx.logger.log("IP-Address", Ethernet.localIP().toString().c_str());
-    openknx.logger.log("LAN-Port", "Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
+    //openknx.logger.log("IP-Address", Ethernet.localIP().toString().c_str());
+    //openknx.logger.log("LAN-Port", "Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
 #else
     openknx.logger.log("IP-Address:", WiFi.localIP().toString().c_str());
 #endif
 }
 
-void IPConfigModule::processSerialInput(uint8_t command)
+bool IPConfigModule::processCommand(const std::string cmd, bool debugKo)
 {
-    switch(command)
+    if(cmd == "xxx")
     {
-        case 'x':
-            logInfoP("Test123");
-        break;
+        logInfoP("Test123");
+        return true;
     }
+    return false;
 }
 
 void IPConfigModule::showHelp()
 {
-    openknx.logger.log("", ">  x  <  Foo [%s]", name().c_str());
+    //openknx.logger.log("", ">  x  <  Foo [%s]", name().c_str());
 }
