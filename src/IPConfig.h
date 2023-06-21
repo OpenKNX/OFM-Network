@@ -248,12 +248,13 @@ void IPConfigModule::SetByteProperty(uint8_t PropertyId, uint8_t value)
 void IPConfigModule::showInformations()
 {
 #ifndef RP2040WIFI
-    openknx.logger.logWithValues("IP-Address: %s", Ethernet.localIP().toString().c_str());
     openknx.logger.logWithPrefixAndValues("IP-Address", "%s", Ethernet.localIP().toString().c_str());
-    //openknx.logger.log("IP-Address", Ethernet.localIP().toString().c_str());
-    //openknx.logger.log("LAN-Port", "Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
+    openknx.logger.logWithPrefixAndValues("LAN-Port", "Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
 #else
-    //openknx.logger.log("IP-Address:", WiFi.localIP().toString().c_str());
+    openknx.logger.logWithPrefixAndValues("IP-Address:", WiFi.localIP().toString().c_str());
+    //openknx.logger.logWithPrefixAndValues("SSID:", WiFi.SSID());
+    //openknx.logger.logWithPrefixAndValues("SSID: dBm", WiFi.RSSI());
+    //openknx.logger.logWithPrefixAndValues("SSID: dBm", WiFi.status());
 #endif
 }
 
