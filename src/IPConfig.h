@@ -251,7 +251,7 @@ void IPConfigModule::showInformations()
     //openknx.logger.log("IP-Address", Ethernet.localIP().toString().c_str());
     //openknx.logger.log("LAN-Port", "Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
 #else
-    openknx.logger.log("IP-Address:", WiFi.localIP().toString().c_str());
+    //openknx.logger.log("IP-Address:", WiFi.localIP().toString().c_str());
 #endif
 }
 
