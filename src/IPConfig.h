@@ -1,8 +1,11 @@
 #include "OpenKNX.h"
-#ifndef RP2040WIFI
+
+#if defined(KNX_ETH_GEN)
 #include <Ethernet_Generic.h>
-#else
+#elif defined(KNX_WIFI)
 #include <WiFi.h>
+#else
+#error "no Ethernet stack specified, #define KNX_WIFI or KNX_ETH_GEN"
 #endif
 
 
@@ -46,7 +49,7 @@ void IPConfigModule::init()
 {
     logInfoP("Init IP Stack");
 
-#ifndef RP2040WIFI
+#if defined(KNX_ETH_GEN)
     uint32_t serial = knx.platform().uniqueSerialNumber();
     uint8_t serialBytes[4];
     pushInt(knx.platform().uniqueSerialNumber(), serialBytes);
@@ -142,7 +145,7 @@ void IPConfigModule::init()
     {
         logInfoP("Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
     }
-#else
+#elif defined(KNX_WIFI)
     if(knx.configured())
     {
         uint8_t NoOfElem = 30;
@@ -247,10 +250,10 @@ void IPConfigModule::SetByteProperty(uint8_t PropertyId, uint8_t value)
 
 void IPConfigModule::showInformations()
 {
-#ifndef RP2040WIFI
+#if defined(KNX_ETH_GEN)
     openknx.logger.logWithPrefixAndValues("IP-Address", "%s", Ethernet.localIP().toString().c_str());
     openknx.logger.logWithPrefixAndValues("LAN-Port", "Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
-#else
+#elif defined(KNX_WIFI)
     openknx.logger.logWithPrefixAndValues("IP-Address:", WiFi.localIP().toString().c_str());
     //openknx.logger.logWithPrefixAndValues("SSID:", WiFi.SSID());
     //openknx.logger.logWithPrefixAndValues("SSID: dBm", WiFi.RSSI());
