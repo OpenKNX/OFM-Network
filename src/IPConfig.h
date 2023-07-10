@@ -206,6 +206,9 @@ void IPConfigModule::loop()
     {
         logInfoP("LAN Link lost.");
     }
+
+    _linkstate = newLinkState;
+    _lastLinkCheck = millis();
 }
 
 IPAddress IPConfigModule::GetIpProperty(uint8_t PropertyId)
