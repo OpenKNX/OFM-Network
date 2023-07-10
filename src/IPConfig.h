@@ -26,9 +26,14 @@ class IPConfigModule : public OpenKNX::Module
         void SetIpProperty(uint8_t PropertyId, IPAddress IPAddress);
         uint8_t GetByteProperty(uint8_t PropertyId);
         void SetByteProperty(uint8_t PropertyId, uint8_t value);
+        uint8_t _linkstate = 0;
+        IPAddress _localIP = 0;
+        IPAddress _subnetMask = 0;
+        IPAddress _gatewayIP = 0;
+        uint8_t* _mac;
+        uint8_t* _friendlyName;
+        bool _useStaticIP;
 };
-
-//Stream* ethernet_logger = new OpenKNX::Log::VirtualSerial("Eth");
 
 //Give your Module a name
 //it will be displayed when you use the method log("Hello")
@@ -49,14 +54,14 @@ void IPConfigModule::init()
 {
     logInfoP("Init IP Stack");
 
-#if defined(KNX_ETH_GEN)
     uint32_t serial = knx.platform().uniqueSerialNumber();
     uint8_t serialBytes[4];
     pushInt(knx.platform().uniqueSerialNumber(), serialBytes);
-    byte mac[] = {0x60, 0x4A, 0x7B, serialBytes[1], serialBytes[2], serialBytes[3]};
+    uint8_t mac[] = {0x60, 0x4A, 0x7B, serialBytes[1], serialBytes[2], serialBytes[3]};
+    _mac = (uint8_t*)mac;
 
     logInfoP("MAC: ");
-    logHexInfoP(mac, 6);
+    logHexInfoP(_mac, 6);
 
     randomSeed(millis());
 
@@ -72,8 +77,12 @@ void IPConfigModule::init()
         logInfoP("Using SPI for Ethernet");
     }
 
+    pinMode(PIN_ETH_RES, OUTPUT);
+
+    digitalWrite(PIN_ETH_RES, LOW);
+
     pinMode(PIN_SS_, OUTPUT);
-    digitalWrite(PIN_SS_, HIGH); // Todo check if this is neccessary
+    //digitalWrite(PIN_SS_, HIGH); // Todo check if this is neccessary
     spi->setRX(PIN_MISO_);
     spi->setTX(PIN_MOSI_);
     spi->setSCK(PIN_SCK_);
@@ -83,51 +92,44 @@ void IPConfigModule::init()
 
     Ethernet.init(PIN_SS_);
 
+
     if(knx.configured())
     {
         uint8_t NoOfElem = 30;
-        uint8_t *FriendlyName;
         uint32_t length;
-        knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, &FriendlyName, length);
-        Ethernet.setHostname((const char *)FriendlyName);
-        delete[] FriendlyName;
+        knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, &_friendlyName, length);
+        Ethernet.setHostname((const char *)_friendlyName);
+
+        _gatewayIP = GetIpProperty(PID_DEFAULT_GATEWAY);
+        _subnetMask = GetIpProperty(PID_SUBNET_MASK);
+        _localIP = GetIpProperty(PID_IP_ADDRESS);
+        _useStaticIP = GetByteProperty(PID_IP_ASSIGNMENT_METHOD) == 1; // see 2.5.6 of 03_08_03
     }
     else
     {
-        Ethernet.setHostname(MAIN_OrderNumber);
+        _friendlyName = (uint8_t*)MAIN_OrderNumber;
     }
 
+    Ethernet.setHostname((const char *)_friendlyName);
     logInfoP("HostName: %s", Ethernet.hostName());
 
-    //uint8_t NoOfElem = 1;
-    //uint8_t *data;
-    //uint32_t length;
-    //knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PID_IP_ASSIGNMENT_METHOD, NoOfElem, 1, &data, length);
     
     uint8_t EthernetState = 1;
-    //switch(*data)
-    switch(GetByteProperty(PID_IP_ASSIGNMENT_METHOD))
-    {
-        case 1: // manually see 2.5.6 of 03_08_03
-        {
-            logInfoP("Use Static IP");
-            
-            Ethernet.begin(mac, GetIpProperty(PID_IP_ADDRESS), IPAddress(8,8,8,8), GetIpProperty(PID_DEFAULT_GATEWAY), GetIpProperty(PID_SUBNET_MASK));
-            //Ethernet.setDnsServerIP(IPAddress(8,8,8,8));    // use Google DNS unless we get a param for that
-            // ToDo: set PID_CURRENT_IP_ASSIGNMENT_METHOD to 1
-            break;
-        }
-        case 4: // DHCP see 2.5.6 of 03_08_03
-        default:
-        {
-            logInfoP("Use DHCP");
-            EthernetState = Ethernet.begin(mac);
-            // ToDo: set PID_CURRENT_IP_ASSIGNMENT_METHOD to 4
-            // set PID_DHCP_BOOTP_SERVER = 63,
-            break;
-        }
-    }
 
+    if(_useStaticIP)
+    {
+        logInfoP("Use Static IP");
+        
+        Ethernet.begin(_mac, _localIP, IPAddress(8,8,8,8), _gatewayIP, _subnetMask);
+        SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1);
+    }
+    else
+    {
+        logInfoP("Use DHCP");
+        EthernetState = Ethernet.begin(_mac);
+        if(EthernetState)
+            SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 4);
+    }
 
     if(EthernetState)
     {
@@ -137,6 +139,7 @@ void IPConfigModule::init()
     {
 
     }
+
     if(Ethernet.getChip() == noChip)
     {
         logErrorP("Error communicating with Ethernet chip");
@@ -145,60 +148,25 @@ void IPConfigModule::init()
     {
         logInfoP("Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
     }
-#elif defined(KNX_WIFI)
-    if(knx.configured())
-    {
-        uint8_t NoOfElem = 30;
-        uint8_t *FriendlyName;
-        uint32_t length;
-        knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, &FriendlyName, length);
-        WiFi.setHostname((const char *)FriendlyName);
-        delete[] FriendlyName;
-    }
-    else
-    {
-        WiFi.setHostname(MAIN_OrderNumber);
-    }
 
-    logTraceP("HostName: %s", WiFi.hostName());
-
-    uint8_t EthernetState = 1;
-    switch(GetByteProperty(PID_IP_ASSIGNMENT_METHOD))
-    {
-        case 1: // manually see 2.5.6 of 03_08_03
-        {
-            logInfoP("Use Static IP");
-            
-            WiFi.config(GetIpProperty(PID_IP_ADDRESS), IPAddress(8,8,8,8), GetIpProperty(PID_DEFAULT_GATEWAY), GetIpProperty(PID_SUBNET_MASK));
-            EthernetState = WiFi.begin("dsnet", "huitza92gegO");
-            // ToDo: set PID_CURRENT_IP_ASSIGNMENT_METHOD to 1
-            break;
-        }
-        case 4: // DHCP see 2.5.6 of 03_08_03
-        default:
-        {
-            logInfoP("Use DHCP");
-            EthernetState = WiFi.begin("dsnet", "huitza92gegO");
-            // ToDo: set PID_CURRENT_IP_ASSIGNMENT_METHOD to 4
-            break;
-        }
-    }
-
-    if(EthernetState)
-    {
-        logInfoP("Connected! IP address: %s", WiFi.localIP().toString().c_str());
-    }
-    else
-    {
-
-    }
-#endif
-
+    _linkstate = Ethernet.link();
 }
 
 void IPConfigModule::loop()
 {
+    // ToDo: do this only every xxx ms
+    uint8_t newLinkState = Ethernet.link();
 
+    // got link
+    if(newLinkState && !_linkstate)
+    {
+        Ethernet.maintain();
+    }
+    // lost link
+    else if(!newLinkState && _linkstate)
+    {
+
+    }
 }
 
 IPAddress IPConfigModule::GetIpProperty(uint8_t PropertyId)
@@ -250,15 +218,9 @@ void IPConfigModule::SetByteProperty(uint8_t PropertyId, uint8_t value)
 
 void IPConfigModule::showInformations()
 {
-#if defined(KNX_ETH_GEN)
     openknx.logger.logWithPrefixAndValues("IP-Address", "%s", Ethernet.localIP().toString().c_str());
     openknx.logger.logWithPrefixAndValues("LAN-Port", "Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
-#elif defined(KNX_WIFI)
-    openknx.logger.logWithPrefixAndValues("IP-Address:", WiFi.localIP().toString().c_str());
-    //openknx.logger.logWithPrefixAndValues("SSID:", WiFi.SSID());
-    //openknx.logger.logWithPrefixAndValues("SSID: dBm", WiFi.RSSI());
-    //openknx.logger.logWithPrefixAndValues("SSID: dBm", WiFi.status());
-#endif
+
 }
 
 bool IPConfigModule::processCommand(const std::string cmd, bool debugKo)
