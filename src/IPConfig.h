@@ -33,6 +33,7 @@ class IPConfigModule : public OpenKNX::Module
         uint8_t* _mac;
         uint8_t* _friendlyName;
         bool _useStaticIP;
+        uint32_t _lastLinkCheck;
 };
 
 //Give your Module a name
@@ -112,22 +113,42 @@ void IPConfigModule::init()
     Ethernet.setHostname((const char *)_friendlyName);
     logInfoP("HostName: %s", Ethernet.hostName());
 
+    if(Ethernet.getChip() != EthernetChip_t::w5500)
+    {
+        openknx.hardware.fatalError(1, "Error communicating with W5500 Ethernet chip");
+    }
+    else
+    {
+        logInfoP("Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
+    }
     
+    _linkstate = Ethernet.link();
     uint8_t EthernetState = 1;
 
     if(_useStaticIP)
     {
-        logInfoP("Use Static IP");
+        logInfoP("Using Static IP");
         
         Ethernet.begin(_mac, _localIP, IPAddress(8,8,8,8), _gatewayIP, _subnetMask);
         SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1);
     }
     else
     {
-        logInfoP("Use DHCP");
-        EthernetState = Ethernet.begin(_mac, 10000); // 10s DHCP timeout
+        if(!_linkstate)
+        {
+            logInfoP("DHCP configured, but no link. Using AutoIP.");
+        }
+        else
+        {
+            logInfoP("DHCP configured, requesting Lease..");
+            EthernetState = Ethernet.begin(_mac, 10000); // 10s DHCP timeout
+        }
+
         if(EthernetState)
+        {
             SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 4);
+            logInfoP("DHCP successfull.");
+        }
         else
         {
             // Assign AutoIP in 169.254. range based on serial number to avoid collisions
@@ -144,44 +165,45 @@ void IPConfigModule::init()
             Ethernet.setLocalIP(IPAddress(169,254,oct3,oct4));
             Ethernet.setSubnetMask(IPAddress(255,255,0,0));
             SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 8);
+            logInfoP("DHCP timeout, Using AutoIP.");
         }
     }
+    logInfoP("IP address: %s", Ethernet.localIP().toString().c_str());
 
-    if(EthernetState)
-    {
-        logInfoP("Connected! IP address: %s", Ethernet.localIP().toString().c_str());
-    }
-    else
-    {
-
-    }
-
-    if(Ethernet.getChip() == noChip)
-    {
-        logErrorP("Error communicating with Ethernet chip");
-    }
-    else
-    {
-        logInfoP("Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
-    }
-
-    _linkstate = Ethernet.link();
+    _lastLinkCheck = millis();
 }
 
 void IPConfigModule::loop()
 {
-    // ToDo: do this only every xxx ms
+    if(!delayCheckMillis(_lastLinkCheck, 1000))
+        return;
+    
     uint8_t newLinkState = Ethernet.link();
 
     // got link
     if(newLinkState && !_linkstate)
     {
-        Ethernet.maintain();
+        logInfoP("LAN Link established.");
+        if(!_useStaticIP)
+        {
+            logInfoP("DHCP configured, requesting Lease..");
+            if(Ethernet.begin(_mac, 3000)) // 3s DHCP timeout
+            {
+                logInfoP("DHCP successfull.");
+                SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 4);
+            }
+            else
+            {
+                logInfoP("DHCP timeout.");
+            }
+            logInfoP("IP address: %s", Ethernet.localIP().toString().c_str());
+        }
     }
+
     // lost link
     else if(!newLinkState && _linkstate)
     {
-
+        logInfoP("LAN Link lost.");
     }
 }
 
