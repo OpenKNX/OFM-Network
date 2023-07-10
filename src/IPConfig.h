@@ -128,6 +128,7 @@ void IPConfigModule::init()
         if(!_linkstate)
         {
             logInfoP("DHCP configured, but no link. Using AutoIP.");
+            EthernetState = 0;
         }
         else
         {
