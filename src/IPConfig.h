@@ -54,6 +54,8 @@ void IPConfigModule::init()
 {
     logInfoP("Init IP Stack");
 
+    SetByteProperty(PID_IP_CAPABILITIES, 6);    // AutoIP + DHCP
+    
     uint32_t serial = knx.platform().uniqueSerialNumber();
     uint8_t serialBytes[4];
     pushInt(knx.platform().uniqueSerialNumber(), serialBytes);
@@ -77,12 +79,10 @@ void IPConfigModule::init()
         logInfoP("Using SPI for Ethernet");
     }
 
-    pinMode(PIN_ETH_RES, OUTPUT);
+    // Hardreset of W5500
+    Ethernet.setRstPin(PIN_ETH_RES);
+    Ethernet.hardreset();
 
-    digitalWrite(PIN_ETH_RES, LOW);
-
-    pinMode(PIN_SS_, OUTPUT);
-    //digitalWrite(PIN_SS_, HIGH); // Todo check if this is neccessary
     spi->setRX(PIN_MISO_);
     spi->setTX(PIN_MOSI_);
     spi->setSCK(PIN_SCK_);
@@ -91,7 +91,6 @@ void IPConfigModule::init()
     logInfoP("Ethernet SPI GPIO: RX/MISO: %d, TX/MOSI: %d, SCK/SCLK: %d, CSn/SS: %d", PIN_MISO_, PIN_MOSI_, PIN_SCK_, PIN_SS_);
 
     Ethernet.init(PIN_SS_);
-
 
     if(knx.configured())
     {
@@ -126,9 +125,26 @@ void IPConfigModule::init()
     else
     {
         logInfoP("Use DHCP");
-        EthernetState = Ethernet.begin(_mac);
+        EthernetState = Ethernet.begin(_mac, 10000); // 10s DHCP timeout
         if(EthernetState)
             SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 4);
+        else
+        {
+            // Assign AutoIP in 169.254. range based on serial number to avoid collisions
+            uint8_t oct3 = _mac[2];
+            uint8_t oct4 = _mac[3];
+            if(oct3==0)
+                oct3++;
+            if(oct3==255)
+                oct3--;
+            if(oct4==0)
+                oct3++;
+            if(oct4==255)
+                oct3--;
+            Ethernet.setLocalIP(IPAddress(169,254,oct3,oct4));
+            Ethernet.setSubnetMask(IPAddress(255,255,0,0));
+            SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 8);
+        }
     }
 
     if(EthernetState)
