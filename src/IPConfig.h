@@ -113,15 +113,6 @@ void IPConfigModule::init()
     Ethernet.setHostname((const char *)_friendlyName);
     logInfoP("HostName: %s", Ethernet.hostName());
 
-    if(Ethernet.getChip() != EthernetChip_t::w5500)
-    {
-        openknx.hardware.fatalError(1, "Error communicating with W5500 Ethernet chip");
-    }
-    else
-    {
-        logInfoP("Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
-    }
-    
     _linkstate = Ethernet.link();
     uint8_t EthernetState = 1;
 
@@ -162,13 +153,21 @@ void IPConfigModule::init()
                 oct3++;
             if(oct4==255)
                 oct3--;
-            Ethernet.setLocalIP(IPAddress(169,254,oct3,oct4));
-            Ethernet.setSubnetMask(IPAddress(255,255,0,0));
+            Ethernet.begin(_mac, IPAddress(169,254,oct3,oct4), 0, 0, IPAddress(255,255,0,0));
             SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 8);
             logInfoP("DHCP timeout, Using AutoIP.");
         }
     }
     logInfoP("IP address: %s", Ethernet.localIP().toString().c_str());
+
+    if(Ethernet.getChip() != EthernetChip_t::w5500)
+    {
+        openknx.hardware.fatalError(1, "Error communicating with W5500 Ethernet chip");
+    }
+    else
+    {
+        logInfoP("Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
+    }
 
     _lastLinkCheck = millis();
 }
@@ -187,6 +186,7 @@ void IPConfigModule::loop()
         if(!_useStaticIP)
         {
             logInfoP("DHCP configured, requesting Lease..");
+            //TODO this is loop, calling a up to 3s blocking DHCP request here is not good. Ethernet lib with non-blocking DHCP needed.
             if(Ethernet.begin(_mac, 3000)) // 3s DHCP timeout
             {
                 logInfoP("DHCP successfull.");
