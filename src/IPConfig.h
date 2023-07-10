@@ -188,7 +188,7 @@ void IPConfigModule::loop()
         {
             logInfoP("DHCP configured, requesting Lease..");
             //TODO this is loop, calling a up to 3s blocking DHCP request here is not good. Ethernet lib with non-blocking DHCP needed.
-            if(Ethernet.begin(_mac, 3000)) // 3s DHCP timeout
+            if(Ethernet.begin(_mac, 10000)) // 3s DHCP timeout
             {
                 logInfoP("DHCP successfull.");
                 SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 4);
