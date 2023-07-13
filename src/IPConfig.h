@@ -30,7 +30,7 @@ class IPConfigModule : public OpenKNX::Module
         IPAddress _localIP = 0;
         IPAddress _subnetMask = 0;
         IPAddress _gatewayIP = 0;
-        uint8_t* _mac;
+        uint8_t _mac[6] = {0x60, 0x4A, 0x7B, 0, 0, 0};
         uint8_t* _friendlyName;
         bool _useStaticIP;
         uint32_t _lastLinkCheck;
@@ -60,8 +60,9 @@ void IPConfigModule::init()
     uint32_t serial = knx.platform().uniqueSerialNumber();
     uint8_t serialBytes[4];
     pushInt(knx.platform().uniqueSerialNumber(), serialBytes);
-    uint8_t mac[] = {0x60, 0x4A, 0x7B, serialBytes[1], serialBytes[2], serialBytes[3]};
-    _mac = (uint8_t*)mac;
+    _mac[3] = serialBytes[1];
+    _mac[4] = serialBytes[2];
+    _mac[5] = serialBytes[3];
 
     logInfoP("MAC: ");
     logHexInfoP(_mac, 6);
@@ -93,6 +94,15 @@ void IPConfigModule::init()
 
     Ethernet.init(PIN_SS_);
 
+    if(Ethernet.getChip() != EthernetChip_t::w5500)
+    {
+        openknx.hardware.fatalError(1, "Error communicating with W5500 Ethernet chip");
+    }
+    else
+    {
+        logInfoP("Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
+    }
+
     if(knx.configured())
     {
         uint8_t NoOfElem = 30;
@@ -114,6 +124,7 @@ void IPConfigModule::init()
     logInfoP("HostName: %s", Ethernet.hostName());
 
     _linkstate = Ethernet.link();
+    //_linkstate = 1;
     uint8_t EthernetState = 1;
 
     if(_useStaticIP)
@@ -156,19 +167,10 @@ void IPConfigModule::init()
                 oct3--;
             Ethernet.begin(_mac, IPAddress(169,254,oct3,oct4), 0, 0, IPAddress(255,255,0,0));
             SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 8);
-            logInfoP("DHCP timeout, Using AutoIP.");
+            logInfoP("DHCP not reachable, using AutoIP.");
         }
     }
     logInfoP("IP address: %s", Ethernet.localIP().toString().c_str());
-
-    if(Ethernet.getChip() != EthernetChip_t::w5500)
-    {
-        openknx.hardware.fatalError(1, "Error communicating with W5500 Ethernet chip");
-    }
-    else
-    {
-        logInfoP("Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
-    }
 
     _lastLinkCheck = millis();
 }
@@ -177,6 +179,8 @@ void IPConfigModule::loop()
 {
     if(!delayCheckMillis(_lastLinkCheck, 1000))
         return;
+
+    //logInfoP("IPConfigModule::loop()");
     
     uint8_t newLinkState = Ethernet.link();
 
@@ -188,7 +192,8 @@ void IPConfigModule::loop()
         {
             logInfoP("DHCP configured, requesting Lease..");
             //TODO this is loop, calling a up to 3s blocking DHCP request here is not good. Ethernet lib with non-blocking DHCP needed.
-            if(Ethernet.begin(_mac, 10000)) // 3s DHCP timeout
+
+            if(Ethernet.begin(_mac, 3000)) // 3s DHCP timeout
             {
                 logInfoP("DHCP successfull.");
                 SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 4);
