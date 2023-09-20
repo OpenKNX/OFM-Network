@@ -1,12 +1,15 @@
 #include "OpenKNX.h"
 
 #if defined(KNX_ETH_GEN)
-#include <Ethernet_Generic.h>
+#include <W5500lwIP.h>
 #elif defined(KNX_WIFI)
 #include <WiFi.h>
 #else
 #error "no Ethernet stack specified, #define KNX_WIFI or KNX_ETH_GEN"
 #endif
+
+Wiznet5500lwIP eth(PIN_SS_, SPI_INTERFACE);
+WiFiUDP Udp;
 
 
 class IPConfigModule : public OpenKNX::Module
@@ -30,7 +33,7 @@ class IPConfigModule : public OpenKNX::Module
         IPAddress _localIP = 0;
         IPAddress _subnetMask = 0;
         IPAddress _gatewayIP = 0;
-        uint8_t _mac[6] = {0x60, 0x4A, 0x7B, 0, 0, 0};
+        uint8_t _mac[6] = {0x66, 0x4A, 0x7B, 0, 0, 0};
         uint8_t* _friendlyName;
         bool _useStaticIP;
         uint32_t _lastLinkCheck;
@@ -69,30 +72,20 @@ void IPConfigModule::init()
 
     randomSeed(millis());
 
-    SPIClassRP2040 *spi;
-    if(USING_SPI2)
-    {
-        spi = &SPI1;
-        logInfoP("Using SPI1 for Ethernet");
-    }
-    else
-    {
-        spi = &SPI;
-        logInfoP("Using SPI for Ethernet");
-    }
 
-    // Hardreset of W5500
-    Ethernet.setRstPin(PIN_ETH_RES);
-    Ethernet.hardreset();
+    // Hardreset of W5500 ToDo
+    //Ethernet.setRstPin(PIN_ETH_RES);
+    //Ethernet.hardreset();
 
-    spi->setRX(PIN_MISO_);
-    spi->setTX(PIN_MOSI_);
-    spi->setSCK(PIN_SCK_);
-    spi->setCS(PIN_SS_);
+    SPI_INTERFACE.setRX(PIN_MISO_);
+    SPI_INTERFACE.setTX(PIN_MOSI_);
+    SPI_INTERFACE.setSCK(PIN_SCK_);
+    SPI_INTERFACE.setCS(PIN_SS_);
 
     logInfoP("Ethernet SPI GPIO: RX/MISO: %d, TX/MOSI: %d, SCK/SCLK: %d, CSn/SS: %d", PIN_MISO_, PIN_MOSI_, PIN_SCK_, PIN_SS_);
 
-    Ethernet.init(PIN_SS_);
+    //Ethernet.init(PIN_SS_);
+    eth.
 
     if(Ethernet.getChip() != EthernetChip_t::w5500)
     {
