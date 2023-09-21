@@ -84,24 +84,12 @@ void IPConfigModule::init()
 
     logInfoP("Ethernet SPI GPIO: RX/MISO: %d, TX/MOSI: %d, SCK/SCLK: %d, CSn/SS: %d", PIN_MISO_, PIN_MOSI_, PIN_SCK_, PIN_SS_);
 
-    //Ethernet.init(PIN_SS_);
-    eth.
-
-    if(Ethernet.getChip() != EthernetChip_t::w5500)
-    {
-        openknx.hardware.fatalError(1, "Error communicating with W5500 Ethernet chip");
-    }
-    else
-    {
-        logInfoP("Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
-    }
 
     if(knx.configured())
     {
         uint8_t NoOfElem = 30;
         uint32_t length;
         knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, &_friendlyName, length);
-        Ethernet.setHostname((const char *)_friendlyName);
 
         _gatewayIP = GetIpProperty(PID_DEFAULT_GATEWAY);
         _subnetMask = GetIpProperty(PID_SUBNET_MASK);
@@ -113,63 +101,30 @@ void IPConfigModule::init()
         _friendlyName = (uint8_t*)MAIN_OrderNumber;
     }
 
-    Ethernet.setHostname((const char *)_friendlyName);
-    logInfoP("HostName: %s", Ethernet.hostName());
+    eth.hostname((const char *)_friendlyName);
+    logInfoP("HostName: %s", eth.hostname());
 
-    _linkstate = Ethernet.link();
+    _linkstate = eth.isLinked();
     //_linkstate = 1;
     uint8_t EthernetState = 1;
 
     if(_useStaticIP)
     {
         logInfoP("Using Static IP");
-        
-        Ethernet.begin(_mac, _localIP, IPAddress(8,8,8,8), _gatewayIP, _subnetMask);
+
+        eth.config(_localIP, _gatewayIP, _subnetMask, IPAddress(8,8,8,8), IPAddress(4,4,4,4));
         SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1);
     }
-    else
+
+    if(!eth.begin())
     {
-        if(!_linkstate)
-        {
-            logInfoP("DHCP configured, but no link. Using AutoIP.");
-            EthernetState = 0;
-        }
-        else
-        {
-            logInfoP("DHCP configured, requesting Lease..");
-            EthernetState = Ethernet.begin(_mac, 10000); // 10s DHCP timeout
-        }
-
-        if(EthernetState)
-        {
-            SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 4);
-            logInfoP("DHCP successfull.");
-        }
-        else
-        {
-            // Assign AutoIP in 169.254. range based on serial number to avoid collisions
-            uint8_t oct3 = _mac[2];
-            uint8_t oct4 = _mac[3];
-            if(oct3==0)
-                oct3++;
-            if(oct3==255)
-                oct3--;
-            if(oct4==0)
-                oct3++;
-            if(oct4==255)
-                oct3--;
-            Ethernet.begin(_mac, IPAddress(169,254,oct3,oct4), 0, 0, IPAddress(255,255,0,0));
-            SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 8);
-            logInfoP("DHCP not reachable, using AutoIP.");
-        }
+        openknx.hardware.fatalError(1, "Error communicating with W5500 Ethernet chip");
     }
-    logInfoP("IP address: %s", Ethernet.localIP().toString().c_str());
-
-    _lastLinkCheck = millis();
 }
 
 void IPConfigModule::loop()
 {
+    /*
     if(!delayCheckMillis(_lastLinkCheck, 1000))
         return;
 
@@ -207,6 +162,7 @@ void IPConfigModule::loop()
 
     _linkstate = newLinkState;
     _lastLinkCheck = millis();
+    */
 }
 
 IPAddress IPConfigModule::GetIpProperty(uint8_t PropertyId)
@@ -258,9 +214,8 @@ void IPConfigModule::SetByteProperty(uint8_t PropertyId, uint8_t value)
 
 void IPConfigModule::showInformations()
 {
-    openknx.logger.logWithPrefixAndValues("IP-Address", "%s", Ethernet.localIP().toString().c_str());
-    openknx.logger.logWithPrefixAndValues("LAN-Port", "Speed: %S, Duplex: %s, Link state: %s", Ethernet.speedReport(), Ethernet.duplexReport(), Ethernet.linkReport());
-
+    openknx.logger.logWithPrefixAndValues("IP-Address", "%s", eth.localIP().toString().c_str());
+    openknx.logger.logWithPrefixAndValues("LAN-Port", "Speed: %S, Duplex: %s, Link state: %s", "unknown", "unknown", eth.isLinked()?"Linked":"No Link");
 }
 
 bool IPConfigModule::processCommand(const std::string cmd, bool debugKo)
