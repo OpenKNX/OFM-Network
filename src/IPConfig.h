@@ -8,7 +8,7 @@
 #error "no Ethernet stack specified, #define KNX_WIFI or KNX_ETH_GEN"
 #endif
 
-Wiznet5500lwIP eth(PIN_SS_, SPI_INTERFACE);
+Wiznet5500lwIP eth(PIN_ETH_SS, ETH_SPI_INTERFACE);
 WiFiUDP Udp;
 
 
@@ -77,12 +77,12 @@ void IPConfigModule::init()
     //Ethernet.setRstPin(PIN_ETH_RES);
     //Ethernet.hardreset();
 
-    SPI_INTERFACE.setRX(PIN_MISO_);
-    SPI_INTERFACE.setTX(PIN_MOSI_);
-    SPI_INTERFACE.setSCK(PIN_SCK_);
-    SPI_INTERFACE.setCS(PIN_SS_);
+    ETH_SPI_INTERFACE.setRX(PIN_ETH_MISO);
+    ETH_SPI_INTERFACE.setTX(PIN_ETH_MOSI);
+    ETH_SPI_INTERFACE.setSCK(PIN_ETH_SCK);
+    ETH_SPI_INTERFACE.setCS(PIN_ETH_SS);
 
-    logInfoP("Ethernet SPI GPIO: RX/MISO: %d, TX/MOSI: %d, SCK/SCLK: %d, CSn/SS: %d", PIN_MISO_, PIN_MOSI_, PIN_SCK_, PIN_SS_);
+    logInfoP("Ethernet SPI GPIO: RX/MISO: %d, TX/MOSI: %d, SCK/SCLK: %d, CSn/SS: %d", PIN_ETH_MISO, PIN_ETH_MOSI, PIN_ETH_SCK, PIN_ETH_SS);
 
 
     if(knx.configured())
