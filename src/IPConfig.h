@@ -68,8 +68,7 @@ void IPConfigModule::init()
     _mac[4] = serialBytes[2];
     _mac[5] = serialBytes[3];
 
-    logInfoP("MAC: ");
-    logHexInfoP(_mac, 6);
+    logInfoP("MAC: %02X:%02X:%02X:%02X:%02X:%02X", _mac[0], _mac[1], _mac[2], _mac[3], _mac[4], _mac[5]);
 
     randomSeed(millis());
 
@@ -104,10 +103,9 @@ void IPConfigModule::init()
     }
 
 #if defined(KNX_IP_W5500)
-    KNX_NETIF.hostname((const char *)_friendlyName);    //ToDo check if that works
-    logInfoP("HostName: %s", KNX_NETIF.hostname());
+    KNX_NETIF.hostname((const char *)_friendlyName);
+    logInfoP("HostName: %s", KNX_NETIF.hostname().c_str());
 
-    _linkstate = KNX_NETIF.isLinked();
     uint8_t EthernetState = 1;
 
     if(_useStaticIP)
@@ -117,13 +115,25 @@ void IPConfigModule::init()
         KNX_NETIF.config(_localIP, _gatewayIP, _subnetMask, IPAddress(8,8,8,8), IPAddress(4,4,4,4));
         SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1);
     }
+    else
+    {
+        logInfoP("Using DHCP");
+        SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 2); // ToDo
+    }
 
     if(!KNX_NETIF.begin())
     {
         openknx.hardware.fatalError(1, "Error communicating with W5500 Ethernet chip");
     }
+
+    _linkstate = KNX_NETIF.isLinked();
+    if(!_linkstate)
+    {
+        logInfoP("Lan Link missing");
+    }
 #elif defined(KNX_IP_WIFI)
     //ToDo for WiFi
+    #pragma warn "Implementation for WiFi missing"
 #endif
 
 
@@ -133,45 +143,34 @@ void IPConfigModule::init()
 
 void IPConfigModule::loop()
 {
-    /*
-    if(!delayCheckMillis(_lastLinkCheck, 1000))
+    if(!delayCheckMillis(_lastLinkCheck, 500))
         return;
 
-    //logInfoP("IPConfigModule::loop()");
-    
-    uint8_t newLinkState = Ethernet.link();
+#if defined(KNX_IP_W5500)
+    uint8_t newLinkState = KNX_NETIF.isLinked();
 
     // got link
     if(newLinkState && !_linkstate)
     {
-        logInfoP("LAN Link established.");
-        if(!_useStaticIP)
-        {
-            logInfoP("DHCP configured, requesting Lease..");
-            //TODO this is loop, calling a up to 3s blocking DHCP request here is not good. Ethernet lib with non-blocking DHCP needed.
 
-            if(Ethernet.begin(_mac, 3000)) // 3s DHCP timeout
-            {
-                logInfoP("DHCP successfull.");
-                SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 4);
-            }
-            else
-            {
-                logInfoP("DHCP timeout.");
-            }
-            logInfoP("IP address: %s", Ethernet.localIP().toString().c_str());
-        }
+        logInfoP("LAN Link established.");
+        netif_set_link_up(KNX_NETIF.getNetIf());
     }
 
     // lost link
     else if(!newLinkState && _linkstate)
     {
+        netif_set_link_down(KNX_NETIF.getNetIf());
         logInfoP("LAN Link lost.");
     }
 
     _linkstate = newLinkState;
+#elif defined(KNX_IP_WIFI)
+    //ToDo for WiFi
+    #pragma warn "Implementation for WiFi missing"
+#endif
+    
     _lastLinkCheck = millis();
-    */
 }
 
 IPAddress IPConfigModule::GetIpProperty(uint8_t PropertyId)
@@ -224,10 +223,12 @@ void IPConfigModule::SetByteProperty(uint8_t PropertyId, uint8_t value)
 void IPConfigModule::showInformations()
 {
     openknx.logger.logWithPrefixAndValues("IP-Address", "%s", KNX_NETIF.localIP().toString().c_str());
+    openknx.logger.logWithPrefixAndValues("MAC-Address", "%02X:%02X:%02X:%02X:%02X:%02X", _mac[0], _mac[1], _mac[2], _mac[3], _mac[4], _mac[5]);
+
 #if defined(KNX_IP_W5500)
-    openknx.logger.logWithPrefixAndValues("LAN-Port", "Speed: %S, Duplex: %s, Link state: %s", "unknown", "unknown", KNX_NETIF.isLinked()?"Linked":"No Link");
+    openknx.logger.logWithPrefixAndValues("LAN-Port", "%s",_linkstate?"Linked":"No Link");
 #elif defined(KNX_IP_WIFI)
-    // display Info over WiFi connection ToDo
+    openknx.logger.logWithPrefixAndValues("SSID", "%s", KNX_NETIF.SSID());
 #endif
 }
 
