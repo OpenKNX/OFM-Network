@@ -1,14 +1,15 @@
 #include "OpenKNX.h"
 
-#if defined(KNX_ETH_GEN)
+#if defined(KNX_IP_W5500)
 #include <W5500lwIP.h>
-#elif defined(KNX_WIFI)
+Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE);
+#elif defined(KNX_IP_WIFI)
 #include <WiFi.h>
 #else
-#error "no Ethernet stack specified, #define KNX_WIFI or KNX_ETH_GEN"
+#error "no Ethernet stack specified, #define KNX_IP_WIFI or KNX_IP_W5500"
 #endif
 
-Wiznet5500lwIP eth(PIN_ETH_SS, ETH_SPI_INTERFACE);
+
 WiFiUDP Udp;
 
 
@@ -72,7 +73,7 @@ void IPConfigModule::init()
 
     randomSeed(millis());
 
-
+#ifdef KNX_IP_W5500
     // Hardreset of W5500 ToDo
     //Ethernet.setRstPin(PIN_ETH_RES);
     //Ethernet.hardreset();
@@ -83,6 +84,7 @@ void IPConfigModule::init()
     ETH_SPI_INTERFACE.setCS(PIN_ETH_SS);
 
     logInfoP("Ethernet SPI GPIO: RX/MISO: %d, TX/MOSI: %d, SCK/SCLK: %d, CSn/SS: %d", PIN_ETH_MISO, PIN_ETH_MOSI, PIN_ETH_SCK, PIN_ETH_SS);
+#endif
 
 
     if(knx.configured())
@@ -101,25 +103,32 @@ void IPConfigModule::init()
         _friendlyName = (uint8_t*)MAIN_OrderNumber;
     }
 
-    eth.hostname((const char *)_friendlyName);
-    logInfoP("HostName: %s", eth.hostname());
+#if defined(KNX_IP_W5500)
+    KNX_NETIF.hostname((const char *)_friendlyName);    //ToDo check if that works
+    logInfoP("HostName: %s", KNX_NETIF.hostname());
 
-    _linkstate = eth.isLinked();
-    //_linkstate = 1;
+    _linkstate = KNX_NETIF.isLinked();
     uint8_t EthernetState = 1;
 
     if(_useStaticIP)
     {
         logInfoP("Using Static IP");
 
-        eth.config(_localIP, _gatewayIP, _subnetMask, IPAddress(8,8,8,8), IPAddress(4,4,4,4));
+        KNX_NETIF.config(_localIP, _gatewayIP, _subnetMask, IPAddress(8,8,8,8), IPAddress(4,4,4,4));
         SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1);
     }
 
-    if(!eth.begin())
+    if(!KNX_NETIF.begin())
     {
         openknx.hardware.fatalError(1, "Error communicating with W5500 Ethernet chip");
     }
+#elif defined(KNX_IP_WIFI)
+    //ToDo for WiFi
+#endif
+
+
+   
+    
 }
 
 void IPConfigModule::loop()
@@ -214,17 +223,27 @@ void IPConfigModule::SetByteProperty(uint8_t PropertyId, uint8_t value)
 
 void IPConfigModule::showInformations()
 {
-    openknx.logger.logWithPrefixAndValues("IP-Address", "%s", eth.localIP().toString().c_str());
-    openknx.logger.logWithPrefixAndValues("LAN-Port", "Speed: %S, Duplex: %s, Link state: %s", "unknown", "unknown", eth.isLinked()?"Linked":"No Link");
+    openknx.logger.logWithPrefixAndValues("IP-Address", "%s", KNX_NETIF.localIP().toString().c_str());
+#if defined(KNX_IP_W5500)
+    openknx.logger.logWithPrefixAndValues("LAN-Port", "Speed: %S, Duplex: %s, Link state: %s", "unknown", "unknown", KNX_NETIF.isLinked()?"Linked":"No Link");
+#elif defined(KNX_IP_WIFI)
+    // display Info over WiFi connection ToDo
+#endif
 }
 
 bool IPConfigModule::processCommand(const std::string cmd, bool debugKo)
 {
-    if(cmd == "xxx")
-    {
-        logInfoP("Test123");
-        return true;
-    }
+#if defined(KNX_IP_W5500)
+
+#elif defined(KNX_IP_WIFI)
+
+#endif
+    
+    //if(cmd == "xxx")
+    //{
+    //    logInfoP("Test123");
+    //    return true;
+    //}
     return false;
 }
 
