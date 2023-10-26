@@ -147,7 +147,7 @@ void IPConfigModule::loop()
         return;
 
 #if defined(KNX_IP_W5500)
-    uint8_t newLinkState = KNX_NETIF.isLinked();
+    uint8_t newLinkState = _linkstate; // KNX_NETIF.isLinked(); ToDo
 
     // got link
     if(newLinkState && !_linkstate)
