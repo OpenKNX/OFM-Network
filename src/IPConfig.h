@@ -2,6 +2,7 @@
 
 #if defined(KNX_IP_W5500)
 #include <W5500lwIP.h>
+#include <lwip/dhcp.h>
 Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE);
 #elif defined(KNX_IP_WIFI)
 #include <WiFi.h>
@@ -19,7 +20,7 @@ class IPConfigModule : public OpenKNX::Module
 		const std::string name() override;
 		const std::string version() override;
         void init() override;
-        void loop() override;
+        void loop(bool configured) override;
         void showInformations() override;
         bool processCommand(const std::string cmd, bool debugKo);
         void showHelp() override;
@@ -141,13 +142,13 @@ void IPConfigModule::init()
     
 }
 
-void IPConfigModule::loop()
+void IPConfigModule::loop(bool configured)
 {
     if(!delayCheckMillis(_lastLinkCheck, 500))
         return;
 
 #if defined(KNX_IP_W5500)
-    uint8_t newLinkState = _linkstate; // KNX_NETIF.isLinked(); ToDo
+    uint8_t newLinkState = KNX_NETIF.isLinked();
 
     // got link
     if(newLinkState && !_linkstate)
@@ -155,6 +156,9 @@ void IPConfigModule::loop()
 
         logInfoP("LAN Link established.");
         netif_set_link_up(KNX_NETIF.getNetIf());
+
+        // work around TODO
+        dhcp_network_changed_link_up(KNX_NETIF.getNetIf());
     }
 
     // lost link
