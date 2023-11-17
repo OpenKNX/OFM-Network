@@ -1,2 +1,3 @@
-# OFM-IPConfig
-OpenKNX Function Modul for Configuration of IP-Devices
+# OFM-Network
+
+This module provides the network functionality for the OpenKNX stack.
