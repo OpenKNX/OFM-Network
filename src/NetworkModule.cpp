@@ -117,6 +117,7 @@ void NetworkModule::setup(bool configured)
     openknxUsbExchangeModule.onLoad("Network.txt", [this](UsbExchangeFile *file) { this->fillNetworkFile(file); });
 
     registerCallback([this](bool state) { if (state) this->showNetworkInformations(false); });
+#if MASK_VERSION != 0x091A
     if (ParamNET_mDNS || true)
     {
         if (!MDNS.begin(_hostName)) logErrorP("Hostname not applied (mDNS)");
@@ -128,6 +129,7 @@ void NetworkModule::setup(bool configured)
         // MDNS.addService("device-info", "tcp", 0);
         // MDNS.addServiceTxt(0, "device-info", "tcp", "Info", "no");
     }
+#endif
 }
 
 void NetworkModule::fillNetworkFile(UsbExchangeFile *file)
