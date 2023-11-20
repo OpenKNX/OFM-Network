@@ -128,6 +128,9 @@ void NetworkModule::setup(bool configured)
         MDNS.addService("device-info", "tcp", -1);
         MDNS.addServiceTxt("device-info", "tcp", "serial", openknx.info.humanSerialNumber().c_str());
         MDNS.addServiceTxt("device-info", "tcp", "firmware", openknx.info.humanFirmwareVersion().c_str());
+#ifdef HARDWARE_NAME
+        MDNS.addServiceTxt("device-info", "tcp", "hardware", HARDWARE_NAME);
+#endif
         if (configured)
         {
             MDNS.addServiceTxt("device-info", "tcp", "address", openknx.info.humanIndividualAddress().c_str());
