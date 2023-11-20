@@ -117,19 +117,24 @@ void NetworkModule::setup(bool configured)
     openknxUsbExchangeModule.onLoad("Network.txt", [this](UsbExchangeFile *file) { this->fillNetworkFile(file); });
 
     registerCallback([this](bool state) { if (state) this->showNetworkInformations(false); });
-#if MASK_VERSION != 0x091A
-    if (ParamNET_mDNS || true)
+
+#ifndef ParamNET_mDNS
+    #define ParamNET_mDNS true
+#endif
+    if (!configured || ParamNET_mDNS)
     {
         if (!MDNS.begin(_hostName)) logErrorP("Hostname not applied (mDNS)");
-        MDNS.enableArduino(80);
-
+        MDNS.addService("http", "tcp", 80);
+        MDNS.addService("device-info", "tcp", -1);
+        MDNS.addServiceTxt("device-info", "tcp", "serial", openknx.info.humanSerialNumber().c_str());
+        MDNS.addServiceTxt("device-info", "tcp", "firmware", openknx.info.humanFirmwareVersion().c_str());
+        if (configured)
+        {
+            MDNS.addServiceTxt("device-info", "tcp", "address", openknx.info.humanIndividualAddress().c_str());
+            MDNS.addServiceTxt("device-info", "tcp", "application", openknx.info.humanApplicationVersion().c_str());
+        }
         registerCallback([this](bool state) { if (state) MDNS.notifyAPChange(); });
-        // MDNSResponder::hMDNSService service = _mdns.addService(0, "http", "tcp", 80);
-        //hMDNSService _mdns
-        // MDNS.addService("device-info", "tcp", 0);
-        // MDNS.addServiceTxt(0, "device-info", "tcp", "Info", "no");
     }
-#endif
 }
 
 void NetworkModule::fillNetworkFile(UsbExchangeFile *file)
