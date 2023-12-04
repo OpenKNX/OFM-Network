@@ -106,7 +106,7 @@ void NetworkModule::init()
 
     if (!KNX_NETIF.begin())
     {
-        openknx.hardware.fatalError(1, "Error communicating with W5500 Ethernet chip");
+        openknx.hardware.fatalError(7, "Error communicating with W5500 Ethernet chip");
     }
 
     logIndentDown();
@@ -138,6 +138,16 @@ void NetworkModule::setup(bool configured)
         }
         registerCallback([this](bool state) { if (state) MDNS.notifyAPChange(); });
     }
+
+    // NTP.begin("pool.ntp.org", "time.nist.gov");
+    // NTP.waitSet(3000);
+    // logInfoP("NTP done");
+
+    // time_t now = time(nullptr);
+    // struct tm timeinfo;
+    // gmtime_r(&now, &timeinfo);
+    // logInfoP("Time: %i",now);
+    // logInfoP("Time: %s", asctime(&timeinfo));
 }
 
 void NetworkModule::fillNetworkFile(UsbExchangeFile *file)
@@ -207,7 +217,8 @@ void NetworkModule::loop(bool configured)
 {
     checkLinkStatus();
     checkIpStatus();
-    MDNS.update();
+    if (!configured || ParamNET_mDNS)
+        MDNS.update();
 }
 
 IPAddress NetworkModule::GetIpProperty(uint8_t PropertyId)

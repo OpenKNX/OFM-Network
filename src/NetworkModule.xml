@@ -49,7 +49,8 @@
                 <Parameter Id="%AID%_UP-%T%000001" Name="CustomHostname"     ParameterType="%AID%_PT-CheckBox"           Offset="20" BitOffset="0" Text="  Hostname anpassen" Value="0" />
                 <Parameter Id="%AID%_UP-%T%000002" Name="StaticIP"           ParameterType="%AID%_PT-DHCP"               Offset="20" BitOffset="1" Text="  DHCP" Value="0" />
                 <Parameter Id="%AID%_UP-%T%000031" Name="mDNS"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="20" BitOffset="2" Text="  mDNS" Value="1" /> 
-                <Parameter Id="%AID%_UP-%T%000032" Name="FTP"                ParameterType="%AID%_PT-OnOffYesNo"         Offset="20" BitOffset="3" Text="  FTP-Server" Value="0" /> 
+                <Parameter Id="%AID%_UP-%T%000032" Name="HTTP"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="20" BitOffset="3" Text="  Weberver" Value="1" /> 
+                <Parameter Id="%AID%_UP-%T%000033" Name="NTP"                ParameterType="%AID%_PT-OnOffYesNo"         Offset="20" BitOffset="4" Text="  Zeitgeber (NTP)" Value="0" /> 
               </Union>
               <Union SizeInBit="192">
                 <Memory CodeSegment="%AID%_RS-04-00000" Offset="24" BitOffset="0" />
@@ -67,6 +68,7 @@
               <ParameterRef Id="%AID%_UP-%T%000022_R-%T%00002201" RefId="%AID%_UP-%T%000022" />
               <ParameterRef Id="%AID%_UP-%T%000031_R-%T%00003101" RefId="%AID%_UP-%T%000031" />
               <ParameterRef Id="%AID%_UP-%T%000032_R-%T%00003201" RefId="%AID%_UP-%T%000032" />
+              <ParameterRef Id="%AID%_UP-%T%000033_R-%T%00003301" RefId="%AID%_UP-%T%000033" />
             </ParameterRefs>
             <ComObjectTable>
             </ComObjectTable>
@@ -76,8 +78,6 @@
           <Dynamic>
             <ChannelIndependentBlock>
               <ParameterBlock Id="%AID%_PB-nnn" Name="Network" Text="Netzwerk" Icon="ethernet" HelpContext="Empty">
-                <ParameterSeparator Id="%AID%_PS-nnn" Text="Netzwerkeinstellungen" UIHint="Headline" />
-
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="Hostname" UIHint="Headline" />
                   <ParameterRefRef RefId="%AID%_UP-%T%000001_R-%T%00000101" />
                   <choose ParamRefId="%AID%_UP-%T%000001_R-%T%00000101">
@@ -104,6 +104,26 @@
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="Services" UIHint="Headline" />
                 <ParameterRefRef RefId="%AID%_UP-%T%000031_R-%T%00003101" />
                 <ParameterRefRef RefId="%AID%_UP-%T%000032_R-%T%00003201" />
+                <choose ParamRefId="%AID%_UP-%T%000032_R-%T%00003201">
+                  <when test="1">
+                    <ParameterBlock Id="%AID%_PB-nnn" Name="HTTP" Text="Webserver" Icon="web" HelpContext="Empty">
+                      <ParameterSeparator Id="%AID%_PS-nnn" Text="Webservereinstellung" UIHint="Headline" />
+                    </ParameterBlock>
+                  </when>
+              </choose>
+
+                <ParameterRefRef RefId="%AID%_UP-%T%000033_R-%T%00003301" />
+                <choose ParamRefId="%AID%_UP-%T%000033_R-%T%00003301">
+                  <when test="0">
+                    <Assign TargetParamRefRef="%AID%_P-5000010_R-500001001" Value="0" />
+                  </when>
+                  <when test="1">
+                    <Assign TargetParamRefRef="%AID%_P-5000010_R-500001001" Value="1" />
+                    <ParameterBlock Id="%AID%_PB-nnn" Name="NTP" Text="Zeitgeber" Icon="clock-outline" HelpContext="Empty">
+                      <ParameterSeparator Id="%AID%_PS-nnn" Text="Zeitgeber (NTP)" UIHint="Headline" />
+                    </ParameterBlock>
+                  </when>
+              </choose>
               </ParameterBlock>
             </ChannelIndependentBlock>
           </Dynamic>
