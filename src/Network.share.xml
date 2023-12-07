@@ -41,34 +41,34 @@
             <Parameters>
               <Union SizeInBit="192">
                 <Memory CodeSegment="%AID%_RS-04-00000" Offset="0" BitOffset="0" />
-                <Parameter Id="%AID%_UP-%T%000011" Name="HostAddress"        ParameterType="%AID%_PT-HostAddress"        Offset="0"  BitOffset="0" Text="  IP-Adresse" Value="192.168.0.1" />
-                <Parameter Id="%AID%_UP-%T%000012" Name="SubnetMask"         ParameterType="%AID%_PT-SubnetMask"         Offset="4"  BitOffset="0" Text="  Subnetzsmaske" Value="255.255.255.0" />
-                <Parameter Id="%AID%_UP-%T%000013" Name="GatewayAddress"     ParameterType="%AID%_PT-GatewayAddress"     Offset="8"  BitOffset="0" Text="  Standardgateway" Value="192.168.0.254" />
-                <Parameter Id="%AID%_UP-%T%000021" Name="NameserverAddress1" ParameterType="%AID%_PT-NameserverAddress1" Offset="12" BitOffset="0" Text="  Primär" Value="0.0.0.0" />
-                <Parameter Id="%AID%_UP-%T%000022" Name="NameserverAddress2" ParameterType="%AID%_PT-NameserverAddress2" Offset="16" BitOffset="0" Text="  Sekundär" Value="0.0.0.0" />
-                <Parameter Id="%AID%_UP-%T%000001" Name="CustomHostname"     ParameterType="%AID%_PT-CheckBox"           Offset="20" BitOffset="0" Text="  Hostname anpassen" Value="0" />
-                <Parameter Id="%AID%_UP-%T%000002" Name="StaticIP"           ParameterType="%AID%_PT-DHCP"               Offset="20" BitOffset="1" Text="  DHCP" Value="0" />
-                <Parameter Id="%AID%_UP-%T%000031" Name="mDNS"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="20" BitOffset="2" Text="  mDNS" Value="1" /> 
-                <Parameter Id="%AID%_UP-%T%000032" Name="HTTP"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="20" BitOffset="3" Text="  Weberver" Value="1" /> 
-                <Parameter Id="%AID%_UP-%T%000033" Name="NTP"                ParameterType="%AID%_PT-OnOffYesNo"         Offset="20" BitOffset="4" Text="  Zeitgeber (NTP)" Value="0" /> 
+                <Parameter Id="%AID%_UP-%TT%00011" Name="HostAddress"        ParameterType="%AID%_PT-HostAddress"        Offset="0"  BitOffset="0" Text="  IP-Adresse" Value="192.168.0.1" />
+                <Parameter Id="%AID%_UP-%TT%00012" Name="SubnetMask"         ParameterType="%AID%_PT-SubnetMask"         Offset="4"  BitOffset="0" Text="  Subnetzsmaske" Value="255.255.255.0" />
+                <Parameter Id="%AID%_UP-%TT%00013" Name="GatewayAddress"     ParameterType="%AID%_PT-GatewayAddress"     Offset="8"  BitOffset="0" Text="  Standardgateway" Value="192.168.0.254" />
+                <Parameter Id="%AID%_UP-%TT%00021" Name="NameserverAddress1" ParameterType="%AID%_PT-NameserverAddress1" Offset="12" BitOffset="0" Text="  Primär" Value="0.0.0.0" />
+                <Parameter Id="%AID%_UP-%TT%00022" Name="NameserverAddress2" ParameterType="%AID%_PT-NameserverAddress2" Offset="16" BitOffset="0" Text="  Sekundär" Value="0.0.0.0" />
+                <Parameter Id="%AID%_UP-%TT%00001" Name="CustomHostname"     ParameterType="%AID%_PT-CheckBox"           Offset="20" BitOffset="0" Text="  Hostname anpassen" Value="0" />
+                <Parameter Id="%AID%_UP-%TT%00002" Name="StaticIP"           ParameterType="%AID%_PT-DHCP"               Offset="20" BitOffset="1" Text="  DHCP" Value="0" />
+                <Parameter Id="%AID%_UP-%TT%00031" Name="mDNS"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="20" BitOffset="2" Text="  mDNS" Value="1" /> 
+                <Parameter Id="%AID%_UP-%TT%00032" Name="HTTP"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="20" BitOffset="3" Text="  Weberver" Value="1" /> 
+                <Parameter Id="%AID%_UP-%TT%00033" Name="NTP"                ParameterType="%AID%_PT-OnOffYesNo"         Offset="20" BitOffset="4" Text="  Zeitgeber (NTP)" Value="0" /> 
               </Union>
               <Union SizeInBit="192">
                 <Memory CodeSegment="%AID%_RS-04-00000" Offset="24" BitOffset="0" />
-                <Parameter Id="%AID%_UP-%T%000010" Name="HostName"           ParameterType="%AID%_PT-Hostname"           Offset="0"  BitOffset="0" Text="" Value="" />
+                <Parameter Id="%AID%_UP-%TT%00010" Name="HostName"           ParameterType="%AID%_PT-Hostname"           Offset="0"  BitOffset="0" Text="" Value="" />
               </Union>
             </Parameters>
             <ParameterRefs>
-              <ParameterRef Id="%AID%_UP-%T%000001_R-%T%00000101" RefId="%AID%_UP-%T%000001" />
-              <ParameterRef Id="%AID%_UP-%T%000002_R-%T%00000201" RefId="%AID%_UP-%T%000002" />
-              <ParameterRef Id="%AID%_UP-%T%000010_R-%T%00001001" RefId="%AID%_UP-%T%000010" />
-              <ParameterRef Id="%AID%_UP-%T%000011_R-%T%00001101" RefId="%AID%_UP-%T%000011" />
-              <ParameterRef Id="%AID%_UP-%T%000012_R-%T%00001201" RefId="%AID%_UP-%T%000012" />
-              <ParameterRef Id="%AID%_UP-%T%000013_R-%T%00001301" RefId="%AID%_UP-%T%000013" />
-              <ParameterRef Id="%AID%_UP-%T%000021_R-%T%00002101" RefId="%AID%_UP-%T%000021" />
-              <ParameterRef Id="%AID%_UP-%T%000022_R-%T%00002201" RefId="%AID%_UP-%T%000022" />
-              <ParameterRef Id="%AID%_UP-%T%000031_R-%T%00003101" RefId="%AID%_UP-%T%000031" />
-              <ParameterRef Id="%AID%_UP-%T%000032_R-%T%00003201" RefId="%AID%_UP-%T%000032" />
-              <ParameterRef Id="%AID%_UP-%T%000033_R-%T%00003301" RefId="%AID%_UP-%T%000033" />
+              <ParameterRef Id="%AID%_UP-%TT%00001_R-%TT%0000101" RefId="%AID%_UP-%TT%00001" />
+              <ParameterRef Id="%AID%_UP-%TT%00002_R-%TT%0000201" RefId="%AID%_UP-%TT%00002" />
+              <ParameterRef Id="%AID%_UP-%TT%00010_R-%TT%0001001" RefId="%AID%_UP-%TT%00010" />
+              <ParameterRef Id="%AID%_UP-%TT%00011_R-%TT%0001101" RefId="%AID%_UP-%TT%00011" />
+              <ParameterRef Id="%AID%_UP-%TT%00012_R-%TT%0001201" RefId="%AID%_UP-%TT%00012" />
+              <ParameterRef Id="%AID%_UP-%TT%00013_R-%TT%0001301" RefId="%AID%_UP-%TT%00013" />
+              <ParameterRef Id="%AID%_UP-%TT%00021_R-%TT%0002101" RefId="%AID%_UP-%TT%00021" />
+              <ParameterRef Id="%AID%_UP-%TT%00022_R-%TT%0002201" RefId="%AID%_UP-%TT%00022" />
+              <ParameterRef Id="%AID%_UP-%TT%00031_R-%TT%0003101" RefId="%AID%_UP-%TT%00031" />
+              <ParameterRef Id="%AID%_UP-%TT%00032_R-%TT%0003201" RefId="%AID%_UP-%TT%00032" />
+              <ParameterRef Id="%AID%_UP-%TT%00033_R-%TT%0003301" RefId="%AID%_UP-%TT%00033" />
             </ParameterRefs>
             <ComObjectTable>
             </ComObjectTable>
@@ -79,10 +79,10 @@
             <ChannelIndependentBlock>
               <ParameterBlock Id="%AID%_PB-nnn" Name="Network" Text="Netzwerk" Icon="ethernet" HelpContext="Empty">
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="Hostname" UIHint="Headline" />
-                  <ParameterRefRef RefId="%AID%_UP-%T%000001_R-%T%00000101" />
-                  <choose ParamRefId="%AID%_UP-%T%000001_R-%T%00000101">
+                  <ParameterRefRef RefId="%AID%_UP-%TT%00001_R-%TT%0000101" />
+                  <choose ParamRefId="%AID%_UP-%TT%00001_R-%TT%0000101">
                     <when test="1">
-                      <ParameterRefRef RefId="%AID%_UP-%T%000010_R-%T%00001001" />
+                      <ParameterRefRef RefId="%AID%_UP-%TT%00010_R-%TT%0001001" />
                     </when>
                   </choose>
 
@@ -90,21 +90,21 @@
 
 
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="IP-Adresse" UIHint="Headline" />
-                <ParameterRefRef RefId="%AID%_UP-%T%000002_R-%T%00000201" />
-                <choose ParamRefId="%AID%_UP-%T%000002_R-%T%00000201">
+                <ParameterRefRef RefId="%AID%_UP-%TT%00002_R-%TT%0000201" />
+                <choose ParamRefId="%AID%_UP-%TT%00002_R-%TT%0000201">
                   <when test="1">
-                    <ParameterRefRef RefId="%AID%_UP-%T%000011_R-%T%00001101" />
-                    <ParameterRefRef RefId="%AID%_UP-%T%000012_R-%T%00001201" />
-                    <ParameterRefRef RefId="%AID%_UP-%T%000013_R-%T%00001301" />
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00011_R-%TT%0001101" />
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00012_R-%TT%0001201" />
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00013_R-%TT%0001301" />
                     <ParameterSeparator Id="%AID%_PS-nnn" Text="DNS-Adressen" UIHint="Headline" />
-                    <ParameterRefRef RefId="%AID%_UP-%T%000021_R-%T%00002101" />
-                    <ParameterRefRef RefId="%AID%_UP-%T%000022_R-%T%00002201" />
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00021_R-%TT%0002101" />
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00022_R-%TT%0002201" />
                   </when>
                 </choose>
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="Services" UIHint="Headline" />
-                <ParameterRefRef RefId="%AID%_UP-%T%000031_R-%T%00003101" />
-                <ParameterRefRef RefId="%AID%_UP-%T%000032_R-%T%00003201" />
-                <choose ParamRefId="%AID%_UP-%T%000032_R-%T%00003201">
+                <ParameterRefRef RefId="%AID%_UP-%TT%00031_R-%TT%0003101" />
+                <ParameterRefRef RefId="%AID%_UP-%TT%00032_R-%TT%0003201" />
+                <choose ParamRefId="%AID%_UP-%TT%00032_R-%TT%0003201">
                   <when test="1">
                     <ParameterBlock Id="%AID%_PB-nnn" Name="HTTP" Text="Webserver" Icon="web" HelpContext="Empty">
                       <ParameterSeparator Id="%AID%_PS-nnn" Text="Webservereinstellung" UIHint="Headline" />
@@ -112,13 +112,13 @@
                   </when>
               </choose>
 
-                <ParameterRefRef RefId="%AID%_UP-%T%000033_R-%T%00003301" />
-                <choose ParamRefId="%AID%_UP-%T%000033_R-%T%00003301">
+                <ParameterRefRef RefId="%AID%_UP-%TT%00033_R-%TT%0003301" />
+                <choose ParamRefId="%AID%_UP-%TT%00033_R-%TT%0003301">
                   <when test="0">
-                    <Assign TargetParamRefRef="%AID%_P-5000010_R-500001001" Value="0" />
+                    <Assign TargetParamRefRef="%AID%_P-1000010_R-100001001" Value="0" />
                   </when>
                   <when test="1">
-                    <Assign TargetParamRefRef="%AID%_P-5000010_R-500001001" Value="1" />
+                    <Assign TargetParamRefRef="%AID%_P-1000010_R-100001001" Value="1" />
                     <ParameterBlock Id="%AID%_PB-nnn" Name="NTP" Text="Zeitgeber" Icon="clock-outline" HelpContext="Empty">
                       <ParameterSeparator Id="%AID%_PS-nnn" Text="Zeitgeber (NTP)" UIHint="Headline" />
                     </ParameterBlock>
