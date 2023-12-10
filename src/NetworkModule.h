@@ -1,16 +1,16 @@
-#include "LEAmDNS.h"
+#pragma once
 #include "OpenKNX.h"
 #include "UsbExchangeModule.h"
 #include "strings.h"
 
-#if defined(KNX_IP_W5500)
-    #include <W5500lwIP.h>
-    #include <lwip/dhcp.h>
-#elif defined(KNX_IP_WIFI)
-    #include <WiFi.h>
-#else
-    #error "no Ethernet stack specified, #define KNX_IP_WIFI or KNX_IP_W5500"
-#endif
+// #if defined(KNX_IP_W5500)
+//     #include <W5500lwIP.h>
+//     #include <lwip/dhcp.h>
+// #elif defined(KNX_IP_WIFI)
+//     #include <WiFi.h>
+// #else
+//     #error "no Ethernet stack specified, #define KNX_IP_WIFI or KNX_IP_W5500"
+// #endif
 
 typedef std::function<void(bool)> NetworkChangeCallback;
 
@@ -37,13 +37,13 @@ class NetworkModule : public OpenKNX::Module
     IPAddress dns2IP();
     void macAddress(uint8_t *address);
 
-    MDNSResponder _mdns;
   private:
     IPAddress GetIpProperty(uint8_t PropertyId);
     void SetIpProperty(uint8_t PropertyId, IPAddress IPAddress);
     uint8_t GetByteProperty(uint8_t PropertyId);
     void SetByteProperty(uint8_t PropertyId, uint8_t value);
 
+    SPIClassRP2040 *spi;
     bool _ipShown = false;
     bool _useStaticIP = 0;
     IPAddress _staticLocalIP = 0;
@@ -53,6 +53,8 @@ class NetworkModule : public OpenKNX::Module
     IPAddress _staticDns2IP = 0;
 
     char *_hostName = nullptr;
+    char *_mDNSHttpServiceName = nullptr;
+    char *_mDNSDeviceServiceName = nullptr;
     bool _currentLinkState = 0;
     uint32_t _lastLinkCheck = false;
 
