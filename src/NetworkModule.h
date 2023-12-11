@@ -9,7 +9,7 @@
 #elif defined(KNX_IP_WIFI)
     #include <WiFi.h>
 #elif defined(KNX_IP_GENERIC)
-    //#include <Ethernet_Generic.h>
+
 #else
     #error "no Ethernet stack specified, #define KNX_IP_WIFI or KNX_IP_W5500"
 #endif

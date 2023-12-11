@@ -10,7 +10,6 @@
 #ifdef KNX_IP_GENERIC
     #include <Ethernet_Generic.h>
     #include <MDNS_Generic.h>
-    #define KNX_NETIF Ethernet
 EthernetUDP udp;
 MDNS mdns(udp);
 #else
@@ -59,6 +58,22 @@ void NetworkModule::initPhy()
 
 void NetworkModule::prepareSettings()
 {
+    // build hostname
+    _hostName = (char *)malloc(25);
+    memset(_hostName, 0, 25);
+    memcpy(_hostName, "OpenKNX-", 8);
+    memcpy(_hostName + 8, openknx.info.humanSerialNumber().c_str() + 5, 8);
+
+    // build mac
+    cyw43_hal_generate_laa_mac(0, _mac);
+
+#if defined(KNX_IP_GENERIC)
+    _mDNSHttpServiceName = (char *)malloc(strlen(_hostName) + 7);
+    _mDNSDeviceServiceName = (char *)malloc(strlen(_hostName) + 14);
+    snprintf(_mDNSHttpServiceName, strlen(_hostName) + 7, "%s._http", _hostName);
+    snprintf(_mDNSDeviceServiceName, strlen(_hostName) + 14, "%s._device-info", _hostName);
+#endif
+
     if (!knx.configured()) return;
 
 #if MASK_VERSION == 0x091A
@@ -72,13 +87,6 @@ void NetworkModule::prepareSettings()
         memcpy(_hostName, ParamNET_HostName, 24);
     }
 
-    #if defined(KNX_IP_GENERIC)
-    _mDNSHttpServiceName = (char *)malloc(strlen(_hostName) + 7);
-    _mDNSDeviceServiceName = (char *)malloc(strlen(_hostName) + 14);
-    snprintf(_mDNSHttpServiceName, strlen(_hostName) + 7, "%s._http", _hostName);
-    snprintf(_mDNSDeviceServiceName, strlen(_hostName) + 14, "%s._device-info", _hostName);
-    #endif
-
     _staticLocalIP = htonl(ParamNET_HostAddress);
     _staticSubnetMask = htonl(ParamNET_SubnetMask);
     _staticGatewayIP = htonl(ParamNET_GatewayAddress);
@@ -89,15 +97,6 @@ void NetworkModule::prepareSettings()
     #endif
     _useStaticIP = ParamNET_StaticIP;
 #endif
-
-    // build hostname
-    _hostName = (char *)malloc(25);
-    memset(_hostName, 0, 25);
-    memcpy(_hostName, "OpenKNX-", 8);
-    memcpy(_hostName + 8, openknx.info.humanSerialNumber().c_str() + 5, 8);
-
-    // build mac
-    cyw43_hal_generate_laa_mac(0, _mac);
 }
 
 void NetworkModule::init()
