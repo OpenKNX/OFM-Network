@@ -32,11 +32,11 @@ class NetworkModule : public OpenKNX::Module
     void registerCallback(NetworkChangeCallback callback);
 
     bool connected();
+    bool established();
     IPAddress localIP();
     IPAddress subnetMask();
     IPAddress gatewayIP();
-    IPAddress dns1IP();
-    IPAddress dns2IP();
+    IPAddress dnsIP();
     void macAddress(uint8_t *address);
 
   private:
@@ -45,26 +45,26 @@ class NetworkModule : public OpenKNX::Module
     uint8_t GetByteProperty(uint8_t PropertyId);
     void SetByteProperty(uint8_t PropertyId, uint8_t value);
 
-    SPIClassRP2040 *spi;
     bool _ipShown = false;
     bool _useStaticIP = 0;
     IPAddress _staticLocalIP = 0;
     IPAddress _staticSubnetMask = 0;
     IPAddress _staticGatewayIP = 0;
-    IPAddress _staticDns1IP = 0;
-    IPAddress _staticDns2IP = 0;
+    IPAddress _staticDnsIP = 0;
 
     char *_hostName = nullptr;
     char *_mDNSHttpServiceName = nullptr;
     char *_mDNSDeviceServiceName = nullptr;
-    bool _currentLinkState = 0;
+    uint8_t _mac[6] = {};
+    bool _currentLinkState = false;
     uint32_t _lastLinkCheck = false;
 
     void initPhy();
-    void loadIpSettings();
+    void prepareSettings();
     void checkLinkStatus();
     void checkIpStatus();
     void loadCallbacks(bool state);
+    void handleMDNS();
 
     std::vector<NetworkChangeCallback> _callback;
 };

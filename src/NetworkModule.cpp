@@ -2,18 +2,25 @@
 
 #define MDNS_DEBUG_PORT Serial
 
-#if defined(KNX_IP_W5500)
-    Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE);
-    WiFiUDP Udp;
-#elif defined(KNX_IP_WIFI)
-    WiFiUDP Udp;
-#elif defined(KNX_IP_GENERIC)
-    #include <Ethernet_Generic.h>
-    #include <MDNS_Generic.h>
-    EthernetUDP udp;
-    MDNS mdns(udp);
+#ifdef KNX_IP_WIFI
+    // TODO WLAN
+    #pragma error "Implementation for WiFi missing"
 #endif
 
+#ifdef KNX_IP_GENERIC
+    #include <Ethernet_Generic.h>
+    #include <MDNS_Generic.h>
+    #define KNX_NETIF Ethernet
+EthernetUDP udp;
+MDNS mdns(udp);
+#else
+    #ifdef KNX_IP_W5500
+Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE);
+    #endif
+WiFiUDP Udp;
+#endif
+
+extern "C" void cyw43_hal_generate_laa_mac(__unused int idx, uint8_t buf[6]);
 
 // Give your Module a name
 // it will be displayed when you use the method log("Hello")
@@ -32,38 +39,25 @@ const std::string NetworkModule::version()
 
 void NetworkModule::initPhy()
 {
-#if defined(KNX_IP_W5500)
-    // Hardreset of W5500 ToDo
-
+#if defined(ETH_SPI_INTERFACE)
+    // initalize SPI
     ETH_SPI_INTERFACE.setRX(PIN_ETH_MISO);
     ETH_SPI_INTERFACE.setTX(PIN_ETH_MOSI);
     ETH_SPI_INTERFACE.setSCK(PIN_ETH_SCK);
     ETH_SPI_INTERFACE.setCS(PIN_ETH_SS);
-
     logDebugP("Ethernet SPI GPIO: RX/MISO: %d, TX/MOSI: %d, SCK/SCLK: %d, CSn/SS: %d", PIN_ETH_MISO, PIN_ETH_MOSI, PIN_ETH_SCK, PIN_ETH_SS);
-#elif defined(KNX_IP_WIFI)
-    // TODO WLAN
-    #pragma warn "Implementation for WiFi missing"
-#elif defined(KNX_IP_GENERIC)
-    spi = &ETH_SPI_INTERFACE;
+#endif
 
+#ifdef KNX_IP_GENERIC
     #ifdef PIN_ETH_RES
     Ethernet.setRstPin(PIN_ETH_RES);
     Ethernet.hardreset();
     #endif
-
-    spi->setRX(PIN_ETH_MISO);
-    spi->setTX(PIN_ETH_MOSI);
-    spi->setSCK(PIN_ETH_SCK);
-    spi->setCS(PIN_ETH_SS);
-
     Ethernet.init(PIN_ETH_SS);
-
-    logDebugP("Ethernet SPI GPIO: RX/MISO: %d, TX/MOSI: %d, SCK/SCLK: %d, CSn/SS: %d", PIN_ETH_MISO, PIN_ETH_MOSI, PIN_ETH_SCK, PIN_ETH_SS);
 #endif
 }
 
-void NetworkModule::loadIpSettings()
+void NetworkModule::prepareSettings()
 {
     if (!knx.configured()) return;
 
@@ -79,19 +73,27 @@ void NetworkModule::loadIpSettings()
     }
 
     #if defined(KNX_IP_GENERIC)
-        _mDNSHttpServiceName = (char *)malloc(strlen(_hostName) + 7);
-        _mDNSDeviceServiceName = (char *)malloc(strlen(_hostName) + 14);
-        snprintf(_mDNSHttpServiceName, strlen(_hostName) + 7, "%s._http", _hostName);
-        snprintf(_mDNSDeviceServiceName, strlen(_hostName) + 14, "%s._device-info", _hostName);
+    _mDNSHttpServiceName = (char *)malloc(strlen(_hostName) + 7);
+    _mDNSDeviceServiceName = (char *)malloc(strlen(_hostName) + 14);
+    snprintf(_mDNSHttpServiceName, strlen(_hostName) + 7, "%s._http", _hostName);
+    snprintf(_mDNSDeviceServiceName, strlen(_hostName) + 14, "%s._device-info", _hostName);
     #endif
 
     _staticLocalIP = htonl(ParamNET_HostAddress);
     _staticSubnetMask = htonl(ParamNET_SubnetMask);
     _staticGatewayIP = htonl(ParamNET_GatewayAddress);
-    _staticDns1IP = htonl(ParamNET_NameserverAddress1);
-    _staticDns2IP = htonl(ParamNET_NameserverAddress2);
+    _staticDnsIP = htonl(ParamNET_NameserverAddress1);
     _useStaticIP = ParamNET_StaticIP;
 #endif
+
+    // build hostname
+    _hostName = (char *)malloc(25);
+    memset(_hostName, 0, 25);
+    memcpy(_hostName, "OpenKNX-", 8);
+    memcpy(_hostName + 8, openknx.info.humanSerialNumber().c_str() + 5, 8);
+
+    // build mac
+    cyw43_hal_generate_laa_mac(0, _mac);
 }
 
 void NetworkModule::init()
@@ -99,82 +101,67 @@ void NetworkModule::init()
     logInfoP("Init IP Stack");
     logIndentUp();
 
-    SetByteProperty(PID_IP_CAPABILITIES, 6); // AutoIP + DHCP
-
-    _hostName = (char *)malloc(25);
-    memset(_hostName, 0, 25);
-    memcpy(_hostName, "OpenKNX-", 8);
-    memcpy(_hostName + 8, openknx.info.humanSerialNumber().c_str() + 5, 8);
-
     initPhy();
-    loadIpSettings();
+    prepareSettings();
 
     if (_useStaticIP)
     {
         logInfoP("Using static IP");
         logIndentUp();
-        #if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI) 
-        if (!KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticDns1IP, _staticDns2IP))
+#if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
+        if (!KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticDnsIP))
         {
             logErrorP("Invalid IP settings");
         }
-        #endif
+#endif
         logIndentDown();
         SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1);
     }
     else
     {
         logInfoP("Using DHCP");
+        SetByteProperty(PID_IP_CAPABILITIES, 6);              // AutoIP + DHCP
         SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 2); // ToDo
     }
 
     logInfoP("Hostname: %s", _hostName);
     logIndentUp();
 
-    #if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI) 
-        if (!KNX_NETIF.hostname(_hostName))
-        {
-            logErrorP("Hostname not applied");
-        }
-    #elif defined(KNX_IP_GENERIC)
-        KNX_NETIF.setHostname(_hostName);
-    #endif 
+#if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
+    if (!KNX_NETIF.hostname(_hostName))
+    {
+        logErrorP("Hostname not applied");
+    }
+#elif defined(KNX_IP_GENERIC)
+    KNX_NETIF.setHostname(_hostName);
+#endif
     logIndentDown();
 
-    #if defined(KNX_IP_W5500)
-        if (!KNX_NETIF.begin())
-        {
-            openknx.hardware.fatalError(7, "Error communicating with W5500 Ethernet chip");
-        }
-    #elif defined(KNX_IP_WIFI)
-        // TODO WLAN
-        #pragma warn "Implementation for WiFi missing"
-    #elif defined(KNX_IP_GENERIC)
-        uint32_t serial = ntohl(openknx.info.serialNumber());
-        byte mac[6] = {0xDE, 0xFA, 0, 0, 0, 0};
-        logHexDebugP(mac, 6);
-        memcpy(((byte *)mac) + 2, (byte *)&serial, 4);
-        logHexDebugP(mac, 6);
-        int r = Ethernet.begin(mac, spi, 3000);
-        logInfoP("huhu %i", r);
+#if defined(KNX_IP_W5500)
+    if (!KNX_NETIF.begin((const uint8_t *)_mac))
+    {
+        openknx.hardware.fatalError(7, "Error communicating with W5500 Ethernet chip");
+    }
+#elif defined(KNX_IP_GENERIC)
+    Ethernet.begin(_mac, &ETH_SPI_INTERFACE, 1000);
 
-        if (Ethernet.hardwareStatus() == EthernetNoHardware)
-        {
-            logInfoP("Ethernet controller not found.");
-        }
-        else if (Ethernet.hardwareStatus() == EthernetW5100)
-        {
-            logInfoP("W5100 Ethernet controller detected.");
-        }
-        else if (Ethernet.hardwareStatus() == EthernetW5200)
-        {
-            logInfoP("W5200 Ethernet controller detected.");
-        }
-        else if (Ethernet.hardwareStatus() == EthernetW5500)
-        {
-            logInfoP("W5500 Ethernet controller detected.");
-        }
-    #endif
+    if (Ethernet.hardwareStatus() == EthernetNoHardware)
+    {
+        openknx.hardware.fatalError(7, "Error communicating with Ethernet chip");
+    }
+    else if (Ethernet.hardwareStatus() == EthernetW5100)
+    {
+        logDebugP("W5100 Ethernet controller detected.");
+    }
+    else if (Ethernet.hardwareStatus() == EthernetW5200)
+    {
+        logDebugP("W5200 Ethernet controller detected.");
+    }
+    else if (Ethernet.hardwareStatus() == EthernetW5500)
+    {
+        logDebugP("W5500 Ethernet controller detected.");
+    }
+#endif
 
     logIndentDown();
 }
@@ -251,20 +238,19 @@ void NetworkModule::fillNetworkFile(UsbExchangeFile *file)
     writeLineToFile(file, "-----------------");
     writeLineToFile(file, "");
     writeLineToFile(file, "Hostname: %s", _hostName);
-    writeLineToFile(file, "Network: %s", connected() ? "Established" : "Disconnected");
-    if (connected())
+    writeLineToFile(file, "Network: %s", established() ? "Established" : "Disconnected");
+    if (established())
     {
         writeLineToFile(file, "IP-Address: %s", localIP().toString().c_str());
         writeLineToFile(file, "Netmask: %s", subnetMask().toString().c_str());
         writeLineToFile(file, "Gateway: %s", gatewayIP().toString().c_str());
-        writeLineToFile(file, "DNS1: %s", dns1IP().toString().c_str());
-        writeLineToFile(file, "DNS2: %s", dns2IP().toString().c_str());
+        writeLineToFile(file, "DNS: %s", dnsIP().toString().c_str());
     }
 }
 
 void NetworkModule::checkIpStatus()
 {
-    if (_ipShown || !connected()) return;
+    if (_ipShown || !established()) return;
     logBegin();
     logInfoP("Network established");
     logIndentUp();
@@ -274,74 +260,63 @@ void NetworkModule::checkIpStatus()
     _ipShown = true;
 }
 
-
 void NetworkModule::checkLinkStatus()
 {
     if (!delayCheckMillis(_lastLinkCheck, 500))
         return;
 
-#if defined(KNX_IP_W5500)
-    uint8_t newLinkState = KNX_NETIF.isLinked();
-
-    // got link
-    if (newLinkState && !_currentLinkState)
-    {
-        logInfoP("Link connected");
-        netif_set_link_up(KNX_NETIF.getNetIf());
-        if (_useStaticIP)
-            netif_set_ipaddr(KNX_NETIF.getNetIf(), _staticLocalIP);
-        else
-            dhcp_network_changed_link_up(KNX_NETIF.getNetIf());
-    }
-
-    // lost link
-    else if (!newLinkState && _currentLinkState)
-    {
-        _ipShown = false;
-        netif_set_ipaddr(KNX_NETIF.getNetIf(), 0);
-        netif_set_link_down(KNX_NETIF.getNetIf());
-        loadCallbacks(false);
-        logInfoP("Link disconnected");
-    }
-
-    _currentLinkState = newLinkState;
-#elif defined(KNX_IP_GENERIC)
-
+    // Get current link state
     bool newLinkState = connected();
 
     // got link
     if (newLinkState && !_currentLinkState)
     {
         logInfoP("Link connected");
-        if (localIP() == IPAddress(0)) Ethernet.maintain();
-        loadCallbacks(true);
+#if defined(KNX_IP_W5500)
+        netif_set_link_up(KNX_NETIF.getNetIf());
+        if (_useStaticIP)
+            netif_set_ipaddr(KNX_NETIF.getNetIf(), _staticLocalIP);
+        else
+            dhcp_network_changed_link_up(KNX_NETIF.getNetIf());
+#elif defined(KNX_IP_GENERIC)
+        if (!established()) KNX_NETIF.maintain();
+#endif
     }
 
     // lost link
     else if (!newLinkState && _currentLinkState)
     {
         _ipShown = false;
+#if defined(KNX_IP_W5500)
+        netif_set_ipaddr(KNX_NETIF.getNetIf(), 0);
+        netif_set_link_down(KNX_NETIF.getNetIf());
+#endif
         loadCallbacks(false);
         logInfoP("Link disconnected");
     }
 
     _currentLinkState = newLinkState;
-
-#endif
-
     _lastLinkCheck = millis();
-}
 
+    logIndentUp();
+    if (_currentLinkState) checkIpStatus();
+    logIndentDown();
+}
 
 void NetworkModule::loop(bool configured)
 {
     checkLinkStatus();
-    #if defined(KNX_IP_W5500)
-        checkIpStatus();
-    #elif defined(KNX_IP_GENERIC)
+
     if (!configured || ParamNET_mDNS)
-        mdns.run();
-    #endif
+        handleMDNS();
+}
+
+void NetworkModule::handleMDNS()
+{
+#ifdef KNX_IP_GENERIC
+    mdns.run();
+#else
+#endif
 }
 
 IPAddress NetworkModule::GetIpProperty(uint8_t PropertyId)
@@ -406,7 +381,7 @@ void NetworkModule::loadCallbacks(bool state)
 void NetworkModule::showInformations()
 {
     openknx.logger.logWithPrefixAndValues("Hostname", "%s", _hostName);
-    if (connected())
+    if (established())
         openknx.logger.logWithPrefixAndValues("Network", "Established (%s)", localIP().toString().c_str());
     else
         openknx.logger.logWithPrefix("Network", "Disconnected");
@@ -439,17 +414,16 @@ void NetworkModule::showNetworkInformations(bool console)
 
         logInfoP("Hostname: %s", _hostName);
         logInfoP("MAC-Address: %02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-        logInfoP("Connection: %s", connected() ? "Established" : "Disconnected");
+        logInfoP("Connection: %s", established() ? "Established" : "Disconnected");
         logIndentUp();
     }
 
-    if (connected())
+    if (established())
     {
         logInfoP("IP-Address: %s", localIP().toString().c_str());
         logInfoP("Netmask: %s", gatewayIP().toString().c_str());
         logInfoP("Gateway: %s", subnetMask().toString().c_str());
-        logInfoP("DNS1: %s", dns1IP().toString().c_str());
-        logInfoP("DNS2: %s", dns2IP().toString().c_str());
+        logInfoP("DNS: %s", dnsIP().toString().c_str());
     }
 
 #if defined(KNX_IP_WIFI)
@@ -470,13 +444,22 @@ void NetworkModule::showHelp()
         openknx.console.printHelpLine("net renew", "Renew DHCP Address");
 }
 
+// Link status
 inline bool NetworkModule::connected()
 {
-    #if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
-        return KNX_NETIF.connected();
-    #elif defined(KNX_IP_GENERIC)
-        return KNX_NETIF.linkStatus() == LinkON;
-    #endif
+#if defined(KNX_IP_W5500)
+    return KNX_NETIF.isLinked();
+#else
+    return KNX_NETIF.linkStatus() == LinkON;
+#endif
+}
+
+// IP Status
+inline bool NetworkModule::established()
+{
+    if (!connected()) return false;
+
+    return localIP() != IPAddress(0);
 }
 
 inline IPAddress NetworkModule::localIP()
@@ -494,33 +477,24 @@ inline IPAddress NetworkModule::gatewayIP()
     return KNX_NETIF.gatewayIP();
 }
 
-inline IPAddress NetworkModule::dns1IP()
+inline IPAddress NetworkModule::dnsIP()
 {
-    #if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
-        return IPAddress(dns_getserver(0));
-    #elif defined(KNX_IP_GENERIC)
-        return KNX_NETIF.dnsServerIP();
-    #endif
-}
-
-inline IPAddress NetworkModule::dns2IP()
-{
-    #if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
-        return IPAddress(dns_getserver(1));
-    #elif defined(KNX_IP_GENERIC)
-        return KNX_NETIF.dnsServerIP();
-    #endif
+#if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
+    return IPAddress(dns_getserver(0));
+#elif defined(KNX_IP_GENERIC)
+    return KNX_NETIF.dnsServerIP();
+#endif
 }
 
 inline void NetworkModule::macAddress(uint8_t *address)
 {
-    #if defined(KNX_IP_W5500)
-        memcpy(address, KNX_NETIF.getNetIf()->hwaddr, 6);
-    #elif defined(KNX_IP_WIFI)
-        KNX_NETIF.macAddress(address);
-    #elif defined(KNX_IP_GENERIC)
-        KNX_NETIF.MACAddress(address);
-    #endif
+#if defined(KNX_IP_W5500)
+    memcpy(address, KNX_NETIF.getNetIf()->hwaddr, 6);
+#elif defined(KNX_IP_WIFI)
+    KNX_NETIF.macAddress(address);
+#elif defined(KNX_IP_GENERIC)
+    KNX_NETIF.MACAddress(address);
+#endif
 }
 
 NetworkModule openknxNetwork;
