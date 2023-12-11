@@ -82,7 +82,11 @@ void NetworkModule::prepareSettings()
     _staticLocalIP = htonl(ParamNET_HostAddress);
     _staticSubnetMask = htonl(ParamNET_SubnetMask);
     _staticGatewayIP = htonl(ParamNET_GatewayAddress);
+    #ifdef ParamNET_NameserverAddress1
     _staticDnsIP = htonl(ParamNET_NameserverAddress1);
+    #else
+    _staticDnsIP = htonl(ParamNET_NameserverAddress);
+    #endif
     _useStaticIP = ParamNET_StaticIP;
 #endif
 
