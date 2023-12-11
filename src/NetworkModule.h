@@ -3,14 +3,16 @@
 #include "UsbExchangeModule.h"
 #include "strings.h"
 
-// #if defined(KNX_IP_W5500)
-//     #include <W5500lwIP.h>
-//     #include <lwip/dhcp.h>
-// #elif defined(KNX_IP_WIFI)
-//     #include <WiFi.h>
-// #else
-//     #error "no Ethernet stack specified, #define KNX_IP_WIFI or KNX_IP_W5500"
-// #endif
+#if defined(KNX_IP_W5500)
+    #include <W5500lwIP.h>
+    #include <lwip/dhcp.h>
+#elif defined(KNX_IP_WIFI)
+    #include <WiFi.h>
+#elif defined(KNX_IP_GENERIC)
+    //#include <Ethernet_Generic.h>
+#else
+    #error "no Ethernet stack specified, #define KNX_IP_WIFI or KNX_IP_W5500"
+#endif
 
 typedef std::function<void(bool)> NetworkChangeCallback;
 
