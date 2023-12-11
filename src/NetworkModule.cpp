@@ -146,7 +146,7 @@ void NetworkModule::init()
         openknx.hardware.fatalError(7, "Error communicating with W5500 Ethernet chip");
     }
 #elif defined(KNX_IP_GENERIC)
-    Ethernet.begin(_mac, &ETH_SPI_INTERFACE, 1000);
+    Ethernet.begin(_mac, &ETH_SPI_INTERFACE, 5000);
 
     if (Ethernet.hardwareStatus() == EthernetNoHardware)
     {
