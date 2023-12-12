@@ -397,13 +397,16 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         showNetworkInformations(true);
         return true;
     }
-#if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
     if (!_useStaticIP && cmd == "net renew")
     {
-        if (_currentLinkState) dhcp_renew(KNX_NETIF.getNetIf());
+#ifdef KNX_IP_GENERIC
+        if (connected()) KNX_NETIF.maintain();
+#else
+        if (connected()) dhcp_renew(KNX_NETIF.getNetIf());
+#endif
+
         return true;
     }
-#endif
     return false;
 }
 
