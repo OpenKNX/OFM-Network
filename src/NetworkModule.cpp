@@ -49,10 +49,10 @@ void NetworkModule::initPhy()
 
 #ifdef KNX_IP_GENERIC
     #ifdef PIN_ETH_RES
-    Ethernet.setRstPin(PIN_ETH_RES);
-    Ethernet.hardreset();
+    KNX_NETIF.setRstPin(PIN_ETH_RES);
+    KNX_NETIF.hardreset();
     #endif
-    Ethernet.init(PIN_ETH_SS);
+    KNX_NETIF.init(PIN_ETH_SS, &ETH_SPI_INTERFACE);
 #endif
 }
 
@@ -107,16 +107,15 @@ void NetworkModule::init()
     initPhy();
     prepareSettings();
 
+#if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
     if (_useStaticIP)
     {
         logInfoP("Using static IP");
         logIndentUp();
-#if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
         if (!KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticDnsIP))
         {
             logErrorP("Invalid IP settings");
         }
-#endif
         logIndentDown();
         SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1);
     }
@@ -129,38 +128,68 @@ void NetworkModule::init()
 
     logInfoP("Hostname: %s", _hostName);
     logIndentUp();
-
-#if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
     if (!KNX_NETIF.hostname(_hostName))
     {
         logErrorP("Hostname not applied");
     }
-#elif defined(KNX_IP_GENERIC)
-    KNX_NETIF.setHostname(_hostName);
-#endif
     logIndentDown();
 
-#if defined(KNX_IP_W5500)
     if (!KNX_NETIF.begin((const uint8_t *)_mac))
     {
         openknx.hardware.fatalError(7, "Error communicating with W5500 Ethernet chip");
     }
 #elif defined(KNX_IP_GENERIC)
-    Ethernet.begin(_mac, &ETH_SPI_INTERFACE, 5000);
+    logInfoP("Hostname: %s", _hostName);
+    KNX_NETIF.setHostname(_hostName);
 
-    if (Ethernet.hardwareStatus() == EthernetNoHardware)
+    if (_useStaticIP)
+    {
+        logInfoP("Using static IP");
+        SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1);
+        KNX_NETIF.begin(_mac, _staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticDnsIP);
+    }
+    else
+    {
+        logInfoP("Using DHCP");
+        logIndentUp();
+        SetByteProperty(PID_IP_CAPABILITIES, 6);              // AutoIP + DHCP
+        SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 2); // ToDo
+
+        // delay(1000);    // wait until 
+        // if(connected()/*KNX_NETIF.linkStatus() != EthernetLinkStatus::LinkOFF*/)
+        // {
+        //     logInfoP("Link, request DHCP");
+        //     KNX_NETIF.begin(_mac, 3000);
+        // }
+        // else
+        // {
+        //     logInfoP("No Link, skip DHCP");
+        //     KNX_NETIF.begin(_mac, 100); // does not work
+        // }
+        logInfoP("Request DHCP..");
+        KNX_NETIF.begin(_mac, 3000);
+        logInfoP("Done");
+
+        logIndentDown();
+    }
+
+    // ToDo
+    // KNX_NETIF.linkStatus() != EthernetLinkStatus::LinkON
+
+
+    if (KNX_NETIF.hardwareStatus() == EthernetNoHardware)
     {
         openknx.hardware.fatalError(7, "Error communicating with Ethernet chip");
     }
-    else if (Ethernet.hardwareStatus() == EthernetW5100)
+    else if (KNX_NETIF.hardwareStatus() == EthernetW5100)
     {
         logDebugP("W5100 Ethernet controller detected.");
     }
-    else if (Ethernet.hardwareStatus() == EthernetW5200)
+    else if (KNX_NETIF.hardwareStatus() == EthernetW5200)
     {
         logDebugP("W5200 Ethernet controller detected.");
     }
-    else if (Ethernet.hardwareStatus() == EthernetW5500)
+    else if (KNX_NETIF.hardwareStatus() == EthernetW5500)
     {
         logDebugP("W5500 Ethernet controller detected.");
     }
@@ -206,7 +235,7 @@ void NetworkModule::setup(bool configured)
         // logInfoP("MDNS");
         // mdns.addServiceRecord("test._device-info", 0, MDNSServiceTCP);
         // mdns.addServiceRecord("test._http", 80, MDNSServiceTCP);
-        // mdns.begin(Ethernet.localIP(), _hostName);
+        // mdns.begin(KNX_NETIF.localIP(), _hostName);
 
         //         if (!MDNS.begin(_hostName)) logErrorP("Hostname not applied (mDNS)");
         //         MDNS.addService("http", "tcp", 80);
