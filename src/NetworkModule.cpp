@@ -147,7 +147,7 @@ void NetworkModule::init()
     {
         logInfoP("Using static IP");
         SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1);
-        KNX_NETIF.begin(_mac, _staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticDnsIP);
+        KNX_NETIF.begin(_mac, _staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP);
     }
     else
     {
