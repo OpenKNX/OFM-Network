@@ -485,7 +485,7 @@ inline void NetworkModule::macAddress(uint8_t *address)
 void NetworkModule::savePower()
 {
     _powerSave = true;
-#if defined(KNX_IP_GENERIC) && defined(PIN_ETH_RES)
+#if defined(PIN_ETH_RES)
     digitalWrite(PIN_ETH_RES, LOW);
 #endif
 }
