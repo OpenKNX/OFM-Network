@@ -28,12 +28,6 @@
               <ParameterType Id="%AID%_PT-GatewayAddress" Name="GatewayAddress">
                 <TypeIPAddress AddressType="GatewayAddress" />
               </ParameterType>
-              <ParameterType Id="%AID%_PT-NameserverAddress1" Name="NameserverAddress1">
-                <TypeIPAddress AddressType="HostAddress" />
-              </ParameterType>
-              <ParameterType Id="%AID%_PT-NameserverAddress2" Name="NameserverAddress2">
-                <TypeIPAddress AddressType="HostAddress" />
-              </ParameterType>
               <ParameterType Id="%AID%_PT-Hostname" Name="Hostname">
                 <TypeText SizeInBit="192" Pattern="^[A-Za-z](?:[A-Za-z0-9\-]*[A-Za-z0-9])*$"/>
               </ParameterType>
@@ -44,8 +38,8 @@
                 <Parameter Id="%AID%_UP-%TT%00011" Name="HostAddress"        ParameterType="%AID%_PT-HostAddress"        Offset="0"  BitOffset="0" Text="  IP-Adresse" Value="192.168.0.1" />
                 <Parameter Id="%AID%_UP-%TT%00012" Name="SubnetMask"         ParameterType="%AID%_PT-SubnetMask"         Offset="4"  BitOffset="0" Text="  Subnetzsmaske" Value="255.255.255.0" />
                 <Parameter Id="%AID%_UP-%TT%00013" Name="GatewayAddress"     ParameterType="%AID%_PT-GatewayAddress"     Offset="8"  BitOffset="0" Text="  Standardgateway" Value="192.168.0.254" />
-                <Parameter Id="%AID%_UP-%TT%00021" Name="NameserverAddress1" ParameterType="%AID%_PT-NameserverAddress1" Offset="12" BitOffset="0" Text="  Primär" Value="0.0.0.0" />
-                <Parameter Id="%AID%_UP-%TT%00022" Name="NameserverAddress2" ParameterType="%AID%_PT-NameserverAddress2" Offset="16" BitOffset="0" Text="  Sekundär" Value="0.0.0.0" />
+                <Parameter Id="%AID%_UP-%TT%00021" Name="NameserverAddress"  ParameterType="%AID%_PT-HostAddress"        Offset="12" BitOffset="0" Text="  Nameserver" Value="192.168.0.254" />
+                <!-- Reserved for Nameserver 2 -->
                 <Parameter Id="%AID%_UP-%TT%00001" Name="CustomHostname"     ParameterType="%AID%_PT-CheckBox"           Offset="20" BitOffset="0" Text="  Hostname anpassen" Value="0" />
                 <Parameter Id="%AID%_UP-%TT%00002" Name="StaticIP"           ParameterType="%AID%_PT-DHCP"               Offset="20" BitOffset="1" Text="  DHCP" Value="0" />
                 <Parameter Id="%AID%_UP-%TT%00031" Name="mDNS"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="20" BitOffset="2" Text="  mDNS" Value="1" /> 
@@ -65,7 +59,6 @@
               <ParameterRef Id="%AID%_UP-%TT%00012_R-%TT%0001201" RefId="%AID%_UP-%TT%00012" />
               <ParameterRef Id="%AID%_UP-%TT%00013_R-%TT%0001301" RefId="%AID%_UP-%TT%00013" />
               <ParameterRef Id="%AID%_UP-%TT%00021_R-%TT%0002101" RefId="%AID%_UP-%TT%00021" />
-              <ParameterRef Id="%AID%_UP-%TT%00022_R-%TT%0002201" RefId="%AID%_UP-%TT%00022" />
               <ParameterRef Id="%AID%_UP-%TT%00031_R-%TT%0003101" RefId="%AID%_UP-%TT%00031" />
               <ParameterRef Id="%AID%_UP-%TT%00032_R-%TT%0003201" RefId="%AID%_UP-%TT%00032" />
               <ParameterRef Id="%AID%_UP-%TT%00033_R-%TT%0003301" RefId="%AID%_UP-%TT%00033" />
@@ -96,14 +89,12 @@
                     <ParameterRefRef RefId="%AID%_UP-%TT%00011_R-%TT%0001101" />
                     <ParameterRefRef RefId="%AID%_UP-%TT%00012_R-%TT%0001201" />
                     <ParameterRefRef RefId="%AID%_UP-%TT%00013_R-%TT%0001301" />
-                    <ParameterSeparator Id="%AID%_PS-nnn" Text="DNS-Adressen" UIHint="Headline" />
                     <ParameterRefRef RefId="%AID%_UP-%TT%00021_R-%TT%0002101" />
-                    <ParameterRefRef RefId="%AID%_UP-%TT%00022_R-%TT%0002201" />
                   </when>
                 </choose>
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="Services" UIHint="Headline" />
                 <ParameterRefRef RefId="%AID%_UP-%TT%00031_R-%TT%0003101" />
-                <ParameterRefRef RefId="%AID%_UP-%TT%00032_R-%TT%0003201" />
+                <!-- <ParameterRefRef RefId="%AID%_UP-%TT%00032_R-%TT%0003201" />
                 <choose ParamRefId="%AID%_UP-%TT%00032_R-%TT%0003201">
                   <when test="1">
                     <ParameterBlock Id="%AID%_PB-nnn" Name="HTTP" Text="Webserver" Icon="web" HelpContext="Empty">
@@ -123,7 +114,7 @@
                       <ParameterSeparator Id="%AID%_PS-nnn" Text="Zeitgeber (NTP)" UIHint="Headline" />
                     </ParameterBlock>
                   </when>
-              </choose>
+              </choose> -->
               </ParameterBlock>
             </ChannelIndependentBlock>
           </Dynamic>

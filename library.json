@@ -1,8 +1,7 @@
 {
   "name": "OFM-Network",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "dependencies": {
-    "Ethernet_Generic": "https://github.com/khoih-prog/Ethernet_Generic",
-    "MDNS_Generic": "https://github.com/khoih-prog/MDNS_Generic"
+
   }
 }

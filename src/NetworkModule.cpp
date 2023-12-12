@@ -90,11 +90,7 @@ void NetworkModule::prepareSettings()
     _staticLocalIP = htonl(ParamNET_HostAddress);
     _staticSubnetMask = htonl(ParamNET_SubnetMask);
     _staticGatewayIP = htonl(ParamNET_GatewayAddress);
-    #ifdef ParamNET_NameserverAddress1
-    _staticDnsIP = htonl(ParamNET_NameserverAddress1);
-    #else
-    _staticDnsIP = htonl(ParamNET_NameserverAddress);
-    #endif
+    _staticNameServerIP = htonl(ParamNET_NameserverAddress);
     _useStaticIP = ParamNET_StaticIP;
 #endif
 }
@@ -112,7 +108,7 @@ void NetworkModule::init()
         logInfoP("Using static IP");
         logIndentUp();
 #if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
-        if (!KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticDnsIP))
+        if (!KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP))
         {
             logErrorP("Invalid IP settings");
         }
@@ -145,7 +141,7 @@ void NetworkModule::init()
     {
         openknx.hardware.fatalError(7, "Error communicating with W5500 Ethernet chip");
     }
-#elif defined(KNX_IP_GENERIC)
+#elif defined(KNX_IP_GENERIC)    
     Ethernet.begin(_mac, &ETH_SPI_INTERFACE, 5000);
 
     if (Ethernet.hardwareStatus() == EthernetNoHardware)
@@ -247,7 +243,7 @@ void NetworkModule::fillNetworkFile(UsbExchangeFile *file)
         writeLineToFile(file, "IP-Address: %s", localIP().toString().c_str());
         writeLineToFile(file, "Netmask: %s", subnetMask().toString().c_str());
         writeLineToFile(file, "Gateway: %s", gatewayIP().toString().c_str());
-        writeLineToFile(file, "DNS: %s", dnsIP().toString().c_str());
+        writeLineToFile(file, "DNS: %s", NameServerIP().toString().c_str());
     }
 }
 
@@ -429,7 +425,7 @@ void NetworkModule::showNetworkInformations(bool console)
         logInfoP("IP-Address: %s", localIP().toString().c_str());
         logInfoP("Netmask: %s", gatewayIP().toString().c_str());
         logInfoP("Gateway: %s", subnetMask().toString().c_str());
-        logInfoP("DNS: %s", dnsIP().toString().c_str());
+        logInfoP("DNS: %s", NameServerIP().toString().c_str());
     }
 
 #if defined(KNX_IP_WIFI)
@@ -483,7 +479,7 @@ inline IPAddress NetworkModule::gatewayIP()
     return KNX_NETIF.gatewayIP();
 }
 
-inline IPAddress NetworkModule::dnsIP()
+inline IPAddress NetworkModule::NameServerIP()
 {
 #if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
     return IPAddress(dns_getserver(0));
