@@ -13,10 +13,15 @@
 EthernetUDP udp;
 MDNS mdns(udp);
 #else
+    #include "LEAmDNS.h"
     #ifdef KNX_IP_W5500
 Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE);
     #endif
 WiFiUDP Udp;
+#endif
+
+#ifndef ParamNET_mDNS
+    #define ParamNET_mDNS true
 #endif
 
 extern "C" void cyw43_hal_generate_laa_mac(__unused int idx, uint8_t buf[6]);
@@ -90,11 +95,7 @@ void NetworkModule::prepareSettings()
     _staticLocalIP = htonl(ParamNET_HostAddress);
     _staticSubnetMask = htonl(ParamNET_SubnetMask);
     _staticGatewayIP = htonl(ParamNET_GatewayAddress);
-    #ifdef ParamNET_NameserverAddress1
-    _staticDnsIP = htonl(ParamNET_NameserverAddress1);
-    #else
-    _staticDnsIP = htonl(ParamNET_NameserverAddress);
-    #endif
+    _staticNameServerIP = htonl(ParamNET_NameserverAddress);
     _useStaticIP = ParamNET_StaticIP;
 #endif
 }
@@ -112,7 +113,7 @@ void NetworkModule::init()
     {
         logInfoP("Using static IP");
         logIndentUp();
-        if (!KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticDnsIP))
+        if (!KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP))
         {
             logErrorP("Invalid IP settings");
         }
@@ -203,54 +204,31 @@ void NetworkModule::setup(bool configured)
     openknxUsbExchangeModule.onLoad("Network.txt", [this](UsbExchangeFile *file) { this->fillNetworkFile(file); });
 
     registerCallback([this](bool state) { if (state) this->showNetworkInformations(false); });
-#ifdef KNX_IP_GENERIC
-    registerCallback([this](bool state) {
-        if (state)
-        {
-            logInfoP("Start mDNS %s, %s,", _mDNSHttpServiceName, _mDNSDeviceServiceName);
-            mdns.begin(KNX_NETIF.localIP(), _hostName);
-            mdns.addServiceRecord(_mDNSHttpServiceName, 80, MDNSServiceTCP);
-            mdns.addServiceRecord(_mDNSDeviceServiceName, -1, MDNSServiceTCP);
-        }
-        else
-        {
-            logInfoP("Stop mDNS");
-            mdns.removeAllServiceRecords();
-        }
-    });
-#endif
-    //
-    // mdns.addServiceRecord("_http", 80, MDNSServiceTCP);
-    // if (!MDNS.begin(_hostName)) logErrorP("Hostname not applied (mDNS)");
-    // MDNS.addService("http", "tcp", 80);
-    // MDNS.addService("device-info", "tcp", -1);
-    // MDNS.addServiceTxt("device-info", "tcp", "serial", openknx.info.humanSerialNumber().c_str());
-    // MDNS.addServiceTxt("device-info", "tcp", "firmware", openknx.info.humanFirmwareVersion().c_str());
 
-#ifndef ParamNET_mDNS
-    #define ParamNET_mDNS true
-#endif
     if (!configured || ParamNET_mDNS)
     {
-        // logInfoP("MDNS");
-        // mdns.addServiceRecord("test._device-info", 0, MDNSServiceTCP);
-        // mdns.addServiceRecord("test._http", 80, MDNSServiceTCP);
-        // mdns.begin(KNX_NETIF.localIP(), _hostName);
 
-        //         if (!MDNS.begin(_hostName)) logErrorP("Hostname not applied (mDNS)");
-        //         MDNS.addService("http", "tcp", 80);
-        //         MDNS.addService("device-info", "tcp", -1);
-        //         MDNS.addServiceTxt("device-info", "tcp", "serial", openknx.info.humanSerialNumber().c_str());
-        //         MDNS.addServiceTxt("device-info", "tcp", "firmware", openknx.info.humanFirmwareVersion().c_str());
-        // #ifdef HARDWARE_NAME
-        //         MDNS.addServiceTxt("device-info", "tcp", "hardware", HARDWARE_NAME);
-        // #endif
-        //         if (configured)
-        //         {
-        //             MDNS.addServiceTxt("device-info", "tcp", "address", openknx.info.humanIndividualAddress().c_str());
-        //             MDNS.addServiceTxt("device-info", "tcp", "application", openknx.info.humanApplicationVersion().c_str());
-        //         }
-        //         registerCallback([this](bool state) { if (state) MDNS.notifyAPChange(); });
+#ifdef KNX_IP_GENERIC
+        registerCallback([this](bool state) {
+            if (state)
+            {
+                logInfoP("Start mDNS");
+                mdns.begin(KNX_NETIF.localIP(), _hostName);
+                mdns.addServiceRecord(_mDNSHttpServiceName, 80, MDNSServiceTCP);
+                mdns.addServiceRecord(_mDNSDeviceServiceName, -1, MDNSServiceTCP);
+            }
+            else
+            {
+                logInfoP("Stop mDNS");
+                mdns.removeAllServiceRecords();
+            }
+        });
+#else
+        if (!MDNS.begin(_hostName)) logErrorP("Hostname not applied (mDNS)");
+        MDNS.addService("http", "tcp", 80);
+        MDNS.addService("device-info", "tcp", -1);
+        registerCallback([this](bool state) { if (state) MDNS.notifyAPChange(); });
+#endif
     }
 
     // NTP.begin("pool.ntp.org", "time.nist.gov");
@@ -276,7 +254,7 @@ void NetworkModule::fillNetworkFile(UsbExchangeFile *file)
         writeLineToFile(file, "IP-Address: %s", localIP().toString().c_str());
         writeLineToFile(file, "Netmask: %s", subnetMask().toString().c_str());
         writeLineToFile(file, "Gateway: %s", gatewayIP().toString().c_str());
-        writeLineToFile(file, "DNS: %s", dnsIP().toString().c_str());
+        writeLineToFile(file, "DNS: %s", NameServerIP().toString().c_str());
     }
 }
 
@@ -294,8 +272,7 @@ void NetworkModule::checkIpStatus()
 
 void NetworkModule::checkLinkStatus()
 {
-    if (!delayCheckMillis(_lastLinkCheck, 500))
-        return;
+    if (!delayCheckMillis(_lastLinkCheck, 500)) return;
 
     // Get current link state
     bool newLinkState = connected();
@@ -337,10 +314,10 @@ void NetworkModule::checkLinkStatus()
 
 void NetworkModule::loop(bool configured)
 {
+    if (_powerSave) return;
     checkLinkStatus();
 
-    if (!configured || ParamNET_mDNS)
-        handleMDNS();
+    if (!configured || ParamNET_mDNS) handleMDNS();
 }
 
 void NetworkModule::handleMDNS()
@@ -348,6 +325,7 @@ void NetworkModule::handleMDNS()
 #ifdef KNX_IP_GENERIC
     mdns.run();
 #else
+    MDNS.update();
 #endif
 }
 
@@ -426,13 +404,16 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         showNetworkInformations(true);
         return true;
     }
-#if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
     if (!_useStaticIP && cmd == "net renew")
     {
-        if (_currentLinkState) dhcp_renew(KNX_NETIF.getNetIf());
+#ifdef KNX_IP_GENERIC
+        if (connected()) KNX_NETIF.maintain();
+#else
+        if (connected()) dhcp_renew(KNX_NETIF.getNetIf());
+#endif
+
         return true;
     }
-#endif
     return false;
 }
 
@@ -455,7 +436,7 @@ void NetworkModule::showNetworkInformations(bool console)
         logInfoP("IP-Address: %s", localIP().toString().c_str());
         logInfoP("Netmask: %s", gatewayIP().toString().c_str());
         logInfoP("Gateway: %s", subnetMask().toString().c_str());
-        logInfoP("DNS: %s", dnsIP().toString().c_str());
+        logInfoP("DNS: %s", NameServerIP().toString().c_str());
     }
 
 #if defined(KNX_IP_WIFI)
@@ -479,6 +460,8 @@ void NetworkModule::showHelp()
 // Link status
 inline bool NetworkModule::connected()
 {
+    if (_powerSave) return false;
+
 #if defined(KNX_IP_W5500)
     return KNX_NETIF.isLinked();
 #else
@@ -509,7 +492,7 @@ inline IPAddress NetworkModule::gatewayIP()
     return KNX_NETIF.gatewayIP();
 }
 
-inline IPAddress NetworkModule::dnsIP()
+inline IPAddress NetworkModule::NameServerIP()
 {
 #if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
     return IPAddress(dns_getserver(0));
@@ -527,6 +510,20 @@ inline void NetworkModule::macAddress(uint8_t *address)
 #elif defined(KNX_IP_GENERIC)
     KNX_NETIF.MACAddress(address);
 #endif
+}
+
+void NetworkModule::savePower()
+{
+    _powerSave = true;
+#if defined(PIN_ETH_RES)
+    digitalWrite(PIN_ETH_RES, LOW);
+#endif
+}
+
+bool NetworkModule::restorePower()
+{
+    delay(1000);
+    return false;
 }
 
 NetworkModule openknxNetwork;

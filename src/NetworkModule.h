@@ -2,6 +2,7 @@
 #include "OpenKNX.h"
 #include "UsbExchangeModule.h"
 #include "strings.h"
+#include <functional>
 
 #if defined(KNX_IP_W5500)
     #include <W5500lwIP.h>
@@ -24,6 +25,8 @@ class NetworkModule : public OpenKNX::Module
     void init() override;
     void loop(bool configured) override;
     void setup(bool configured) override;
+    void savePower() override;
+    bool restorePower() override;
     void showInformations() override;
     bool processCommand(const std::string cmd, bool debugKo);
     void showHelp() override;
@@ -36,7 +39,7 @@ class NetworkModule : public OpenKNX::Module
     IPAddress localIP();
     IPAddress subnetMask();
     IPAddress gatewayIP();
-    IPAddress dnsIP();
+    IPAddress NameServerIP();
     void macAddress(uint8_t *address);
 
   private:
@@ -45,12 +48,13 @@ class NetworkModule : public OpenKNX::Module
     uint8_t GetByteProperty(uint8_t PropertyId);
     void SetByteProperty(uint8_t PropertyId, uint8_t value);
 
+    bool _powerSave = false;
     bool _ipShown = false;
     bool _useStaticIP = 0;
     IPAddress _staticLocalIP = 0;
     IPAddress _staticSubnetMask = 0;
     IPAddress _staticGatewayIP = 0;
-    IPAddress _staticDnsIP = 0;
+    IPAddress _staticNameServerIP = 0;
 
     char *_hostName = nullptr;
     char *_mDNSHttpServiceName = nullptr;
