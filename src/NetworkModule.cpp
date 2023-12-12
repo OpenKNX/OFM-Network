@@ -19,6 +19,10 @@ Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE);
 WiFiUDP Udp;
 #endif
 
+#ifndef ParamNET_mDNS
+    #define ParamNET_mDNS true
+#endif
+
 extern "C" void cyw43_hal_generate_laa_mac(__unused int idx, uint8_t buf[6]);
 
 // Give your Module a name
@@ -141,7 +145,7 @@ void NetworkModule::init()
     {
         openknx.hardware.fatalError(7, "Error communicating with W5500 Ethernet chip");
     }
-#elif defined(KNX_IP_GENERIC)    
+#elif defined(KNX_IP_GENERIC)
     Ethernet.begin(_mac, &ETH_SPI_INTERFACE, 5000);
 
     if (Ethernet.hardwareStatus() == EthernetNoHardware)
@@ -170,54 +174,30 @@ void NetworkModule::setup(bool configured)
     openknxUsbExchangeModule.onLoad("Network.txt", [this](UsbExchangeFile *file) { this->fillNetworkFile(file); });
 
     registerCallback([this](bool state) { if (state) this->showNetworkInformations(false); });
-#ifdef KNX_IP_GENERIC
-    registerCallback([this](bool state) {
-        if (state)
-        {
-            logInfoP("Start mDNS %s, %s,", _mDNSHttpServiceName, _mDNSDeviceServiceName);
-            mdns.begin(KNX_NETIF.localIP(), _hostName);
-            mdns.addServiceRecord(_mDNSHttpServiceName, 80, MDNSServiceTCP);
-            mdns.addServiceRecord(_mDNSDeviceServiceName, -1, MDNSServiceTCP);
-        }
-        else
-        {
-            logInfoP("Stop mDNS");
-            mdns.removeAllServiceRecords();
-        }
-    });
-#endif
-    //
-    // mdns.addServiceRecord("_http", 80, MDNSServiceTCP);
-    // if (!MDNS.begin(_hostName)) logErrorP("Hostname not applied (mDNS)");
-    // MDNS.addService("http", "tcp", 80);
-    // MDNS.addService("device-info", "tcp", -1);
-    // MDNS.addServiceTxt("device-info", "tcp", "serial", openknx.info.humanSerialNumber().c_str());
-    // MDNS.addServiceTxt("device-info", "tcp", "firmware", openknx.info.humanFirmwareVersion().c_str());
 
-#ifndef ParamNET_mDNS
-    #define ParamNET_mDNS true
-#endif
     if (!configured || ParamNET_mDNS)
     {
-        // logInfoP("MDNS");
-        // mdns.addServiceRecord("test._device-info", 0, MDNSServiceTCP);
-        // mdns.addServiceRecord("test._http", 80, MDNSServiceTCP);
-        // mdns.begin(Ethernet.localIP(), _hostName);
-
-        //         if (!MDNS.begin(_hostName)) logErrorP("Hostname not applied (mDNS)");
-        //         MDNS.addService("http", "tcp", 80);
-        //         MDNS.addService("device-info", "tcp", -1);
-        //         MDNS.addServiceTxt("device-info", "tcp", "serial", openknx.info.humanSerialNumber().c_str());
-        //         MDNS.addServiceTxt("device-info", "tcp", "firmware", openknx.info.humanFirmwareVersion().c_str());
-        // #ifdef HARDWARE_NAME
-        //         MDNS.addServiceTxt("device-info", "tcp", "hardware", HARDWARE_NAME);
-        // #endif
-        //         if (configured)
-        //         {
-        //             MDNS.addServiceTxt("device-info", "tcp", "address", openknx.info.humanIndividualAddress().c_str());
-        //             MDNS.addServiceTxt("device-info", "tcp", "application", openknx.info.humanApplicationVersion().c_str());
-        //         }
-        //         registerCallback([this](bool state) { if (state) MDNS.notifyAPChange(); });
+#ifdef KNX_IP_GENERIC
+        registerCallback([this](bool state) {
+            if (state)
+            {
+                logInfoP("Start mDNS");
+                mdns.begin(KNX_NETIF.localIP(), _hostName);
+                mdns.addServiceRecord(_mDNSHttpServiceName, 80, MDNSServiceTCP);
+                mdns.addServiceRecord(_mDNSDeviceServiceName, -1, MDNSServiceTCP);
+            }
+            else
+            {
+                logInfoP("Stop mDNS");
+                mdns.removeAllServiceRecords();
+            }
+        });
+#else
+        if (!MDNS.begin(_hostName)) logErrorP("Hostname not applied (mDNS)");
+        MDNS.addService("http", "tcp", 80);
+        MDNS.addService("device-info", "tcp", -1);
+        registerCallback([this](bool state) { if (state) MDNS.notifyAPChange(); });
+#endif
     }
 
     // NTP.begin("pool.ntp.org", "time.nist.gov");
@@ -261,8 +241,7 @@ void NetworkModule::checkIpStatus()
 
 void NetworkModule::checkLinkStatus()
 {
-    if (!delayCheckMillis(_lastLinkCheck, 500))
-        return;
+    if (!delayCheckMillis(_lastLinkCheck, 500)) return;
 
     // Get current link state
     bool newLinkState = connected();
@@ -315,6 +294,7 @@ void NetworkModule::handleMDNS()
 #ifdef KNX_IP_GENERIC
     mdns.run();
 #else
+    MDNS.update();
 #endif
 }
 
