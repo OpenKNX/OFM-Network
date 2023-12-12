@@ -25,6 +25,8 @@ class NetworkModule : public OpenKNX::Module
     void init() override;
     void loop(bool configured) override;
     void setup(bool configured) override;
+    void savePower() override;
+    bool restorePower() override;
     void showInformations() override;
     bool processCommand(const std::string cmd, bool debugKo);
     void showHelp() override;
@@ -46,6 +48,7 @@ class NetworkModule : public OpenKNX::Module
     uint8_t GetByteProperty(uint8_t PropertyId);
     void SetByteProperty(uint8_t PropertyId, uint8_t value);
 
+    bool _powerSave = false;
     bool _ipShown = false;
     bool _useStaticIP = 0;
     IPAddress _staticLocalIP = 0;

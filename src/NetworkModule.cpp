@@ -284,10 +284,10 @@ void NetworkModule::checkLinkStatus()
 
 void NetworkModule::loop(bool configured)
 {
+    if (_powerSave) return;
     checkLinkStatus();
 
-    if (!configured || ParamNET_mDNS)
-        handleMDNS();
+    if (!configured || ParamNET_mDNS) handleMDNS();
 }
 
 void NetworkModule::handleMDNS()
@@ -430,6 +430,8 @@ void NetworkModule::showHelp()
 // Link status
 inline bool NetworkModule::connected()
 {
+    if (_powerSave) return false;
+
 #if defined(KNX_IP_W5500)
     return KNX_NETIF.isLinked();
 #else
@@ -478,6 +480,20 @@ inline void NetworkModule::macAddress(uint8_t *address)
 #elif defined(KNX_IP_GENERIC)
     KNX_NETIF.MACAddress(address);
 #endif
+}
+
+void NetworkModule::savePower()
+{
+    _powerSave = true;
+#if defined(KNX_IP_GENERIC) && defined(PIN_ETH_RES)
+    digitalWrite(PIN_ETH_RES, LOW);
+#endif
+}
+
+bool NetworkModule::restorePower()
+{
+    delay(1000);
+    return false;
 }
 
 NetworkModule openknxNetwork;
