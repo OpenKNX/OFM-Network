@@ -168,8 +168,15 @@ void NetworkModule::init()
         //     KNX_NETIF.begin(_mac, 100); // does not work
         // }
         logInfoP("Request DHCP..");
-        KNX_NETIF.begin(_mac, 3000);
-        logInfoP("Done");
+        KNX_NETIF.begin(_mac, 5000);
+        if(localIP() == IPAddress(0))
+        {
+            logInfoP("Timeout");
+        }
+        else
+        {
+            logInfoP("Got %s", localIP().toString().c_str());
+        }
 
         logIndentDown();
     }
