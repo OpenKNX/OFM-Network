@@ -39,7 +39,7 @@ class NetworkModule : public OpenKNX::Module
     IPAddress localIP();
     IPAddress subnetMask();
     IPAddress gatewayIP();
-    IPAddress NameServerIP();
+    IPAddress nameServerIP();
     void macAddress(uint8_t *address);
 
   private:

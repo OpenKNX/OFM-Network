@@ -156,7 +156,7 @@ void NetworkModule::init()
         SetByteProperty(PID_IP_CAPABILITIES, 6);              // AutoIP + DHCP
         SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 2); // ToDo
 
-        // delay(1000);    // wait until 
+        // delay(1000);    // wait until
         // if(connected()/*KNX_NETIF.linkStatus() != EthernetLinkStatus::LinkOFF*/)
         // {
         //     logInfoP("Link, request DHCP");
@@ -169,7 +169,7 @@ void NetworkModule::init()
         // }
         logInfoP("Request DHCP..");
         KNX_NETIF.begin(_mac, 5000);
-        if(localIP() == IPAddress(0))
+        if (localIP() == IPAddress(0))
         {
             logInfoP("Timeout");
         }
@@ -183,7 +183,6 @@ void NetworkModule::init()
 
     // ToDo
     // KNX_NETIF.linkStatus() != EthernetLinkStatus::LinkON
-
 
     if (KNX_NETIF.hardwareStatus() == EthernetNoHardware)
     {
@@ -261,7 +260,7 @@ void NetworkModule::fillNetworkFile(UsbExchangeFile *file)
         writeLineToFile(file, "IP-Address: %s", localIP().toString().c_str());
         writeLineToFile(file, "Netmask: %s", subnetMask().toString().c_str());
         writeLineToFile(file, "Gateway: %s", gatewayIP().toString().c_str());
-        writeLineToFile(file, "DNS: %s", NameServerIP().toString().c_str());
+        writeLineToFile(file, "DNS: %s", nameServerIP().toString().c_str());
     }
 }
 
@@ -426,6 +425,7 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 
 void NetworkModule::showNetworkInformations(bool console)
 {
+    openknx.common.skipLooptimeWarning();
     logBegin();
     if (console)
     {
@@ -443,7 +443,7 @@ void NetworkModule::showNetworkInformations(bool console)
         logInfoP("IP-Address: %s", localIP().toString().c_str());
         logInfoP("Netmask: %s", gatewayIP().toString().c_str());
         logInfoP("Gateway: %s", subnetMask().toString().c_str());
-        logInfoP("DNS: %s", NameServerIP().toString().c_str());
+        logInfoP("DNS: %s", nameServerIP().toString().c_str());
     }
 
 #if defined(KNX_IP_WIFI)
@@ -499,7 +499,7 @@ inline IPAddress NetworkModule::gatewayIP()
     return KNX_NETIF.gatewayIP();
 }
 
-inline IPAddress NetworkModule::NameServerIP()
+inline IPAddress NetworkModule::nameServerIP()
 {
 #if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
     return IPAddress(dns_getserver(0));
