@@ -218,14 +218,12 @@ void NetworkModule::setup(bool configured)
         registerCallback([this](bool state) {
             if (state)
             {
-                logInfoP("Start mDNS");
                 mdns.begin(KNX_NETIF.localIP(), _hostName);
                 mdns.addServiceRecord(_mDNSHttpServiceName, 80, MDNSServiceTCP);
                 mdns.addServiceRecord(_mDNSDeviceServiceName, -1, MDNSServiceTCP);
             }
             else
             {
-                logInfoP("Stop mDNS");
                 mdns.removeAllServiceRecords();
             }
         });
