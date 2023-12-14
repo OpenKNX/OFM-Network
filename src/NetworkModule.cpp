@@ -75,8 +75,32 @@ void NetworkModule::prepareSettings()
 #if defined(KNX_IP_GENERIC)
     _mDNSHttpServiceName = (char *)malloc(strlen(_hostName) + 7);
     _mDNSDeviceServiceName = (char *)malloc(strlen(_hostName) + 14);
+    _mDNSDeviceServiceNameTXT = (char *)malloc(256);
     snprintf(_mDNSHttpServiceName, strlen(_hostName) + 7, "%s._http", _hostName);
     snprintf(_mDNSDeviceServiceName, strlen(_hostName) + 14, "%s._device-info", _hostName);
+
+    char buffer[50] = {};
+    std::string bufferTXT = "";
+    bufferTXT.reserve(50);
+
+    snprintf(buffer, 50, "serial=%s\x0", openknx.info.humanSerialNumber().c_str());
+    bufferTXT.append(1, static_cast<char>(strlen(buffer)));
+    bufferTXT.append(buffer);
+
+    snprintf(buffer, 50, "firmwareNumber=%s\x0", openknx.info.humanFirmwareNumber().c_str());
+    bufferTXT.append(1, static_cast<char>(strlen(buffer)));
+    bufferTXT.append(buffer);
+
+    snprintf(buffer, 50, "firmwareVersion=%s\x0", openknx.info.humanFirmwareVersion().c_str());
+    bufferTXT.append(1, static_cast<char>(strlen(buffer)));
+    bufferTXT.append(buffer);
+
+    snprintf(buffer, 50, "individualAddress=%s\x0", openknx.info.humanIndividualAddress().c_str());
+    bufferTXT.append(1, static_cast<char>(strlen(buffer)));
+    bufferTXT.append(buffer);
+    
+    memcpy(_mDNSDeviceServiceNameTXT, bufferTXT.c_str(), bufferTXT.size());
+
 #endif
 
     if (!knx.configured()) return;
@@ -219,8 +243,10 @@ void NetworkModule::setup(bool configured)
             if (state)
             {
                 mdns.begin(KNX_NETIF.localIP(), _hostName);
-                mdns.addServiceRecord(_mDNSHttpServiceName, 80, MDNSServiceTCP);
-                mdns.addServiceRecord(_mDNSDeviceServiceName, -1, MDNSServiceTCP);
+                int x1 = mdns.addServiceRecord(_mDNSDeviceServiceName, -1, MDNSServiceTCP, _mDNSDeviceServiceNameTXT);
+                int x2 = mdns.addServiceRecord(_mDNSHttpServiceName, 80, MDNSServiceTCP);
+                if(!x1) logErrorP("mdns err 1");
+                if(!x2) logErrorP("mdns err 2");
             }
             else
             {
