@@ -40,6 +40,7 @@ class NetworkModule : public OpenKNX::Module
     IPAddress subnetMask();
     IPAddress gatewayIP();
     IPAddress nameServerIP();
+    std::string phyMode();
     void macAddress(uint8_t *address);
 
   private:

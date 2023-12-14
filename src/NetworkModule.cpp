@@ -1,6 +1,7 @@
 #include "NetworkModule.h"
 
 #define MDNS_DEBUG_PORT Serial
+#define OPENKNX_MDNS_FULL
 
 #ifdef KNX_IP_WIFI
     // TODO WLAN
@@ -68,16 +69,22 @@ void NetworkModule::prepareSettings()
     memset(_hostName, 0, 25);
     memcpy(_hostName, "OpenKNX-", 8);
     memcpy(_hostName + 8, openknx.info.humanSerialNumber().c_str() + 5, 8);
+    if (ParamNET_CustomHostname)
+    {
+        memcpy(_hostName, ParamNET_HostName, 24);
+    }
 
     // build mac
     cyw43_hal_generate_laa_mac(0, _mac);
 
 #if defined(KNX_IP_GENERIC)
-    _mDNSHttpServiceName = (char *)malloc(strlen(_hostName) + 7);
     _mDNSDeviceServiceName = (char *)malloc(strlen(_hostName) + 14);
-    _mDNSDeviceServiceNameTXT = (char *)malloc(256);
-    snprintf(_mDNSHttpServiceName, strlen(_hostName) + 7, "%s._http", _hostName);
     snprintf(_mDNSDeviceServiceName, strlen(_hostName) + 14, "%s._device-info", _hostName);
+
+    #ifdef OPENKNX_MDNS_FULL
+    _mDNSDeviceServiceNameTXT = (char *)malloc(256);
+    _mDNSHttpServiceName = (char *)malloc(strlen(_hostName) + 7);
+    snprintf(_mDNSHttpServiceName, strlen(_hostName) + 7, "%s._http", _hostName);
 
     char buffer[50] = {};
     std::string bufferTXT = "";
@@ -87,20 +94,22 @@ void NetworkModule::prepareSettings()
     bufferTXT.append(1, static_cast<char>(strlen(buffer)));
     bufferTXT.append(buffer);
 
-    snprintf(buffer, 50, "firmwareNumber=%s\x0", openknx.info.humanFirmwareNumber().c_str());
+    snprintf(buffer, 50, "firmware=%s\x0", openknx.info.humanFirmwareNumber().c_str());
     bufferTXT.append(1, static_cast<char>(strlen(buffer)));
     bufferTXT.append(buffer);
 
-    snprintf(buffer, 50, "firmwareVersion=%s\x0", openknx.info.humanFirmwareVersion().c_str());
+    snprintf(buffer, 50, "version=%s\x0", openknx.info.humanFirmwareVersion().c_str());
     bufferTXT.append(1, static_cast<char>(strlen(buffer)));
     bufferTXT.append(buffer);
 
-    snprintf(buffer, 50, "individualAddress=%s\x0", openknx.info.humanIndividualAddress().c_str());
+    snprintf(buffer, 50, "pa=%s\x0", openknx.info.humanIndividualAddress().c_str());
     bufferTXT.append(1, static_cast<char>(strlen(buffer)));
     bufferTXT.append(buffer);
-    
+
     memcpy(_mDNSDeviceServiceNameTXT, bufferTXT.c_str(), bufferTXT.size());
-
+    #else
+    _mDNSDeviceServiceNameTXT = (char *)malloc(1);
+    #endif
 #endif
 
     if (!knx.configured()) return;
@@ -111,10 +120,6 @@ void NetworkModule::prepareSettings()
     _staticLocalIP = GetIpProperty(PID_IP_ADDRESS);
     _useStaticIP = GetByteProperty(PID_IP_ASSIGNMENT_METHOD) == 1; // see 2.5.6 of 03_08_03
 #else
-    if (ParamNET_CustomHostname)
-    {
-        memcpy(_hostName, ParamNET_HostName, 24);
-    }
 
     _staticLocalIP = htonl(ParamNET_HostAddress);
     _staticSubnetMask = htonl(ParamNET_SubnetMask);
@@ -166,6 +171,7 @@ void NetworkModule::init()
 #elif defined(KNX_IP_GENERIC)
     logInfoP("Hostname: %s", _hostName);
     KNX_NETIF.setHostname(_hostName);
+    // W5100.phyMode(FULL_DUPLEX_100_AUTONEG);
 
     if (_useStaticIP)
     {
@@ -191,17 +197,9 @@ void NetworkModule::init()
         //     logInfoP("No Link, skip DHCP");
         //     KNX_NETIF.begin(_mac, 100); // does not work
         // }
-        logInfoP("Request DHCP...");
+        logInfoP("Request DHCP, please wait...");
         KNX_NETIF.begin(_mac, 5000);
-        if (localIP() == IPAddress(0))
-        {
-            logErrorP("Timeout");
-        }
-        else
-        {
-            logInfoP("Got %s", localIP().toString().c_str());
-        }
-
+        if (localIP() == IPAddress(0)) logErrorP("Timeout");
         logIndentDown();
     }
 
@@ -237,14 +235,13 @@ void NetworkModule::setup(bool configured)
 
     if (!configured || ParamNET_mDNS)
     {
-
 #ifdef KNX_IP_GENERIC
         registerCallback([this](bool state) {
             if (state)
             {
+                logDebugP("Start mDNS");
                 mdns.begin(KNX_NETIF.localIP(), _hostName);
                 mdns.addServiceRecord(_mDNSDeviceServiceName, -1, MDNSServiceTCP, _mDNSDeviceServiceNameTXT);
-                mdns.addServiceRecord(_mDNSHttpServiceName, 80, MDNSServiceTCP);
             }
             else
             {
@@ -252,10 +249,17 @@ void NetworkModule::setup(bool configured)
             }
         });
 #else
+        logDebugP("Start mDNS");
         if (!MDNS.begin(_hostName)) logErrorP("Hostname not applied (mDNS)");
-        MDNS.addService("http", "tcp", 80);
         MDNS.addService("device-info", "tcp", -1);
-        registerCallback([this](bool state) { if (state) MDNS.notifyAPChange(); });
+    #ifdef OPENKNX_MDNS_FULL
+        MDNS.addServiceTxt("device-info", "tcp", "serial", openknx.info.humanSerialNumber().c_str());
+        MDNS.addServiceTxt("device-info", "tcp", "version", openknx.info.humanFirmwareVersion().c_str());
+        MDNS.addServiceTxt("device-info", "tcp", "firmware", openknx.info.humanFirmwareNumber().c_str());
+        MDNS.addServiceTxt("device-info", "tcp", "pa", openknx.info.humanIndividualAddress().c_str());
+        s
+    #endif
+            registerCallback([this](bool state) { if (state) MDNS.notifyAPChange(); });
 #endif
     }
 
@@ -283,6 +287,7 @@ void NetworkModule::fillNetworkFile(UsbExchangeFile *file)
         writeLineToFile(file, "Netmask: %s", subnetMask().toString().c_str());
         writeLineToFile(file, "Gateway: %s", gatewayIP().toString().c_str());
         writeLineToFile(file, "DNS: %s", nameServerIP().toString().c_str());
+        writeLineToFile(file, "Mode: %s", phyMode().c_str());
     }
 }
 
@@ -335,9 +340,7 @@ void NetworkModule::checkLinkStatus()
     _currentLinkState = newLinkState;
     _lastLinkCheck = millis();
 
-    logIndentUp();
     if (_currentLinkState) checkIpStatus();
-    logIndentDown();
 }
 
 void NetworkModule::loop(bool configured)
@@ -466,6 +469,7 @@ void NetworkModule::showNetworkInformations(bool console)
         logInfoP("Netmask: %s", gatewayIP().toString().c_str());
         logInfoP("Gateway: %s", subnetMask().toString().c_str());
         logInfoP("DNS: %s", nameServerIP().toString().c_str());
+        logInfoP("Mode: %s", phyMode().c_str());
     }
 
 #if defined(KNX_IP_WIFI)
@@ -527,6 +531,26 @@ inline IPAddress NetworkModule::nameServerIP()
     return IPAddress(dns_getserver(0));
 #elif defined(KNX_IP_GENERIC)
     return KNX_NETIF.dnsServerIP();
+#endif
+}
+
+inline std::string NetworkModule::phyMode()
+{
+#ifdef KNX_IP_GENERIC
+    std::string mode = std::to_string(KNX_NETIF.speed()) + " MBit/s";
+    switch (KNX_NETIF.duplex())
+    {
+        case 1:
+            mode.append(" (HDX)");
+            break;
+        case 2:
+            mode.append(" (FDX)");
+            break;
+    }
+
+    return mode;
+#else
+    return "Auto";
 #endif
 }
 
