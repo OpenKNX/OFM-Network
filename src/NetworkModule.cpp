@@ -191,11 +191,11 @@ void NetworkModule::init()
         //     logInfoP("No Link, skip DHCP");
         //     KNX_NETIF.begin(_mac, 100); // does not work
         // }
-        logInfoP("Request DHCP..");
+        logInfoP("Request DHCP...");
         KNX_NETIF.begin(_mac, 5000);
         if (localIP() == IPAddress(0))
         {
-            logInfoP("Timeout");
+            logErrorP("Timeout");
         }
         else
         {
@@ -243,10 +243,8 @@ void NetworkModule::setup(bool configured)
             if (state)
             {
                 mdns.begin(KNX_NETIF.localIP(), _hostName);
-                int x1 = mdns.addServiceRecord(_mDNSDeviceServiceName, -1, MDNSServiceTCP, _mDNSDeviceServiceNameTXT);
-                int x2 = mdns.addServiceRecord(_mDNSHttpServiceName, 80, MDNSServiceTCP);
-                if(!x1) logErrorP("mdns err 1");
-                if(!x2) logErrorP("mdns err 2");
+                mdns.addServiceRecord(_mDNSDeviceServiceName, -1, MDNSServiceTCP, _mDNSDeviceServiceNameTXT);
+                mdns.addServiceRecord(_mDNSHttpServiceName, 80, MDNSServiceTCP);
             }
             else
             {
