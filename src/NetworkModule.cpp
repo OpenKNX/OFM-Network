@@ -108,7 +108,7 @@ void NetworkModule::init()
     initPhy();
     prepareSettings();
 
-#if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
+#if defined(KNX_IP_W5500)
     if (_useStaticIP)
     {
         logInfoP("Using static IP");
@@ -138,6 +138,30 @@ void NetworkModule::init()
     if (!KNX_NETIF.begin((const uint8_t *)_mac))
     {
         openknx.hardware.fatalError(7, "Error communicating with W5500 Ethernet chip");
+    }
+#elif defined(KNX_IP_WIFI)
+    if (_useStaticIP)
+    {
+        logInfoP("Using static IP");
+        KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP);
+        SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1);
+    }
+    else
+    {
+        logInfoP("Using DHCP");
+        SetByteProperty(PID_IP_CAPABILITIES, 6);              // AutoIP + DHCP
+        SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 2); // ToDo
+    }
+
+    logInfoP("Hostname: %s", _hostName);
+    KNX_NETIF.hostname(_hostName);
+
+    // debug only
+    //_ssid = "test.ap";
+    //_pass = "test.test";
+    if (!KNX_NETIF.begin(_ssid, _pass))
+    {
+        openknx.hardware.fatalError(7, "Error connecting to Wifi");
     }
 #elif defined(KNX_IP_GENERIC)
     logInfoP("Hostname: %s", _hostName);
@@ -410,12 +434,17 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
     }
     if (!_useStaticIP && cmd == "net renew")
     {
-#ifdef KNX_IP_GENERIC
-        if (connected()) KNX_NETIF.maintain();
-#else
+#ifdef KNX_IP_W5500
         if (connected()) dhcp_renew(KNX_NETIF.getNetIf());
+#elif defined(KNX_IP_WIFI)
+        if (connected())
+        {
+            KNX_NETIF.disconnect();
+            KNX_NETIF.begin(_ssid, _pass);
+         }
+#elif defined(KNX_IP_GENERIC)
+        if (connected()) KNX_NETIF.maintain();        
 #endif
-
         return true;
     }
     return false;
@@ -469,7 +498,9 @@ inline bool NetworkModule::connected()
 
 #if defined(KNX_IP_W5500)
     return KNX_NETIF.isLinked();
-#else
+#elif defined(KNX_IP_WIFI)
+    return KNX_NETIF.isConnected();
+#elif defined(KNX_IP_GENERIC)
     return KNX_NETIF.linkStatus() == LinkON;
 #endif
 }

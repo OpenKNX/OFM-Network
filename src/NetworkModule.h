@@ -63,6 +63,11 @@ class NetworkModule : public OpenKNX::Module
     bool _currentLinkState = false;
     uint32_t _lastLinkCheck = false;
 
+#ifdef KNX_IP_WIFI
+    const char *_ssid = nullptr;
+    const char *_pass = nullptr;
+#endif
+
     void initPhy();
     void prepareSettings();
     void checkLinkStatus();
