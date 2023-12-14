@@ -69,10 +69,12 @@ void NetworkModule::prepareSettings()
     memset(_hostName, 0, 25);
     memcpy(_hostName, "OpenKNX-", 8);
     memcpy(_hostName + 8, openknx.info.humanSerialNumber().c_str() + 5, 8);
+#ifdef ParamNET_CustomHostname
     if (ParamNET_CustomHostname)
     {
         memcpy(_hostName, ParamNET_HostName, 24);
     }
+#endif
 
     // build mac
     cyw43_hal_generate_laa_mac(0, _mac);
@@ -468,9 +470,9 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         {
             KNX_NETIF.disconnect();
             KNX_NETIF.begin(_ssid, _pass);
-         }
+        }
 #elif defined(KNX_IP_GENERIC)
-        if (connected()) KNX_NETIF.maintain();        
+        if (connected()) KNX_NETIF.maintain();
 #endif
         return true;
     }
