@@ -40,6 +40,7 @@ class NetworkModule : public OpenKNX::Module
     IPAddress subnetMask();
     IPAddress gatewayIP();
     IPAddress nameServerIP();
+    std::string phyMode();
     void macAddress(uint8_t *address);
 
   private:
@@ -59,6 +60,7 @@ class NetworkModule : public OpenKNX::Module
     char *_hostName = nullptr;
     char *_mDNSHttpServiceName = nullptr;
     char *_mDNSDeviceServiceName = nullptr;
+    char *_mDNSDeviceServiceNameTXT = nullptr;
     uint8_t _mac[6] = {};
     bool _currentLinkState = false;
     uint32_t _lastLinkCheck = false;
