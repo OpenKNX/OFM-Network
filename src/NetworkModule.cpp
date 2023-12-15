@@ -283,7 +283,6 @@ void NetworkModule::setup(bool configured)
         MDNS.addServiceTxt("device-info", "tcp", "version", openknx.info.humanFirmwareVersion().c_str());
         MDNS.addServiceTxt("device-info", "tcp", "firmware", openknx.info.humanFirmwareNumber().c_str());
         MDNS.addServiceTxt("device-info", "tcp", "pa", openknx.info.humanIndividualAddress().c_str());
-        s
     #endif
             registerCallback([this](bool state) { if (state) MDNS.notifyAPChange(); });
 #endif
