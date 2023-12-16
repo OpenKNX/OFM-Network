@@ -120,7 +120,7 @@ void NetworkModule::prepareSettings()
         // set PID_FRIENDLY_NAME to the _hostname in this case, so "OpenKNX-XXXXXX" is display in the ETS
         uint8_t NoOfElem = 30;
         uint32_t length = 0;
-        uint8_t *friendlyName = (uint8_t *)malloc(30);
+        uint8_t *friendlyName = new uint8_t[30];
         memcpy(friendlyName, _hostName, 25);
         knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, friendlyName, length);
 
