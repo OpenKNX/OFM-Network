@@ -114,7 +114,18 @@ void NetworkModule::prepareSettings()
     #endif
 #endif
 
-    if (!knx.configured()) return;
+    if (!knx.configured())
+    {
+        // PID_FRIENDLY_NAME is used to identify the device over Search Request from ETS. If not configured, PID_FRIENDLY_NAME is empty and so is the Name in the SearchReqest.
+        // set PID_FRIENDLY_NAME to the _hostname in this case, so "OpenKNX-XXXXXX" is display in the ETS
+        uint8_t NoOfElem = 30;
+        uint32_t length = 0;
+        uint8_t *friendlyName = (uint8_t *)malloc(30);
+        memcpy(friendlyName, _hostName, 25);
+        knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, friendlyName, length);
+
+        return;
+    }
 
 #if !defined(ParamNET_HostAddress) || !defined(ParamNET_SubnetMask) || !defined(ParamNET_GatewayAddress) || !defined(ParamNET_NameserverAddress) || !defined(ParamNET_StaticIP)
     _staticGatewayIP = GetIpProperty(PID_DEFAULT_GATEWAY);
