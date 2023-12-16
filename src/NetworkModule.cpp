@@ -116,7 +116,7 @@ void NetworkModule::prepareSettings()
 
     if (!knx.configured()) return;
 
-#if MASK_VERSION == 0x091A
+#if !defined(ParamNET_HostAddress) || !defined(ParamNET_SubnetMask) || !defined(ParamNET_GatewayAddress) || !defined(ParamNET_NameserverAddress) || !defined(ParamNET_StaticIP)
     _staticGatewayIP = GetIpProperty(PID_DEFAULT_GATEWAY);
     _staticSubnetMask = GetIpProperty(PID_SUBNET_MASK);
     _staticLocalIP = GetIpProperty(PID_IP_ADDRESS);
@@ -203,7 +203,7 @@ void NetworkModule::init()
     {
         logInfoP("Using static IP");
         SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1);
-        KNX_NETIF.begin(_mac, _staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP);
+        KNX_NETIF.begin(_mac, _staticLocalIP, _staticNameServerIP, _staticGatewayIP, _staticSubnetMask);
     }
     else
     {
