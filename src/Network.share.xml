@@ -70,7 +70,7 @@
           </Static>
           <Dynamic>
             <ChannelIndependentBlock>
-              <ParameterBlock Id="%AID%_PB-nnn" Name="Network" Text="Netzwerk" Icon="ethernet" HelpContext="Empty">
+              <ParameterBlock Id="%AID%_PB-nnn" Name="Network" Text="Netzwerk" Icon="ethernet" HelpContext="NET-Info">
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="Hostname" UIHint="Headline" />
                   <ParameterRefRef RefId="%AID%_UP-%TT%00001_R-%TT%0000101" />
                   <choose ParamRefId="%AID%_UP-%TT%00001_R-%TT%0000101">
@@ -93,7 +93,7 @@
                   </when>
                 </choose>
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="Services" UIHint="Headline" />
-                <ParameterRefRef RefId="%AID%_UP-%TT%00031_R-%TT%0003101" />
+                <ParameterRefRef RefId="%AID%_UP-%TT%00031_R-%TT%0003101" HelpContext="NET-MDNS" />
                 <!-- <ParameterRefRef RefId="%AID%_UP-%TT%00032_R-%TT%0003201" />
                 <choose ParamRefId="%AID%_UP-%TT%00032_R-%TT%0003201">
                   <when test="1">
