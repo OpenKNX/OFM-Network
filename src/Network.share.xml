@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <?xml-model href="../../Organization/knxprod-support/knx_project_20/knx-editor.xsd" type="application/xml" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <KNX xmlns:op="http://github.com/OpenKNX/OpenKNXproducer" xmlns="http://knx.org/xml/project/20" CreatedBy="KNX MT" ToolVersion="5.1.255.16695">
+  <op:config name="%NET_IPConfigTool%" value="0" />
   <ManufacturerData>
     <Manufacturer>
       <ApplicationPrograms>
@@ -33,6 +34,7 @@
               </ParameterType>
             </ParameterTypes>
             <Parameters>
+              <Parameter Id="%AID%_P-%TT%00100" Name="SelectIPConfig" ParameterType="%AID%_PT-CheckBox" Text="" Value="0" Access="None"/>
               <Union SizeInBit="192">
                 <Memory CodeSegment="%MID%" Offset="0" BitOffset="0" />
                 <Parameter Id="%AID%_UP-%TT%00011" Name="HostAddress"        ParameterType="%AID%_PT-HostAddress"        Offset="0"  BitOffset="0" Text="  IP-Adresse" Value="192.168.0.1" />
@@ -52,6 +54,7 @@
               </Union>
             </Parameters>
             <ParameterRefs>
+              <ParameterRef Id="%AID%_P-%TT%00100_R-%TT%0010001" RefId="%AID%_P-%TT%00100" />
               <ParameterRef Id="%AID%_UP-%TT%00001_R-%TT%0000101" RefId="%AID%_UP-%TT%00001" />
               <ParameterRef Id="%AID%_UP-%TT%00002_R-%TT%0000201" RefId="%AID%_UP-%TT%00002" />
               <ParameterRef Id="%AID%_UP-%TT%00010_R-%TT%0001001" RefId="%AID%_UP-%TT%00010" />
@@ -83,13 +86,21 @@
 
 
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="IP-Adresse" UIHint="Headline" />
-                <ParameterRefRef RefId="%AID%_UP-%TT%00002_R-%TT%0000201" />
-                <choose ParamRefId="%AID%_UP-%TT%00002_R-%TT%0000201">
-                  <when test="1">
-                    <ParameterRefRef RefId="%AID%_UP-%TT%00011_R-%TT%0001101" />
-                    <ParameterRefRef RefId="%AID%_UP-%TT%00012_R-%TT%0001201" />
-                    <ParameterRefRef RefId="%AID%_UP-%TT%00013_R-%TT%0001301" />
-                    <ParameterRefRef RefId="%AID%_UP-%TT%00021_R-%TT%0002101" />
+                <ParameterRefRef RefId="%AID%_P-%TT%00100_R-%TT%0010001" />
+                <choose ParamRefId="%AID%_P-%TT%00100_R-%TT%0010001">
+                  <when test="%NET_IPConfigTool%"> <!-- default -->
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00002_R-%TT%0000201" />
+                    <choose ParamRefId="%AID%_UP-%TT%00002_R-%TT%0000201">
+                      <when test="1">
+                        <ParameterRefRef RefId="%AID%_UP-%TT%00011_R-%TT%0001101" />
+                        <ParameterRefRef RefId="%AID%_UP-%TT%00012_R-%TT%0001201" />
+                        <ParameterRefRef RefId="%AID%_UP-%TT%00013_R-%TT%0001301" />
+                        <ParameterRefRef RefId="%AID%_UP-%TT%00021_R-%TT%0002101" />
+                      </when>
+                    </choose>
+                  </when>
+                  <when test="!=%NET_IPConfigTool%"> <!-- router -->
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="IP-Einstellungen können im Eigenschaften Feld der ETS, Tab IP gesetzt werden" UIHint="Information" />
                   </when>
                 </choose>
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="Services" UIHint="Headline" />
