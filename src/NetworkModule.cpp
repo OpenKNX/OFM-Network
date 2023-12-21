@@ -127,7 +127,7 @@ void NetworkModule::prepareSettings()
         return;
     }
 
-#if !defined(ParamNET_HostAddress) || !defined(ParamNET_SubnetMask) || !defined(ParamNET_GatewayAddress) || !defined(ParamNET_NameserverAddress) || !defined(ParamNET_StaticIP)
+#if !defined(ParamNET_HostAddress) || !defined(ParamNET_SubnetMask) || !defined(ParamNET_GatewayAddress) || !defined(ParamNET_NameserverAddress) || !defined(ParamNET_StaticIP) || defined(OPENKNX_NETWORK_USEIPPROP)
     _staticGatewayIP = GetIpProperty(PID_DEFAULT_GATEWAY);
     _staticSubnetMask = GetIpProperty(PID_SUBNET_MASK);
     _staticLocalIP = GetIpProperty(PID_IP_ADDRESS);
