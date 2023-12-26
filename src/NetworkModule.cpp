@@ -201,10 +201,7 @@ void NetworkModule::init()
     // debug only
     //_ssid = "test.ap";
     //_pass = "test.test";
-    if (!KNX_NETIF.begin(_ssid, _pass))
-    {
-        openknx.hardware.fatalError(7, "Error connecting to Wifi");
-    }
+    KNX_NETIF.begin(NET_WifiSSID, NET_WifiPassword);
 #elif defined(KNX_IP_GENERIC)
     logInfoP("Hostname: %s", _hostName);
     KNX_NETIF.setHostname(_hostName);
@@ -266,7 +263,9 @@ void NetworkModule::init()
 
 void NetworkModule::setup(bool configured)
 {
+#ifndef ARDUINO_ARCH_ESP32
     openknxUsbExchangeModule.onLoad("Network.txt", [this](UsbExchangeFile *file) { this->fillNetworkFile(file); });
+#endif
 
     registerCallback([this](bool state) { if (state) this->showNetworkInformations(false); });
 
@@ -310,6 +309,7 @@ void NetworkModule::setup(bool configured)
     // logInfoP("Time: %s", asctime(&timeinfo));
 }
 
+#ifndef ARDUINO_ARCH_ESP32
 void NetworkModule::fillNetworkFile(UsbExchangeFile *file)
 {
     writeLineToFile(file, "OpenKNX Network");
@@ -326,6 +326,7 @@ void NetworkModule::fillNetworkFile(UsbExchangeFile *file)
         writeLineToFile(file, "Mode: %s", phyMode().c_str());
     }
 }
+#endif
 
 void NetworkModule::checkIpStatus()
 {
@@ -514,7 +515,8 @@ void NetworkModule::showNetworkInformations(bool console)
     }
 
 #if defined(KNX_IP_WIFI)
-    logInfoP("WLAN-SSID: %s", KNX_NETIF.SSID());
+    logInfoP("WLAN-SSID: %s", KNX_
+    NETIF.SSID());
 #endif
 
     if (console)

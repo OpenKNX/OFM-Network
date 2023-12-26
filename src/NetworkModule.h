@@ -1,8 +1,11 @@
 #pragma once
 #include "OpenKNX.h"
-#include "UsbExchangeModule.h"
 #include "strings.h"
 #include <functional>
+
+#ifndef ARDUINO_ARCH_ESP32
+    #include "UsbExchangeModule.h"
+#endif
 
 #if defined(KNX_IP_W5500)
     #include <W5500lwIP.h>
@@ -31,7 +34,9 @@ class NetworkModule : public OpenKNX::Module
     bool processCommand(const std::string cmd, bool debugKo);
     void showHelp() override;
     void showNetworkInformations(bool console = false);
+#ifndef ARDUINO_ARCH_ESP32
     void fillNetworkFile(UsbExchangeFile *file);
+#endif
     void registerCallback(NetworkChangeCallback callback);
 
     bool connected();
