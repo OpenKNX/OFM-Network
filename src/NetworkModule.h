@@ -57,10 +57,11 @@ class NetworkModule : public OpenKNX::Module
     bool _powerSave = false;
     bool _ipShown = false;
     bool _useStaticIP = 0;
-    IPAddress _staticLocalIP = 0;
-    IPAddress _staticSubnetMask = 0;
-    IPAddress _staticGatewayIP = 0;
-    IPAddress _staticNameServerIP = 0;
+    uint8_t _lanMode = 0;
+    IPAddress _staticLocalIP;
+    IPAddress _staticSubnetMask;
+    IPAddress _staticGatewayIP;
+    IPAddress _staticNameServerIP;
 
     char *_hostName = nullptr;
     char *_mDNSHttpServiceName = nullptr;
@@ -69,11 +70,6 @@ class NetworkModule : public OpenKNX::Module
     uint8_t _mac[6] = {};
     bool _currentLinkState = false;
     uint32_t _lastLinkCheck = false;
-
-#ifdef KNX_IP_WIFI
-    const char *_ssid = nullptr;
-    const char *_pass = nullptr;
-#endif
 
     void initPhy();
     void prepareSettings();

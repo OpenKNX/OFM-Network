@@ -69,15 +69,36 @@ void NetworkModule::prepareSettings()
     memset(_hostName, 0, 25);
     memcpy(_hostName, "OpenKNX-", 8);
     memcpy(_hostName + 8, openknx.info.humanSerialNumber().c_str() + 5, 8);
-#ifdef ParamNET_CustomHostname
-    if (ParamNET_CustomHostname)
-    {
-        memcpy(_hostName, ParamNET_HostName, 24);
-    }
-#endif
 
     // build mac
     cyw43_hal_generate_laa_mac(0, _mac);
+
+    if (knx.configured())
+    {
+        // custom hostname
+#ifdef ParamNET_CustomHostname
+        if (ParamNET_CustomHostname)
+        {
+            memcpy(_hostName, ParamNET_HostName, 24);
+        }
+#endif
+
+#ifdef ParamNET_CustomMacAddress
+        // custom mac
+        if (ParamNET_CustomMacAddress)
+        {
+
+            std::string macAddress = "";
+            macAddress.append((const char *)ParamNET_MacAddress);
+
+            uint8_t index = 0;
+            for (size_t i = 0; i < 17; i += 3)
+            {
+                _mac[index++] = static_cast<uint8_t>(std::stoi(macAddress.substr(i, 2), nullptr, 16));
+            }
+        }
+#endif
+    }
 
 #if defined(KNX_IP_GENERIC)
     _mDNSDeviceServiceName = (char *)malloc(strlen(_hostName) + 14);
@@ -133,7 +154,6 @@ void NetworkModule::prepareSettings()
     _staticLocalIP = GetIpProperty(PID_IP_ADDRESS);
     _useStaticIP = GetByteProperty(PID_IP_ASSIGNMENT_METHOD) == 1; // see 2.5.6 of 03_08_03
 #else
-
     _staticLocalIP = htonl(ParamNET_HostAddress);
     _staticSubnetMask = htonl(ParamNET_SubnetMask);
     _staticGatewayIP = htonl(ParamNET_GatewayAddress);
@@ -151,6 +171,8 @@ void NetworkModule::init()
     prepareSettings();
 
 #if defined(KNX_IP_W5500)
+    // TODO: ParamNET_LanMode
+
     if (_useStaticIP)
     {
         logInfoP("Using static IP");
@@ -198,14 +220,29 @@ void NetworkModule::init()
     logInfoP("Hostname: %s", _hostName);
     KNX_NETIF.hostname(_hostName);
 
-    // debug only
-    //_ssid = "test.ap";
-    //_pass = "test.test";
-    KNX_NETIF.begin(NET_WifiSSID, NET_WifiPassword);
+    KNX_NETIF.begin((const char *)NET_WifiSSID, (const char *)NET_WifiSSID);
 #elif defined(KNX_IP_GENERIC)
     logInfoP("Hostname: %s", _hostName);
     KNX_NETIF.setHostname(_hostName);
-    // W5100.phyMode(FULL_DUPLEX_100_AUTONEG);
+
+    switch (ParamNET_LanMode)
+    {
+        case 1:
+            W5100.phyMode(FULL_DUPLEX_100);
+            break;
+        case 2:
+            W5100.phyMode(HALF_DUPLEX_100);
+            break;
+        case 3:
+            W5100.phyMode(FULL_DUPLEX_10);
+            break;
+        case 4:
+            W5100.phyMode(HALF_DUPLEX_10);
+            break;
+
+        default:
+            break;
+    }
 
     if (_useStaticIP)
     {
@@ -233,7 +270,7 @@ void NetworkModule::init()
         // }
         logInfoP("Request DHCP, please wait...");
         KNX_NETIF.begin(_mac, 5000);
-        if (localIP() == IPAddress(0)) logErrorP("Timeout");
+        if (localIP() == IPAddress()) logErrorP("Timeout");
         logIndentDown();
     }
 
@@ -294,7 +331,7 @@ void NetworkModule::setup(bool configured)
         MDNS.addServiceTxt("device-info", "tcp", "firmware", openknx.info.humanFirmwareNumber().c_str());
         MDNS.addServiceTxt("device-info", "tcp", "pa", openknx.info.humanIndividualAddress().c_str());
     #endif
-            registerCallback([this](bool state) { if (state) MDNS.notifyAPChange(); });
+        registerCallback([this](bool state) { if (state) MDNS.notifyAPChange(); });
 #endif
     }
 
@@ -480,7 +517,7 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         if (connected())
         {
             KNX_NETIF.disconnect();
-            KNX_NETIF.begin(_ssid, _pass);
+            KNX_NETIF.begin((const char *)NET_WifiSSID, (const char *)NET_WifiSSID);
         }
 #elif defined(KNX_IP_GENERIC)
         if (connected()) KNX_NETIF.maintain();
@@ -515,8 +552,7 @@ void NetworkModule::showNetworkInformations(bool console)
     }
 
 #if defined(KNX_IP_WIFI)
-    logInfoP("WLAN-SSID: %s", KNX_
-    NETIF.SSID());
+    logInfoP("WLAN-SSID: %s", KNX_NETIF.SSID());
 #endif
 
     if (console)
@@ -552,7 +588,7 @@ inline bool NetworkModule::established()
 {
     if (!connected()) return false;
 
-    return localIP() != IPAddress(0);
+    return localIP() != IPAddress();
 }
 
 inline IPAddress NetworkModule::localIP()

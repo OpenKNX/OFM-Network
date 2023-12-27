@@ -3,6 +3,7 @@
 <KNX xmlns:op="http://github.com/OpenKNX/OpenKNXproducer" xmlns="http://knx.org/xml/project/20" CreatedBy="KNX MT" ToolVersion="5.1.255.16695">
   <op:config name="%NET_IPConfigTool%" value="0" />
   <op:config name="%NET_WifiConfig%" value="0" />
+  <op:config name="%NET_LanMode%" value="0" />
   <ManufacturerData>
     <Manufacturer>
       <ApplicationPrograms>
@@ -30,7 +31,7 @@
               <ParameterType Id="%AID%_PT-GatewayAddress" Name="GatewayAddress">
                 <TypeIPAddress AddressType="GatewayAddress" />
               </ParameterType>
-              <ParameterType Id="%AID%_PT-Hostname" Name="Hostname">
+              <ParameterType Id="%AID%_PT-Hostname" Name="Hostname" ValidationErrorRef="%AID%_M-1100001">
                 <TypeText SizeInBit="192" Pattern="^[A-Za-z](?:[A-Za-z0-9\-]*[A-Za-z0-9])*$"/>
               </ParameterType>
               <ParameterType Id="%AID%_PT-WifiSSID" Name="WifiSSID">
@@ -39,39 +40,79 @@
               <ParameterType Id="%AID%_PT-WifiPassword" Name="WifiPassword">
                 <TypeText SizeInBit="504" />
               </ParameterType>
+              <ParameterType Id="%AID%_PT-MacAddress" Name="MacAddress" ValidationErrorRef="%AID%_M-1100002">
+                <TypeText SizeInBit="136" Pattern="^(?:[0-9A-Fa-f]{2}:){5}(?:[0-9A-Fa-f]{2})$" />
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-LanMode" Name="LanMode">
+                <TypeRestriction Base="Value" SizeInBit="4">
+                  <Enumeration Text="Automatisch" Value="0" Id="%ENID%" />
+                  <Enumeration Text="100 MBit/s Voll-Duplex" Value="1" Id="%ENID%" />
+                  <Enumeration Text="100 MBit/s Halb-Duplex" Value="2" Id="%ENID%" />
+                  <Enumeration Text="10 MBit/s Voll-Duplex" Value="3" Id="%ENID%" />
+                  <Enumeration Text="10 MBit/s Halb-Duplex" Value="4" Id="%ENID%" />
+                </TypeRestriction>
+              </ParameterType>
             </ParameterTypes>
             <Parameters>
-              <Parameter Id="%AID%_P-%TT%00100" Name="SelectIPConfig" ParameterType="%AID%_PT-CheckBox" Text="" Value="0" Access="None"/>
-              <Parameter Id="%AID%_P-%TT%00101" Name="SelectWifiConfig" ParameterType="%AID%_PT-CheckBox" Text="" Value="0" Access="None"/>
-              <Union SizeInBit="192">
+              <!-- IP Config-->
+              <Parameter Id="%AID%_P-%TT%00100" Name="SelectIPConfig" ParameterType="%AID%_PT-CheckBox"                  Text="" Value="0" Access="None"/>
+              <Union SizeInBit="128"><!-- 16bytes-->
                 <Memory CodeSegment="%MID%" Offset="0" BitOffset="0" />
                 <Parameter Id="%AID%_UP-%TT%00011" Name="HostAddress"        ParameterType="%AID%_PT-HostAddress"        Offset="0"  BitOffset="0" Text="IP-Adresse" Value="192.168.0.1" />
                 <Parameter Id="%AID%_UP-%TT%00012" Name="SubnetMask"         ParameterType="%AID%_PT-SubnetMask"         Offset="4"  BitOffset="0" Text="Subnetzsmaske" Value="255.255.255.0" />
                 <Parameter Id="%AID%_UP-%TT%00013" Name="GatewayAddress"     ParameterType="%AID%_PT-GatewayAddress"     Offset="8"  BitOffset="0" Text="Standardgateway" Value="192.168.0.254" />
                 <Parameter Id="%AID%_UP-%TT%00021" Name="NameserverAddress"  ParameterType="%AID%_PT-HostAddress"        Offset="12" BitOffset="0" Text="Nameserver" Value="192.168.0.254" />
                 <!-- Reserved for Nameserver 2 -->
-                <Parameter Id="%AID%_UP-%TT%00001" Name="CustomHostname"     ParameterType="%AID%_PT-CheckBox"           Offset="20" BitOffset="0" Text="Hostname anpassen" Value="0" />
-                <Parameter Id="%AID%_UP-%TT%00002" Name="StaticIP"           ParameterType="%AID%_PT-DHCP"               Offset="20" BitOffset="1" Text="DHCP" Value="0" />
-                <Parameter Id="%AID%_UP-%TT%00031" Name="mDNS"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="20" BitOffset="2" Text="mDNS" Value="1" /> 
-                <Parameter Id="%AID%_UP-%TT%00032" Name="HTTP"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="20" BitOffset="3" Text="Weberver" Value="1" /> 
-                <Parameter Id="%AID%_UP-%TT%00033" Name="NTP"                ParameterType="%AID%_PT-OnOffYesNo"         Offset="20" BitOffset="4" Text="Zeitgeber (NTP)" Value="0" /> 
               </Union>
-              <Union SizeInBit="192">
-                <Memory CodeSegment="%MID%" Offset="24" BitOffset="0" />
-                <Parameter Id="%AID%_UP-%TT%00010" Name="HostName"           ParameterType="%AID%_PT-Hostname"           Offset="0"  BitOffset="0" Text="" Value="" />
-              </Union>
-              <Union SizeInBit="760">
-                <Memory CodeSegment="%MID%" Offset="48" BitOffset="0" />
+
+              <!-- Wifi -->
+              <Parameter Id="%AID%_P-%TT%00101" Name="SelectWifiConfig"      ParameterType="%AID%_PT-CheckBox"           Text="" Value="0" Access="None"/>
+              <Union SizeInBit="760"><!-- 95 -->
+                <Memory CodeSegment="%MID%" Offset="16" BitOffset="0" />
                 <Parameter Id="%AID%_UP-%TT%00041" Name="WifiSSID"           ParameterType="%AID%_PT-WifiSSID"           Offset="0"  BitOffset="0" Text="SSID" Value="" />
                 <Parameter Id="%AID%_UP-%TT%00042" Name="WifiPassword"       ParameterType="%AID%_PT-WifiPassword"       Offset="32"  BitOffset="0" Text="Passswort" Value="" />
+              </Union>
+
+              <!-- Services -->
+              <Union SizeInBit="8">
+                <Memory CodeSegment="%MID%" Offset="111" BitOffset="0" />
+                <Parameter Id="%AID%_UP-%TT%00001" Name="CustomHostname"     ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="0" Text="Hostname anpassen" Value="0" />
+                <Parameter Id="%AID%_UP-%TT%00002" Name="StaticIP"           ParameterType="%AID%_PT-DHCP"               Offset="0" BitOffset="1" Text="DHCP" Value="0" />
+                <Parameter Id="%AID%_UP-%TT%00003" Name="CustomMacAddress"   ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="2" Text="MAC-Adresse anpassen" Value="0" />
+                <!-- 2bit free-->
+                <Parameter Id="%AID%_UP-%TT%00031" Name="mDNS"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="5" Text="mDNS" Value="1" /> 
+                <Parameter Id="%AID%_UP-%TT%00032" Name="HTTP"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="6" Text="Weberver" Value="1" /> 
+                <Parameter Id="%AID%_UP-%TT%00033" Name="NTP"                ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="7" Text="Zeitgeber (NTP)" Value="0" /> 
+              </Union>
+
+              <!-- Hostname -->
+              <Parameter Id="%AID%_P-%TT%00010" Name="HostName"              ParameterType="%AID%_PT-Hostname"           Text="Hostname" Value="" >
+                <Memory CodeSegment="%MID%" Offset="112" BitOffset="0" />
+                <!-- 192bits / 24bytes-->
+              </Parameter>
+
+              <!-- MacAddress -->
+              <Parameter Id="%AID%_P-%TT%00051" Name="MacAddress"            ParameterType="%AID%_PT-MacAddress"         Text="MAC-Adresse" Value="" >
+                <Memory CodeSegment="%MID%" Offset="136" BitOffset="0" />
+                <!-- 136bits / 17bytes-->
+              </Parameter>
+
+              <!-- LanMode -->
+              <Parameter Id="%AID%_P-%TT%00102" Name="SelectLanMode"         ParameterType="%AID%_PT-CheckBox"           Text=""           Value="0" Access="None"/>
+              <Union SizeInBit="4">
+                <Memory CodeSegment="%MID%" Offset="153" BitOffset="0" />
+                <Parameter Id="%AID%_UP-%TT%00053" Name="LanModeInactive"    ParameterType="%AID%_PT-LanMode"            Offset="0" BitOffset="0" Text="LAN-Modus"  Value="0" Access="None" DefaultUnionParameter="true"/>
+                <Parameter Id="%AID%_UP-%TT%00052" Name="LanMode"            ParameterType="%AID%_PT-LanMode"            Offset="0" BitOffset="0" Text="LAN-Modus"  Value="0" />
               </Union>
             </Parameters>
             <ParameterRefs>
               <ParameterRef Id="%AID%_P-%TT%00100_R-%TT%0010001" RefId="%AID%_P-%TT%00100" />
               <ParameterRef Id="%AID%_P-%TT%00101_R-%TT%0010101" RefId="%AID%_P-%TT%00101" />
+              <ParameterRef Id="%AID%_P-%TT%00102_R-%TT%0010201" RefId="%AID%_P-%TT%00102" />
               <ParameterRef Id="%AID%_UP-%TT%00001_R-%TT%0000101" RefId="%AID%_UP-%TT%00001" />
               <ParameterRef Id="%AID%_UP-%TT%00002_R-%TT%0000201" RefId="%AID%_UP-%TT%00002" />
-              <ParameterRef Id="%AID%_UP-%TT%00010_R-%TT%0001001" RefId="%AID%_UP-%TT%00010" />
+              <ParameterRef Id="%AID%_UP-%TT%00003_R-%TT%0000301" RefId="%AID%_UP-%TT%00003" />
+              <ParameterRef Id="%AID%_P-%TT%00010_R-%TT%0001001" RefId="%AID%_P-%TT%00010" />
               <ParameterRef Id="%AID%_UP-%TT%00011_R-%TT%0001101" RefId="%AID%_UP-%TT%00011" />
               <ParameterRef Id="%AID%_UP-%TT%00012_R-%TT%0001201" RefId="%AID%_UP-%TT%00012" />
               <ParameterRef Id="%AID%_UP-%TT%00013_R-%TT%0001301" RefId="%AID%_UP-%TT%00013" />
@@ -81,26 +122,21 @@
               <ParameterRef Id="%AID%_UP-%TT%00033_R-%TT%0003301" RefId="%AID%_UP-%TT%00033" />
               <ParameterRef Id="%AID%_UP-%TT%00041_R-%TT%0004101" RefId="%AID%_UP-%TT%00041" />
               <ParameterRef Id="%AID%_UP-%TT%00042_R-%TT%0004201" RefId="%AID%_UP-%TT%00042" />
+              <ParameterRef Id="%AID%_P-%TT%00051_R-%TT%0005101" RefId="%AID%_P-%TT%00051" />
+              <ParameterRef Id="%AID%_UP-%TT%00052_R-%TT%0005201" RefId="%AID%_UP-%TT%00052" />
             </ParameterRefs>
             <ComObjectTable>
             </ComObjectTable>
             <ComObjectRefs>
             </ComObjectRefs>
+            <Messages>
+              <Message Id="%AID%_M-1100001" Name="InvalidHostName" Text="Darf nur 24 Zeichen lang sein und muss aus Buchstaben, Zahlen und Bindestriche bestehen." />
+              <Message Id="%AID%_M-1100002" Name="InvalidMacAddress" Text="Die MAC-Adresse muss im Format XX:XX:XX:XX:XX:XX und hexadezimal eingegeben werden." />
+            </Messages>
           </Static>
           <Dynamic>
             <ChannelIndependentBlock>
               <ParameterBlock Id="%AID%_PB-nnn" Name="Network" Text="Netzwerk" Icon="ethernet" HelpContext="NET-Info">
-                <ParameterSeparator Id="%AID%_PS-nnn" Text="Hostname" UIHint="Headline" />
-                  <ParameterRefRef RefId="%AID%_UP-%TT%00001_R-%TT%0000101" IndentLevel="1" />
-                  <choose ParamRefId="%AID%_UP-%TT%00001_R-%TT%0000101">
-                    <when test="1">
-                      <ParameterRefRef RefId="%AID%_UP-%TT%00010_R-%TT%0001001" />
-                    </when>
-                  </choose>
-
-                <ParameterSeparator Id="%AID%_PS-nnn" Text="Der Hostname wir standardmäßig aus &quot;OpenKNX-&quot; und der Seriennummer gebildet (OpenKNX-XXXXXXXX). Dieser kann auf Wunsch angepasst werden. Hierbei gelten die üblichen Limitierungen sowie eine Länge von 24 Zeichen." UIHint="Information" />
-
-
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="IP-Adresse" UIHint="Headline" />
                 <ParameterRefRef RefId="%AID%_P-%TT%00100_R-%TT%0010001" />
                 <choose ParamRefId="%AID%_P-%TT%00100_R-%TT%0010001">
@@ -152,6 +188,31 @@
                     </ParameterBlock>
                   </when>
               </choose> -->
+
+                <ParameterSeparator Id="%AID%_PS-nnn" Text="Erweiterte Einstellung" UIHint="Headline" />
+                <ParameterRefRef RefId="%AID%_UP-%TT%00001_R-%TT%0000101" IndentLevel="1" />
+                <choose ParamRefId="%AID%_UP-%TT%00001_R-%TT%0000101">
+                  <when test="1">
+                    <ParameterRefRef RefId="%AID%_P-%TT%00010_R-%TT%0001001" IndentLevel="2" />
+                  </when>
+                </choose>
+
+                <ParameterRefRef RefId="%AID%_UP-%TT%00003_R-%TT%0000301" IndentLevel="1" />
+                <choose ParamRefId="%AID%_UP-%TT%00003_R-%TT%0000301">
+                  <when test="1">
+                    <ParameterRefRef RefId="%AID%_P-%TT%00051_R-%TT%0005101" IndentLevel="2" />
+                  </when>
+                </choose>
+
+                <ParameterRefRef RefId="%AID%_P-%TT%00102_R-%TT%0010201" />
+                <choose ParamRefId="%AID%_P-%TT%00102_R-%TT%0010201">
+                  <when test="!=%NET_LanMode%">
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00052_R-%TT%0005201" IndentLevel="1" />
+                  </when>
+                </choose>
+
+                <ParameterSeparator Id="%AID%_PS-nnn" Text="Standardmäßig werden aus der Seriennummer der Hostname (OpenKNX-XXXXXXXX), sowie die Mac-Adresse (5E:84:XX:XX:XX:XX) gebaut. Diese können hier angepasst werden." UIHint="Information" />
+
               </ParameterBlock>
             </ChannelIndependentBlock>
           </Dynamic>
