@@ -415,6 +415,12 @@ void NetworkModule::checkLinkStatus()
     _lastLinkCheck = millis();
 
     if (_currentLinkState) checkIpStatus();
+
+    // set network bit for heartbeat
+    if (established())
+        openknx.common.extendedHeartbeatValue |= 0b10000000;
+    else
+        openknx.common.extendedHeartbeatValue &= 0b01111111;
 }
 
 void NetworkModule::loop(bool configured)
