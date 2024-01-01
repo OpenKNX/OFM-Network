@@ -31,7 +31,7 @@
               <ParameterType Id="%AID%_PT-GatewayAddress" Name="GatewayAddress">
                 <TypeIPAddress AddressType="GatewayAddress" />
               </ParameterType>
-              <ParameterType Id="%AID%_PT-Hostname" Name="Hostname" ValidationErrorRef="%AID%_M-1100001">
+              <ParameterType Id="%AID%_PT-Hostname" Name="Hostname" ValidationErrorRef="%AID%_M-%TT%00001">
                 <TypeText SizeInBit="192" Pattern="^[A-Za-z](?:[A-Za-z0-9\-]*[A-Za-z0-9])*$"/>
               </ParameterType>
               <ParameterType Id="%AID%_PT-WifiSSID" Name="WifiSSID">
@@ -40,7 +40,7 @@
               <ParameterType Id="%AID%_PT-WifiPassword" Name="WifiPassword">
                 <TypeText SizeInBit="504" />
               </ParameterType>
-              <ParameterType Id="%AID%_PT-MacAddress" Name="MacAddress" ValidationErrorRef="%AID%_M-1100002">
+              <ParameterType Id="%AID%_PT-MacAddress" Name="MacAddress" ValidationErrorRef="%AID%_M-%TT%00002">
                 <TypeText SizeInBit="136" Pattern="^(?:[0-9A-Fa-f]{2}:){5}(?:[0-9A-Fa-f]{2})$" />
               </ParameterType>
               <ParameterType Id="%AID%_PT-LanMode" Name="LanMode">
@@ -130,8 +130,8 @@
             <ComObjectRefs>
             </ComObjectRefs>
             <Messages>
-              <Message Id="%AID%_M-1100001" Name="InvalidHostName" Text="Darf nur 24 Zeichen lang sein und muss aus Buchstaben, Zahlen und Bindestriche bestehen." />
-              <Message Id="%AID%_M-1100002" Name="InvalidMacAddress" Text="Die MAC-Adresse muss im Format XX:XX:XX:XX:XX:XX und hexadezimal eingegeben werden." />
+              <Message Id="%AID%_M-%TT%00001" Name="InvalidHostName" Text="Darf nur 24 Zeichen lang sein und muss aus Buchstaben, Zahlen und Bindestriche bestehen." />
+              <Message Id="%AID%_M-%TT%00002" Name="InvalidMacAddress" Text="Die MAC-Adresse muss im Format XX:XX:XX:XX:XX:XX und hexadezimal eingegeben werden." />
             </Messages>
           </Static>
           <Dynamic>
