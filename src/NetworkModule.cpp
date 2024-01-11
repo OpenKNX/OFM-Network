@@ -3,11 +3,6 @@
 #define MDNS_DEBUG_PORT Serial
 #define OPENKNX_MDNS_FULL
 
-#ifdef KNX_IP_WIFI
-    // TODO WLAN
-    #pragma error "Implementation for WiFi missing"
-#endif
-
 #ifdef KNX_IP_GENERIC
     #include <Ethernet_Generic.h>
     #include <MDNS_Generic.h>
@@ -25,6 +20,7 @@ WiFiUDP Udp;
     #define ParamNET_mDNS true
 #endif
 
+// TODO: Build fallback for cyw43_hal_generate_laa_mac to generate 5E:84:XX:XX:XX:XX on ESP
 extern "C" void cyw43_hal_generate_laa_mac(__unused int idx, uint8_t buf[6]);
 
 // Give your Module a name
@@ -164,6 +160,9 @@ void NetworkModule::prepareSettings()
 
 void NetworkModule::init()
 {
+    logInfoP("ParamNET_NetworkType: %i", ParamNET_NetworkType);
+    if (ParamNET_NetworkType == 0) return;
+
     logInfoP("Init IP Stack");
     logIndentUp();
 
@@ -171,7 +170,11 @@ void NetworkModule::init()
     prepareSettings();
 
 #if defined(KNX_IP_W5500)
-    // TODO: ParamNET_LanMode
+
+    if (ParamNET_NetworkType != 1) {
+        delay(5000);
+        logErrorP("The settings do not match this hardware...");
+    }
 
     if (_useStaticIP)
     {
@@ -204,6 +207,11 @@ void NetworkModule::init()
         openknx.hardware.fatalError(7, "Error communicating with W5500 Ethernet chip");
     }
 #elif defined(KNX_IP_WIFI)
+    if (ParamNET_NetworkType != 2) {
+        delay(5000);
+        logErrorP("The settings do not match this hardware...");
+    }
+
     if (_useStaticIP)
     {
         logInfoP("Using static IP");
@@ -222,6 +230,11 @@ void NetworkModule::init()
 
     KNX_NETIF.begin((const char *)NET_WifiSSID, (const char *)NET_WifiSSID);
 #elif defined(KNX_IP_GENERIC)
+    if (ParamNET_NetworkType != 1) {
+        delay(5000);
+        logErrorP("The settings do not match this hardware...");
+    }
+
     logInfoP("Hostname: %s", _hostName);
     KNX_NETIF.setHostname(_hostName);
 
@@ -300,6 +313,8 @@ void NetworkModule::init()
 
 void NetworkModule::setup(bool configured)
 {
+    if (ParamNET_NetworkType == 0) return;
+
 #ifndef ARDUINO_ARCH_ESP32
     openknxUsbExchangeModule.onLoad("Network.txt", [this](UsbExchangeFile *file) { this->fillNetworkFile(file); });
 #endif
@@ -425,6 +440,7 @@ void NetworkModule::checkLinkStatus()
 
 void NetworkModule::loop(bool configured)
 {
+    if (ParamNET_NetworkType == 0) return;
     if (_powerSave) return;
     checkLinkStatus();
 

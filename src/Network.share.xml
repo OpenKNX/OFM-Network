@@ -1,9 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <?xml-model href="../../Organization/knxprod-support/knx_project_20/knx-editor.xsd" type="application/xml" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <KNX xmlns:op="http://github.com/OpenKNX/OpenKNXproducer" xmlns="http://knx.org/xml/project/20" CreatedBy="KNX MT" ToolVersion="5.1.255.16695">
+  <!-- Enable IPTool of ETS. This hide ip settings in network tab -->
   <op:config name="%NET_IPConfigTool%" value="0" />
-  <op:config name="%NET_WifiConfig%" value="0" />
-  <op:config name="%NET_LanMode%" value="0" />
+
+  <!-- 
+    0 = User select network adapter
+    1 = Hide select -> Use LAN
+    2 = Hide select -> Use WLAN
+  -->
+  <op:config name="%NET_NetworkVariant%" value="0" />
+
+  <!-- 
+    0 = Disabled / Not allowed - only reserved
+    1 = LAN
+    2 = WLAN
+  -->
+  <op:config name="%NET_NetworkPreselect%" value="1" />
+
   <ManufacturerData>
     <Manufacturer>
       <ApplicationPrograms>
@@ -52,10 +66,32 @@
                   <Enumeration Text="10 MBit/s Halb-Duplex" Value="4" Id="%ENID%" />
                 </TypeRestriction>
               </ParameterType>
+              <ParameterType Id="%AID%_PT-NetworkType" Name="NetworkType">
+                <TypeRestriction Base="Value" SizeInBit="4">
+                  <Enumeration Text="Disabled" Value="0" Id="%ENID%" />
+                  <Enumeration Text="LAN" Value="1" Id="%ENID%" />
+                  <Enumeration Text="WLAN" Value="2" Id="%ENID%" />
+                </TypeRestriction>
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-NetworkTypeSelect" Name="NetworkTypeSelect">
+                <!-- 0 is reserved for disabled -->
+                <TypeRestriction Base="Value" SizeInBit="4">
+                  <Enumeration Text="LAN" Value="1" Id="%ENID%" />
+                  <Enumeration Text="WLAN" Value="2" Id="%ENID%" />
+                </TypeRestriction>
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-NetworkVariant" Name="NetworkVariant">
+                <TypeNumber SizeInBit="8" Type="unsignedInt" minInclusive="%NET_NetworkVariant%" maxInclusive="%NET_NetworkVariant%" />
+              </ParameterType>
             </ParameterTypes>
             <Parameters>
-              <!-- IP Config-->
-              <Parameter Id="%AID%_P-%TT%00100" Name="SelectIPConfig" ParameterType="%AID%_PT-CheckBox"                  Text="" Value="0" Access="None"/>
+              <!-- helper to check against a certain value in the case of a choose -->
+              <Parameter Id="%AID%_P-%TT%01000" Name="SelectHelper"          ParameterType="%AID%_PT-ValueDpt5"         Text=""        Value="0" Access="None" />
+
+              <Parameter Id="%AID%_P-%TT%00061" Name="NetworkTypeSelect"     ParameterType="%AID%_PT-NetworkTypeSelect" Text="Adapter" Value="%NET_NetworkPreselect%" />
+              <Parameter Id="%AID%_P-%TT%00062" Name="NetworkVariant"        ParameterType="%AID%_PT-NetworkVariant"    Text=""        Value="%NET_NetworkVariant%" Access="None" />
+
+              <!-- IP Config -->
               <Union SizeInBit="128"><!-- 16bytes-->
                 <Memory CodeSegment="%MID%" Offset="0" BitOffset="0" />
                 <Parameter Id="%AID%_UP-%TT%00011" Name="HostAddress"        ParameterType="%AID%_PT-HostAddress"        Offset="0"  BitOffset="0" Text="IP-Adresse" Value="192.168.0.1" />
@@ -73,42 +109,52 @@
                 <Parameter Id="%AID%_UP-%TT%00042" Name="WifiPassword"       ParameterType="%AID%_PT-WifiPassword"       Offset="32"  BitOffset="0" Text="Passswort" Value="" />
               </Union>
 
-              <!-- Services -->
+              <!-- 1bit options -->
               <Union SizeInBit="8">
                 <Memory CodeSegment="%MID%" Offset="111" BitOffset="0" />
                 <Parameter Id="%AID%_UP-%TT%00001" Name="CustomHostname"     ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="0" Text="Hostname anpassen" Value="0" />
                 <Parameter Id="%AID%_UP-%TT%00002" Name="StaticIP"           ParameterType="%AID%_PT-DHCP"               Offset="0" BitOffset="1" Text="DHCP" Value="0" />
                 <Parameter Id="%AID%_UP-%TT%00003" Name="CustomMacAddress"   ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="2" Text="MAC-Adresse anpassen" Value="0" />
-                <!-- 2bit free-->
-                <Parameter Id="%AID%_UP-%TT%00031" Name="mDNS"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="5" Text="mDNS" Value="1" /> 
-                <Parameter Id="%AID%_UP-%TT%00032" Name="HTTP"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="6" Text="Weberver" Value="1" /> 
-                <Parameter Id="%AID%_UP-%TT%00033" Name="NTP"                ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="7" Text="Zeitgeber (NTP)" Value="0" /> 
+                <!-- 5 bits free -->
+              </Union>
+
+              <!-- Services -->
+              <Union SizeInBit="8">
+                <Memory CodeSegment="%MID%" Offset="112" BitOffset="0" />
+                <Parameter Id="%AID%_UP-%TT%00031" Name="mDNS"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="0" Text="mDNS" Value="1" /> 
+                <Parameter Id="%AID%_UP-%TT%00032" Name="HTTP"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="1" Text="Weberver" Value="1" /> 
+                <Parameter Id="%AID%_UP-%TT%00033" Name="NTP"                ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="2" Text="Zeitgeber (NTP)" Value="0" /> 
+                <!-- 5 bits free -->
               </Union>
 
               <!-- Hostname -->
               <Parameter Id="%AID%_P-%TT%00010" Name="HostName"              ParameterType="%AID%_PT-Hostname"           Text="Hostname" Value="" >
-                <Memory CodeSegment="%MID%" Offset="112" BitOffset="0" />
+                <Memory CodeSegment="%MID%" Offset="113" BitOffset="0" />
                 <!-- 192bits / 24bytes-->
               </Parameter>
 
               <!-- MacAddress -->
               <Parameter Id="%AID%_P-%TT%00051" Name="MacAddress"            ParameterType="%AID%_PT-MacAddress"         Text="MAC-Adresse" Value="" >
-                <Memory CodeSegment="%MID%" Offset="136" BitOffset="0" />
+                <Memory CodeSegment="%MID%" Offset="137" BitOffset="0" />
                 <!-- 136bits / 17bytes-->
               </Parameter>
 
-              <!-- LanMode -->
-              <Parameter Id="%AID%_P-%TT%00102" Name="SelectLanMode"         ParameterType="%AID%_PT-CheckBox"           Text=""           Value="0" Access="None"/>
-              <Union SizeInBit="4">
-                <Memory CodeSegment="%MID%" Offset="153" BitOffset="0" />
-                <Parameter Id="%AID%_UP-%TT%00053" Name="LanModeInactive"    ParameterType="%AID%_PT-LanMode"            Offset="0" BitOffset="0" Text="LAN-Modus"  Value="0" Access="None" DefaultUnionParameter="true"/>
-                <Parameter Id="%AID%_UP-%TT%00052" Name="LanMode"            ParameterType="%AID%_PT-LanMode"            Offset="0" BitOffset="0" Text="LAN-Modus"  Value="0" />
+              <!-- Type & Mode -->
+              <Union SizeInBit="8">
+                <Memory CodeSegment="%MID%" Offset="154" BitOffset="0" />
+                <Parameter Id="%AID%_UP-%TT%00052" Name="LanMode"            ParameterType="%AID%_PT-LanMode"       Offset="0" BitOffset="0" Text="LAN-Modus" Value="0" />
+                <Parameter Id="%AID%_UP-%TT%00060" Name="NetworkType"        ParameterType="%AID%_PT-NetworkType"   Offset="0" BitOffset="4" Text="Typ" Value="0" Access="None" />
               </Union>
+
+              <Union SizeInBit="128">
+                <Memory CodeSegment="%MID%" Offset="155" BitOffset="0" />
+                <!-- Set dummy for last Byte to reserve Space -->
+                <Parameter Id="%AID%_UP-%TT%00099" Name="Dummy"  ParameterType="%AID%_PT-ValueDpt5" Offset="15" BitOffset="0" Text="" Value="0" />
+              </Union>
+              
             </Parameters>
             <ParameterRefs>
-              <ParameterRef Id="%AID%_P-%TT%00100_R-%TT%0010001" RefId="%AID%_P-%TT%00100" />
-              <ParameterRef Id="%AID%_P-%TT%00101_R-%TT%0010101" RefId="%AID%_P-%TT%00101" />
-              <ParameterRef Id="%AID%_P-%TT%00102_R-%TT%0010201" RefId="%AID%_P-%TT%00102" />
+              <ParameterRef Id="%AID%_P-%TT%01000_R-%TT%0100000" RefId="%AID%_P-%TT%01000" />
               <ParameterRef Id="%AID%_UP-%TT%00001_R-%TT%0000101" RefId="%AID%_UP-%TT%00001" />
               <ParameterRef Id="%AID%_UP-%TT%00002_R-%TT%0000201" RefId="%AID%_UP-%TT%00002" />
               <ParameterRef Id="%AID%_UP-%TT%00003_R-%TT%0000301" RefId="%AID%_UP-%TT%00003" />
@@ -124,6 +170,11 @@
               <ParameterRef Id="%AID%_UP-%TT%00042_R-%TT%0004201" RefId="%AID%_UP-%TT%00042" />
               <ParameterRef Id="%AID%_P-%TT%00051_R-%TT%0005101" RefId="%AID%_P-%TT%00051" />
               <ParameterRef Id="%AID%_UP-%TT%00052_R-%TT%0005201" RefId="%AID%_UP-%TT%00052" />
+
+              <!-- NetworkType -->
+              <ParameterRef Id="%AID%_UP-%TT%00060_R-%TT%0006000" RefId="%AID%_UP-%TT%00060" /><!-- NetworkType / Hidden -->
+              <ParameterRef Id="%AID%_P-%TT%00061_R-%TT%0006100" RefId="%AID%_P-%TT%00061" /><!-- UserSelect / LAN -->
+              <ParameterRef Id="%AID%_P-%TT%00062_R-%TT%0006200" RefId="%AID%_P-%TT%00062" /><!-- NetworkVariant / Hidden -->
             </ParameterRefs>
             <ComObjectTable>
             </ComObjectTable>
@@ -137,11 +188,29 @@
           <Dynamic>
             <ChannelIndependentBlock>
               <ParameterBlock Id="%AID%_PB-nnn" Name="Network" Text="Netzwerk" Icon="ethernet" HelpContext="Empty">
-                <ParameterSeparator Id="%AID%_PS-nnn" Text="IP-Adresse" UIHint="Headline" />
-                <ParameterRefRef RefId="%AID%_P-%TT%00100_R-%TT%0010001" />
-                <choose ParamRefId="%AID%_P-%TT%00100_R-%TT%0010001">
+                <!-- Hidden -->
+                <ParameterRefRef RefId="%AID%_P-%TT%01000_R-%TT%0100000" />
+                <ParameterRefRef RefId="%AID%_UP-%TT%00060_R-%TT%0006000" />
+                <ParameterRefRef RefId="%AID%_P-%TT%00062_R-%TT%0006200" />
+
+                <ParameterSeparator Id="%AID%_PS-nnn" Text="Netzwerk" UIHint="Headline" />
+
+                <!-- NetworkType based on NetwortVariant config -->
+                <choose ParamRefId="%AID%_P-%TT%00062_R-%TT%0006200">
+                  <when test="0">
+                    <ParameterRefRef RefId="%AID%_P-%TT%00061_R-%TT%0006100" IndentLevel="1" HelpContext="NET-NetworkType" />
+                    <choose ParamRefId="%AID%_P-%TT%00061_R-%TT%0006100">
+                      <when test="1"><Assign TargetParamRefRef="%AID%_UP-%TT%00060_R-%TT%0006000" Value="1"/></when>
+                      <when test="2"><Assign TargetParamRefRef="%AID%_UP-%TT%00060_R-%TT%0006000" Value="2"/></when>
+                    </choose>
+                  </when>
+                  <when test="1"><Assign TargetParamRefRef="%AID%_UP-%TT%00060_R-%TT%0006000" Value="1"/></when>
+                  <when test="2"><Assign TargetParamRefRef="%AID%_UP-%TT%00060_R-%TT%0006000" Value="2"/></when>
+                </choose>
+
+                <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000"><!-- Static 0 -->
                   <when test="%NET_IPConfigTool%"> <!-- default -->
-                    <ParameterRefRef RefId="%AID%_UP-%TT%00002_R-%TT%0000201" HelpContext="NET-IpAddress" />
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00002_R-%TT%0000201" IndentLevel="1" HelpContext="NET-IpAddress" />
                     <choose ParamRefId="%AID%_UP-%TT%00002_R-%TT%0000201">
                       <when test="1">
                         <ParameterRefRef RefId="%AID%_UP-%TT%00011_R-%TT%0001101" IndentLevel="1" HelpContext="NET-IpAddress" />
@@ -156,9 +225,8 @@
                   </when>
                 </choose>
 
-                <ParameterRefRef RefId="%AID%_P-%TT%00101_R-%TT%0010101" />
-                <choose ParamRefId="%AID%_P-%TT%00101_R-%TT%0010101">
-                  <when test="!=%NET_WifiConfig%">
+                <choose ParamRefId="%AID%_UP-%TT%00060_R-%TT%0006000">
+                  <when test="2">
                     <ParameterSeparator Id="%AID%_PS-nnn" Text="WLAN" UIHint="Headline" />
                     <ParameterRefRef RefId="%AID%_UP-%TT%00041_R-%TT%0004101" IndentLevel="1" HelpContext="NET-Wifi" />
                     <ParameterRefRef RefId="%AID%_UP-%TT%00042_R-%TT%0004201" IndentLevel="1" HelpContext="NET-Wifi" />
@@ -204,14 +272,13 @@
                   </when>
                 </choose>
 
-                <ParameterRefRef RefId="%AID%_P-%TT%00102_R-%TT%0010201" />
-                <choose ParamRefId="%AID%_P-%TT%00102_R-%TT%0010201">
-                  <when test="!=%NET_LanMode%">
+                <choose ParamRefId="%AID%_UP-%TT%00060_R-%TT%0006000">
+                  <when test="1">
                     <ParameterRefRef RefId="%AID%_UP-%TT%00052_R-%TT%0005201" IndentLevel="1" HelpContext="NET-LanMode" />
                   </when>
                 </choose>
 
-                <ParameterSeparator Id="%AID%_PS-nnn" Text="Standardmäßig werden aus der Seriennummer der Hostname (OpenKNX-XXXXXXXX), sowie die Mac-Adresse (5E:84:XX:XX:XX:XX) gebaut. Diese können hier angepasst werden." UIHint="Information" />
+                <ParameterSeparator Id="%AID%_PS-nnn" Text="Standardmäßig werden aus der Seriennummer der Hostname (OpenKNX-XXXXXXXX), sowie die MAC-Adresse (5E:84:XX:XX:XX:XX) gebaut. Diese können hier angepasst werden." UIHint="Information" />
 
               </ParameterBlock>
             </ChannelIndependentBlock>
