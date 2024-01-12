@@ -18,6 +18,12 @@
   -->
   <op:config name="%NET_NetworkPreselect%" value="1" />
 
+  <!--
+    Prepare: Not ready to use
+  -->
+  <op:config name="%NET_ServiceHTTP%" value="0" />
+  <op:config name="%NET_ServiceNTP%" value="0" />
+
   <ManufacturerData>
     <Manufacturer>
       <ApplicationPrograms>
@@ -60,10 +66,10 @@
               <ParameterType Id="%AID%_PT-LanMode" Name="LanMode">
                 <TypeRestriction Base="Value" SizeInBit="4">
                   <Enumeration Text="Automatisch" Value="0" Id="%ENID%" />
-                  <Enumeration Text="100 MBit/s Voll-Duplex" Value="1" Id="%ENID%" />
-                  <Enumeration Text="100 MBit/s Halb-Duplex" Value="2" Id="%ENID%" />
-                  <Enumeration Text="10 MBit/s Voll-Duplex" Value="3" Id="%ENID%" />
-                  <Enumeration Text="10 MBit/s Halb-Duplex" Value="4" Id="%ENID%" />
+                  <Enumeration Text="10 MBit/s (Stromsparender)" Value="3" Id="%ENID%" />
+                  <Enumeration Text="100 MBit/s" Value="1" Id="%ENID%" />
+                  <!-- <Enumeration Text="100 MBit/s Halb-Duplex" Value="2" Id="%ENID%" /> -->
+                  <!-- <Enumeration Text="10 MBit/s Halb-Duplex" Value="4" Id="%ENID%" /> -->
                 </TypeRestriction>
               </ParameterType>
               <ParameterType Id="%AID%_PT-NetworkType" Name="NetworkType">
@@ -234,28 +240,39 @@
                 </choose>
 
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="Services" UIHint="Headline" />
-                <ParameterRefRef RefId="%AID%_UP-%TT%00031_R-%TT%0003101" HelpContext="NET-MDNS" IndentLevel="1" />
-                <!-- <ParameterRefRef RefId="%AID%_UP-%TT%00032_R-%TT%0003201" />
-                <choose ParamRefId="%AID%_UP-%TT%00032_R-%TT%0003201">
-                  <when test="1">
-                    <ParameterBlock Id="%AID%_PB-nnn" Name="HTTP" Text="Webserver" Icon="web" HelpContext="Empty">
-                      <ParameterSeparator Id="%AID%_PS-nnn" Text="Webservereinstellung" UIHint="Headline" IndentLevel="1" />
-                    </ParameterBlock>
+                <ParameterRefRef RefId="%AID%_UP-%TT%00031_R-%TT%0003101" IndentLevel="1" HelpContext="NET-MDNS" />
+                
+                <!-- HTTP -->
+                <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000">
+                  <when test="!=%NET_ServiceHTTP%">
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00032_R-%TT%0003201" IndentLevel="1" />
+                    <choose ParamRefId="%AID%_UP-%TT%00032_R-%TT%0003201">
+                      <when test="1">
+                        <ParameterBlock Id="%AID%_PB-nnn" Name="HTTP" Text="Webserver" Icon="web" HelpContext="Empty">
+                          <ParameterSeparator Id="%AID%_PS-nnn" Text="Webservereinstellung" UIHint="Headline" />
+                        </ParameterBlock>
+                      </when>
+                    </choose>
                   </when>
-              </choose>
+                </choose>
 
-                <ParameterRefRef RefId="%AID%_UP-%TT%00033_R-%TT%0003301" />
-                <choose ParamRefId="%AID%_UP-%TT%00033_R-%TT%0003301">
-                  <when test="0">
-                    <Assign TargetParamRefRef="%AID%_P-1000010_R-100001001" Value="0" />
+                <!-- NTP -->
+                <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000">
+                  <when test="!=%NET_ServiceNTP%">
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00033_R-%TT%0003301" IndentLevel="1" />
+                    <choose ParamRefId="%AID%_UP-%TT%00033_R-%TT%0003301">
+                      <when test="0">
+                        <Assign TargetParamRefRef="%AID%_P-1000010_R-100001001" Value="0" />
+                      </when>
+                      <when test="1">
+                        <Assign TargetParamRefRef="%AID%_P-1000010_R-100001001" Value="1" />
+                        <ParameterBlock Id="%AID%_PB-nnn" Name="NTP" Text="Zeitgeber" Icon="clock-outline" HelpContext="Empty">
+                          <ParameterSeparator Id="%AID%_PS-nnn" Text="Zeitgeber (NTP)" UIHint="Headline" />
+                        </ParameterBlock>
+                      </when>
+                    </choose>
                   </when>
-                  <when test="1">
-                    <Assign TargetParamRefRef="%AID%_P-1000010_R-100001001" Value="1" />
-                    <ParameterBlock Id="%AID%_PB-nnn" Name="NTP" Text="Zeitgeber" Icon="clock-outline" HelpContext="Empty" IndentLevel="1">
-                      <ParameterSeparator Id="%AID%_PS-nnn" Text="Zeitgeber (NTP)" UIHint="Headline" />
-                    </ParameterBlock>
-                  </when>
-              </choose> -->
+                </choose>
 
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="Erweiterte Einstellung" UIHint="Headline" />
                 <ParameterRefRef RefId="%AID%_UP-%TT%00001_R-%TT%0000101" IndentLevel="1" HelpContext="NET-Hostname" />
