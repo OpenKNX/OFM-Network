@@ -158,7 +158,9 @@ void NetworkModule::loadSettings()
         _useMDNS = ParamNET_mDNS;
 #endif
 
+        uint32_t start = millis();
         writeToFlash();
+        logTraceP("Write network settings (%ims)", millis() - start);
     }
     else
     {
@@ -697,6 +699,7 @@ bool NetworkModule::restorePower()
 void NetworkModule::writeToFlash()
 {
     uint16_t relAddress = 0;
+    relAddress = _flash.writeInt(relAddress, OPENKNX_NETWORK_MAGIC);
     relAddress = _flash.writeByte(relAddress, 1); // version
 
     uint8_t options = 0;
@@ -723,30 +726,32 @@ void NetworkModule::writeToFlash()
 #endif
 
     _flash.commit();
-    logDebugP("relAddress: %i", relAddress);
 }
 
 void NetworkModule::readFromFlash()
 {
-    uint8_t version = _flash.readByte(0);
+    const uint32_t magic = _flash.readInt(0);
+    if (magic != OPENKNX_NETWORK_MAGIC) return;
+
+    const uint8_t version = _flash.readByte(4);
     if (version != 1) return;
 
     logDebugP("Read ip settings from flash fallback (knx is unconfigured)");
     logIndentUp();
 
-    uint32_t options = _flash.readByte(1);
+    uint32_t options = _flash.readByte(5);
     _useStaticIP = options & 0x01;
     _useMDNS = (options >> 1) & 0x01;
 
-    _staticLocalIP = IPAddress(_flash.readInt(2));
-    _staticSubnetMask = IPAddress(_flash.readInt(6));
-    _staticGatewayIP = IPAddress(_flash.readInt(10));
-    _staticNameServerIP = IPAddress(_flash.readInt(14));
+    _staticLocalIP = IPAddress(_flash.readInt(6));
+    _staticSubnetMask = IPAddress(_flash.readInt(10));
+    _staticGatewayIP = IPAddress(_flash.readInt(14));
+    _staticNameServerIP = IPAddress(_flash.readInt(18));
     // Reserved NameServer
-    _flash.read(22, (uint8_t *)_hostName, 24);
-    _flash.read(46, _mac, 6);
+    _flash.read(26, (uint8_t *)_hostName, 24);
+    _flash.read(50, _mac, 6);
 
-    uint8_t types = _flash.readByte(52);
+    uint8_t types = _flash.readByte(56);
     _networkType = types & 0x0F;
     _lanMode = (types >> 4) & 0xF0;
 
