@@ -21,7 +21,7 @@ WiFiUDP Udp;
 #endif
 
 // TODO: Build fallback for cyw43_hal_generate_laa_mac to generate 5E:84:XX:XX:XX:XX on ESP
-extern "C" void cyw43_hal_generate_laa_mac(__unused int idx, uint8_t buf[6]);
+// extern "C" void cyw43_hal_generate_laa_mac(__unused int idx, uint8_t buf[6]);
 
 // Give your Module a name
 // it will be displayed when you use the method log("Hello")
@@ -40,6 +40,8 @@ const std::string NetworkModule::version()
 
 void NetworkModule::initPhy()
 {
+    logDebugP("Initialize network adapter");
+    logIndentUp();
 #if defined(ETH_SPI_INTERFACE)
     // initalize SPI
     ETH_SPI_INTERFACE.setRX(PIN_ETH_MISO);
@@ -56,21 +58,57 @@ void NetworkModule::initPhy()
     #endif
     KNX_NETIF.init(PIN_ETH_SS, &ETH_SPI_INTERFACE);
 #endif
+
+#if defined(KNX_IP_W5500) or defined(KNX_IP_GENERIC)
+    if (KNX_NETIF.hardwareStatus() == EthernetNoHardware)
+    {
+        openknx.hardware.fatalError(7, "Error communicating with Ethernet chip");
+    }
+    else if (KNX_NETIF.hardwareStatus() == EthernetW5100)
+    {
+        logDebugP("W5100 Ethernet controller detected.");
+    }
+    else if (KNX_NETIF.hardwareStatus() == EthernetW5200)
+    {
+        logDebugP("W5200 Ethernet controller detected.");
+    }
+    else if (KNX_NETIF.hardwareStatus() == EthernetW5500)
+    {
+        logDebugP("W5500 Ethernet controller detected.");
+    }
+    else
+    {
+        openknx.hardware.fatalError(7, "Unsupported Ethernet chip");
+    }
+#endif
+    logIndentDown();
 }
 
-void NetworkModule::prepareSettings()
+void NetworkModule::loadSettings()
 {
-    // build hostname
-    _hostName = (char *)malloc(25);
-    memset(_hostName, 0, 25);
+    logDebugP("Load settings");
+    logIndentUp();
+
+    // build default hostname
+    // _hostName = (char *)malloc(25);
+    // memset(_hostName, 0, 25);
     memcpy(_hostName, "OpenKNX-", 8);
     memcpy(_hostName + 8, openknx.info.humanSerialNumber().c_str() + 5, 8);
+    logTraceP("Default hostname: %s", _hostName);
 
-    // build mac
-    cyw43_hal_generate_laa_mac(0, _mac);
+    // build default mac
+    // cyw43_hal_generate_laa_mac(0, _mac);
+    // 5E:84:03:2D:0C:24
+    _mac[0] = 0x5e;
+    _mac[1] = 0x84;
+    uint32_t serial = htonl(openknx.info.serialNumber());
+    memcpy(_mac + 2, &serial, 4);
+
+    logDebugP("Default mac: %02X:%02X:%02X:%02X:%02X:%02X", _mac[0], _mac[1], _mac[2], _mac[3], _mac[4], _mac[5]);
 
     if (knx.configured())
     {
+        logDebugP("Read hostname & mac address from parameters");
         // custom hostname
 #ifdef ParamNET_CustomHostname
         if (ParamNET_CustomHostname)
@@ -94,6 +132,47 @@ void NetworkModule::prepareSettings()
             }
         }
 #endif
+
+#if !defined(ParamNET_HostAddress) || !defined(ParamNET_SubnetMask) || !defined(ParamNET_GatewayAddress) || !defined(ParamNET_NameserverAddress) || !defined(ParamNET_StaticIP) || defined(OPENKNX_NETWORK_USEIPPROP)
+
+        logTraceP("Read ip settings from properties");
+        _staticGatewayIP = GetIpProperty(PID_DEFAULT_GATEWAY);
+        _staticSubnetMask = GetIpProperty(PID_SUBNET_MASK);
+        _staticLocalIP = GetIpProperty(PID_IP_ADDRESS);
+        _useStaticIP = GetByteProperty(PID_IP_ASSIGNMENT_METHOD) == 1; // see 2.5.6 of 03_08_03
+#else
+        logTraceP("Read ip settings from parameters");
+        _staticLocalIP = htonl(ParamNET_HostAddress);
+        _staticSubnetMask = htonl(ParamNET_SubnetMask);
+        _staticGatewayIP = htonl(ParamNET_GatewayAddress);
+        _staticNameServerIP = htonl(ParamNET_NameserverAddress);
+        _useStaticIP = ParamNET_StaticIP;
+
+        memcpy(_wifiSSID, ParamNET_WifiSSID, 32);
+        memcpy(_wifiPassword, ParamNET_WifiPassword, 63);
+#endif
+    }
+    else
+    {
+        logTraceP("no ets configration found");
+
+        // PID_FRIENDLY_NAME is used to identify the device over Search Request from ETS. If not configured, PID_FRIENDLY_NAME is empty and so is the Name in the SearchReqest.
+        // set PID_FRIENDLY_NAME to the _hostname in this case, so "OpenKNX-XXXXXX" is display in the ETS
+        uint8_t NoOfElem = 30;
+        uint32_t length = 0;
+        uint8_t *friendlyName = new uint8_t[30];
+        memcpy(friendlyName, _hostName, 25);
+        knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, friendlyName, length);
+    }
+
+    if (_useStaticIP)
+    {
+        SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1);
+    }
+    else
+    {
+        SetByteProperty(PID_IP_CAPABILITIES, 6);              // AutoIP + DHCP
+        SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 2); // ToDo
     }
 
 #if defined(KNX_IP_GENERIC)
@@ -131,145 +210,90 @@ void NetworkModule::prepareSettings()
     #endif
 #endif
 
-    if (!knx.configured())
-    {
-        // PID_FRIENDLY_NAME is used to identify the device over Search Request from ETS. If not configured, PID_FRIENDLY_NAME is empty and so is the Name in the SearchReqest.
-        // set PID_FRIENDLY_NAME to the _hostname in this case, so "OpenKNX-XXXXXX" is display in the ETS
-        uint8_t NoOfElem = 30;
-        uint32_t length = 0;
-        uint8_t *friendlyName = new uint8_t[30];
-        memcpy(friendlyName, _hostName, 25);
-        knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, friendlyName, length);
-
-        return;
-    }
-
-#if !defined(ParamNET_HostAddress) || !defined(ParamNET_SubnetMask) || !defined(ParamNET_GatewayAddress) || !defined(ParamNET_NameserverAddress) || !defined(ParamNET_StaticIP) || defined(OPENKNX_NETWORK_USEIPPROP)
-    _staticGatewayIP = GetIpProperty(PID_DEFAULT_GATEWAY);
-    _staticSubnetMask = GetIpProperty(PID_SUBNET_MASK);
-    _staticLocalIP = GetIpProperty(PID_IP_ADDRESS);
-    _useStaticIP = GetByteProperty(PID_IP_ASSIGNMENT_METHOD) == 1; // see 2.5.6 of 03_08_03
-#else
-    _staticLocalIP = htonl(ParamNET_HostAddress);
-    _staticSubnetMask = htonl(ParamNET_SubnetMask);
-    _staticGatewayIP = htonl(ParamNET_GatewayAddress);
-    _staticNameServerIP = htonl(ParamNET_NameserverAddress);
-    _useStaticIP = ParamNET_StaticIP;
-#endif
+    logIndentDown();
 }
 
 void NetworkModule::init()
 {
-    logInfoP("ParamNET_NetworkType: %i", ParamNET_NetworkType);
-    if (ParamNET_NetworkType == 0) return;
-
-    logInfoP("Init IP Stack");
+    logInfoP("Initialize IP stack");
     logIndentUp();
-
     initPhy();
-    prepareSettings();
+    loadSettings();
+    initIp();
+    logIndentDown();
+}
 
-#if defined(KNX_IP_W5500)
+void NetworkModule::initIp()
+{
 
-    if (ParamNET_NetworkType != 1) {
-        delay(5000);
-        logErrorP("The settings do not match this hardware...");
-    }
+    // Hostname
+    logInfoP("Hostname: %s", _hostName);
+    #ifdef KNX_IP_GENERIC
+    KNX_NETIF.setHostname(_hostName);
+    #else
+    KNX_NETIF.hostname(_hostName);
+    #endif
 
     if (_useStaticIP)
     {
         logInfoP("Using static IP");
-        logIndentUp();
-        if (!KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP))
-        {
-            logErrorP("Invalid IP settings");
-        }
-        logIndentDown();
-        SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1);
     }
     else
     {
         logInfoP("Using DHCP");
-        SetByteProperty(PID_IP_CAPABILITIES, 6);              // AutoIP + DHCP
-        SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 2); // ToDo
     }
-
-    logInfoP("Hostname: %s", _hostName);
     logIndentUp();
-    if (!KNX_NETIF.hostname(_hostName))
+
+#if defined(KNX_IP_W5500)
+    if (_useStaticIP)
     {
-        logErrorP("Hostname not applied");
+        if (!KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP))
+        {
+            logErrorP("Invalid IP settings");
+        }
     }
-    logIndentDown();
 
     if (!KNX_NETIF.begin((const uint8_t *)_mac))
     {
         openknx.hardware.fatalError(7, "Error communicating with W5500 Ethernet chip");
     }
 #elif defined(KNX_IP_WIFI)
-    if (ParamNET_NetworkType != 2) {
-        delay(5000);
-        logErrorP("The settings do not match this hardware...");
-    }
-
     if (_useStaticIP)
     {
-        logInfoP("Using static IP");
         KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP);
-        SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1);
-    }
-    else
-    {
-        logInfoP("Using DHCP");
-        SetByteProperty(PID_IP_CAPABILITIES, 6);              // AutoIP + DHCP
-        SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 2); // ToDo
     }
 
-    logInfoP("Hostname: %s", _hostName);
-    KNX_NETIF.hostname(_hostName);
-
-    KNX_NETIF.begin((const char *)NET_WifiSSID, (const char *)NET_WifiSSID);
+    KNX_NETIF.begin((const char *)_wifiSSID, (const char *)_wifiPassword);
 #elif defined(KNX_IP_GENERIC)
-    if (ParamNET_NetworkType != 1) {
-        delay(5000);
-        logErrorP("The settings do not match this hardware...");
-    }
-
-    logInfoP("Hostname: %s", _hostName);
-    KNX_NETIF.setHostname(_hostName);
-
-    switch (ParamNET_LanMode)
+    // Lan mode only for w5500 available
+    if (KNX_NETIF.hardwareStatus() == EthernetW5500)
     {
-        case 1:
-            W5100.phyMode(FULL_DUPLEX_100);
-            break;
-        case 2:
-            W5100.phyMode(HALF_DUPLEX_100);
-            break;
-        case 3:
-            W5100.phyMode(FULL_DUPLEX_10);
-            break;
-        case 4:
-            W5100.phyMode(HALF_DUPLEX_10);
-            break;
+        switch (ParamNET_LanMode)
+        {
+            case 1:
+                W5100.phyMode(FULL_DUPLEX_100);
+                break;
+            case 2:
+                W5100.phyMode(HALF_DUPLEX_100);
+                break;
+            case 3:
+                W5100.phyMode(FULL_DUPLEX_10);
+                break;
+            case 4:
+                W5100.phyMode(HALF_DUPLEX_10);
+                break;
 
-        default:
-            break;
+            default:
+                break;
+        }
     }
 
     if (_useStaticIP)
     {
-        logInfoP("Using static IP");
-        SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1);
         KNX_NETIF.begin(_mac, _staticLocalIP, _staticNameServerIP, _staticGatewayIP, _staticSubnetMask);
     }
     else
     {
-        logInfoP("Using DHCP");
-        logIndentUp();
-        SetByteProperty(PID_IP_CAPABILITIES, 6);              // AutoIP + DHCP
-        SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 2); // ToDo
-
         // delay(1000);    // wait until
         // if(connected()/*KNX_NETIF.linkStatus() != EthernetLinkStatus::LinkOFF*/)
         // {
@@ -283,38 +307,23 @@ void NetworkModule::init()
         // }
         logInfoP("Request DHCP, please wait...");
         KNX_NETIF.begin(_mac, 5000);
-        if (localIP() == IPAddress()) logErrorP("Timeout");
-        logIndentDown();
+        if (localIP() == IPAddress())
+        {
+            logIndentUp();
+            logErrorP("Timeout");
+            logIndentDown();
+        }
     }
 
     // ToDo
-    // KNX_NETIF.linkStatus() != EthernetLinkStatus::LinkON
-
-    if (KNX_NETIF.hardwareStatus() == EthernetNoHardware)
-    {
-        openknx.hardware.fatalError(7, "Error communicating with Ethernet chip");
-    }
-    else if (KNX_NETIF.hardwareStatus() == EthernetW5100)
-    {
-        logDebugP("W5100 Ethernet controller detected.");
-    }
-    else if (KNX_NETIF.hardwareStatus() == EthernetW5200)
-    {
-        logDebugP("W5200 Ethernet controller detected.");
-    }
-    else if (KNX_NETIF.hardwareStatus() == EthernetW5500)
-    {
-        logDebugP("W5500 Ethernet controller detected.");
-    }
+    // KNX_NETIF.linkStatus() != EthernetLinkStatus::LinkON by dom
+    // KNX_NETIF.linkStatus() is here wrong!!!!!!! by msc
 #endif
-
     logIndentDown();
 }
 
 void NetworkModule::setup(bool configured)
 {
-    if (ParamNET_NetworkType == 0) return;
-
 #ifndef ARDUINO_ARCH_ESP32
     openknxUsbExchangeModule.onLoad("Network.txt", [this](UsbExchangeFile *file) { this->fillNetworkFile(file); });
 #endif
@@ -440,7 +449,6 @@ void NetworkModule::checkLinkStatus()
 
 void NetworkModule::loop(bool configured)
 {
-    if (ParamNET_NetworkType == 0) return;
     if (_powerSave) return;
     checkLinkStatus();
 
@@ -644,10 +652,10 @@ inline std::string NetworkModule::phyMode()
     switch (KNX_NETIF.duplex())
     {
         case 1:
-            mode.append(" (HDX)");
+            mode.append(" (Half duplex)");
             break;
         case 2:
-            mode.append(" (FDX)");
+            mode.append("");
             break;
     }
 

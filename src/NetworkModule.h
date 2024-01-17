@@ -62,17 +62,21 @@ class NetworkModule : public OpenKNX::Module
     IPAddress _staticSubnetMask;
     IPAddress _staticGatewayIP;
     IPAddress _staticNameServerIP;
+    
+    uint8_t _mac[6] = {};
+    char _hostName[25] = {};
+    char _wifiSSID[33] = {};
+    char _wifiPassword[64] = {};
 
-    char *_hostName = nullptr;
     char *_mDNSHttpServiceName = nullptr;
     char *_mDNSDeviceServiceName = nullptr;
     char *_mDNSDeviceServiceNameTXT = nullptr;
-    uint8_t _mac[6] = {};
     bool _currentLinkState = false;
     uint32_t _lastLinkCheck = false;
 
     void initPhy();
-    void prepareSettings();
+    void initIp();
+    void loadSettings();
     void checkLinkStatus();
     void checkIpStatus();
     void loadCallbacks(bool state);
