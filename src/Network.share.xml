@@ -100,10 +100,10 @@
               <!-- IP Config -->
               <Union SizeInBit="128"><!-- 16bytes-->
                 <Memory CodeSegment="%MID%" Offset="0" BitOffset="0" />
-                <Parameter Id="%AID%_UP-%TT%00011" Name="HostAddress"        ParameterType="%AID%_PT-HostAddress"        Offset="0"  BitOffset="0" Text="IP-Adresse" Value="192.168.0.1" />
+                <Parameter Id="%AID%_UP-%TT%00011" Name="HostAddress"        ParameterType="%AID%_PT-HostAddress"        Offset="0"  BitOffset="0" Text="IP-Adresse" Value="192.168.178.2" />
                 <Parameter Id="%AID%_UP-%TT%00012" Name="SubnetMask"         ParameterType="%AID%_PT-SubnetMask"         Offset="4"  BitOffset="0" Text="Subnetzsmaske" Value="255.255.255.0" />
-                <Parameter Id="%AID%_UP-%TT%00013" Name="GatewayAddress"     ParameterType="%AID%_PT-GatewayAddress"     Offset="8"  BitOffset="0" Text="Standardgateway" Value="192.168.0.254" />
-                <Parameter Id="%AID%_UP-%TT%00021" Name="NameserverAddress"  ParameterType="%AID%_PT-HostAddress"        Offset="12" BitOffset="0" Text="Nameserver" Value="192.168.0.254" />
+                <Parameter Id="%AID%_UP-%TT%00013" Name="GatewayAddress"     ParameterType="%AID%_PT-GatewayAddress"     Offset="8"  BitOffset="0" Text="Standardgateway" Value="192.168.178.1" />
+                <Parameter Id="%AID%_UP-%TT%00021" Name="NameserverAddress"  ParameterType="%AID%_PT-HostAddress"        Offset="12" BitOffset="0" Text="Nameserver" Value="192.168.178.1" />
                 <!-- Reserved for Nameserver 2 -->
               </Union>
 
