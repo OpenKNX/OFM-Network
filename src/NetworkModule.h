@@ -28,6 +28,12 @@ class NetworkModule : public OpenKNX::Module
     void init() override;
     void loop(bool configured) override;
     void setup(bool configured) override;
+    // uint16_t flashSize() override;
+    // void writeFlash() override;
+    // void readFlash(const bool configured, const uint8_t *data, const uint16_t size) override;
+    void writeToFlash();
+    void readFromFlash();
+
     void savePower() override;
     bool restorePower() override;
     void showInformations() override;
@@ -49,6 +55,8 @@ class NetworkModule : public OpenKNX::Module
     void macAddress(uint8_t *address);
 
   private:
+    OpenKNX::Flash::Driver _flash;
+
     IPAddress GetIpProperty(uint8_t PropertyId);
     void SetIpProperty(uint8_t PropertyId, IPAddress IPAddress);
     uint8_t GetByteProperty(uint8_t PropertyId);
@@ -56,17 +64,21 @@ class NetworkModule : public OpenKNX::Module
 
     bool _powerSave = false;
     bool _ipShown = false;
-    bool _useStaticIP = 0;
+    bool _useStaticIP = false;
+    bool _useMDNS = false;
     uint8_t _lanMode = 0;
+    uint8_t _networkType = 0;
     IPAddress _staticLocalIP;
     IPAddress _staticSubnetMask;
     IPAddress _staticGatewayIP;
     IPAddress _staticNameServerIP;
-    
+
     uint8_t _mac[6] = {};
     char _hostName[25] = {};
+#if defined(KNX_IP_WIFI) || true
     char _wifiSSID[33] = {};
     char _wifiPassword[64] = {};
+#endif
 
     char *_mDNSHttpServiceName = nullptr;
     char *_mDNSDeviceServiceName = nullptr;

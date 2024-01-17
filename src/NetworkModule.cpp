@@ -90,21 +90,17 @@ void NetworkModule::loadSettings()
     logIndentUp();
 
     // build default hostname
-    // _hostName = (char *)malloc(25);
-    // memset(_hostName, 0, 25);
     memcpy(_hostName, "OpenKNX-", 8);
     memcpy(_hostName + 8, openknx.info.humanSerialNumber().c_str() + 5, 8);
     logTraceP("Default hostname: %s", _hostName);
 
     // build default mac
-    // cyw43_hal_generate_laa_mac(0, _mac);
-    // 5E:84:03:2D:0C:24
     _mac[0] = 0x5e;
     _mac[1] = 0x84;
     uint32_t serial = htonl(openknx.info.serialNumber());
     memcpy(_mac + 2, &serial, 4);
 
-    logDebugP("Default mac: %02X:%02X:%02X:%02X:%02X:%02X", _mac[0], _mac[1], _mac[2], _mac[3], _mac[4], _mac[5]);
+    logTraceP("Default mac: %02X:%02X:%02X:%02X:%02X:%02X", _mac[0], _mac[1], _mac[2], _mac[3], _mac[4], _mac[5]);
 
     if (knx.configured())
     {
@@ -148,14 +144,24 @@ void NetworkModule::loadSettings()
         _staticNameServerIP = htonl(ParamNET_NameserverAddress);
         _useStaticIP = ParamNET_StaticIP;
 
+    #if defined(KNX_IP_WIFI) || true
         memcpy(_wifiSSID, ParamNET_WifiSSID, 32);
         memcpy(_wifiPassword, ParamNET_WifiPassword, 63);
+    #endif
+
 #endif
+
+        _lanMode = ParamNET_LanMode;
+        _networkType = ParamNET_NetworkType;
+
+#ifdef ParamNET_mDNS
+        _useMDNS = ParamNET_mDNS;
+#endif
+
+        writeToFlash();
     }
     else
     {
-        logTraceP("no ets configration found");
-
         // PID_FRIENDLY_NAME is used to identify the device over Search Request from ETS. If not configured, PID_FRIENDLY_NAME is empty and so is the Name in the SearchReqest.
         // set PID_FRIENDLY_NAME to the _hostname in this case, so "OpenKNX-XXXXXX" is display in the ETS
         uint8_t NoOfElem = 30;
@@ -163,6 +169,10 @@ void NetworkModule::loadSettings()
         uint8_t *friendlyName = new uint8_t[30];
         memcpy(friendlyName, _hostName, 25);
         knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, friendlyName, length);
+
+        readFromFlash();
+
+        // TODO WLAN Fallback!!!
     }
 
     if (_useStaticIP)
@@ -215,6 +225,12 @@ void NetworkModule::loadSettings()
 
 void NetworkModule::init()
 {
+#ifdef ARDUINO_ARCH_ESP32
+    _flash.init("network");
+#else
+    _flash.init("network", NETWORK_FLASH_OFFSET, NETWORK_FLASH_SIZE);
+#endif
+
     logInfoP("Initialize IP stack");
     logIndentUp();
     initPhy();
@@ -228,11 +244,11 @@ void NetworkModule::initIp()
 
     // Hostname
     logInfoP("Hostname: %s", _hostName);
-    #ifdef KNX_IP_GENERIC
+#ifdef KNX_IP_GENERIC
     KNX_NETIF.setHostname(_hostName);
-    #else
+#else
     KNX_NETIF.hostname(_hostName);
-    #endif
+#endif
 
     if (_useStaticIP)
     {
@@ -294,30 +310,15 @@ void NetworkModule::initIp()
     }
     else
     {
-        // delay(1000);    // wait until
-        // if(connected()/*KNX_NETIF.linkStatus() != EthernetLinkStatus::LinkOFF*/)
-        // {
-        //     logInfoP("Link, request DHCP");
-        //     KNX_NETIF.begin(_mac, 3000);
-        // }
-        // else
-        // {
-        //     logInfoP("No Link, skip DHCP");
-        //     KNX_NETIF.begin(_mac, 100); // does not work
-        // }
         logInfoP("Request DHCP, please wait...");
         KNX_NETIF.begin(_mac, 5000);
-        if (localIP() == IPAddress())
+        if (localIP() == IPAddress(0))
         {
             logIndentUp();
             logErrorP("Timeout");
             logIndentDown();
         }
     }
-
-    // ToDo
-    // KNX_NETIF.linkStatus() != EthernetLinkStatus::LinkON by dom
-    // KNX_NETIF.linkStatus() is here wrong!!!!!!! by msc
 #endif
     logIndentDown();
 }
@@ -618,7 +619,7 @@ inline bool NetworkModule::established()
 {
     if (!connected()) return false;
 
-    return localIP() != IPAddress();
+    return localIP() != IPAddress(0);
 }
 
 inline IPAddress NetworkModule::localIP()
@@ -688,6 +689,84 @@ bool NetworkModule::restorePower()
 {
     delay(1000);
     return false;
+}
+
+/*
+ * Write current network settings
+ */
+void NetworkModule::writeToFlash()
+{
+    uint16_t relAddress = 0;
+    relAddress = _flash.writeByte(relAddress, 1); // version
+
+    uint8_t options = 0;
+    options |= ((uint8_t)_useStaticIP) & 0b00000001;
+    options |= ((uint8_t)_useMDNS << 1) & 0b00000010;
+
+    relAddress = _flash.writeByte(relAddress, options);
+    relAddress = _flash.writeInt(relAddress, (uint32_t)_staticLocalIP);
+    relAddress = _flash.writeInt(relAddress, (uint32_t)_staticSubnetMask);
+    relAddress = _flash.writeInt(relAddress, (uint32_t)_staticGatewayIP);
+    relAddress = _flash.writeInt(relAddress, (uint32_t)_staticNameServerIP);
+    relAddress = _flash.writeInt(relAddress, 0xFFFFFFFF); // DNS2 reserved
+    relAddress = _flash.write(relAddress, (uint8_t *)_hostName, 24);
+    relAddress = _flash.write(relAddress, (uint8_t *)_mac, 6);
+
+    uint32_t types = 0;
+    types |= (_networkType) & 0x0F;
+    types |= (_lanMode << 4) & 0xF0;
+    relAddress = _flash.writeByte(relAddress, types);
+
+#if defined(KNX_IP_WIFI) || true
+    relAddress = _flash.write(100, (uint8_t *)_wifiSSID, 32);
+    relAddress = _flash.write(132, (uint8_t *)_wifiPassword, 32);
+#endif
+
+    _flash.commit();
+    logDebugP("relAddress: %i", relAddress);
+}
+
+void NetworkModule::readFromFlash()
+{
+    uint8_t version = _flash.readByte(0);
+    if (version != 1) return;
+
+    logDebugP("Read ip settings from flash fallback (knx is unconfigured)");
+    logIndentUp();
+
+    uint32_t options = _flash.readByte(1);
+    _useStaticIP = options & 0x01;
+    _useMDNS = (options >> 1) & 0x01;
+
+    _staticLocalIP = IPAddress(_flash.readInt(2));
+    _staticSubnetMask = IPAddress(_flash.readInt(6));
+    _staticGatewayIP = IPAddress(_flash.readInt(10));
+    _staticNameServerIP = IPAddress(_flash.readInt(14));
+    // Reserved NameServer
+    _flash.read(22, (uint8_t *)_hostName, 24);
+    _flash.read(46, _mac, 6);
+
+    uint8_t types = _flash.readByte(52);
+    _networkType = types & 0x0F;
+    _lanMode = (types >> 4) & 0xF0;
+
+#if defined(KNX_IP_WIFI) || true
+    _flash.read(100, (uint8_t *)_wifiSSID, 32);
+    _flash.read(132, (uint8_t *)_wifiPassword, 63);
+#endif
+
+    logTraceP("Version %i", version);
+    logTraceP("MDNS %i", _useMDNS);
+    logTraceP("Static %i", _useStaticIP);
+    logTraceP("LocalIP %s", _staticLocalIP.toString().c_str());
+    logTraceP("Subnet %s", _staticSubnetMask.toString().c_str());
+    logTraceP("Gateway %s", _staticGatewayIP.toString().c_str());
+    logTraceP("Nameserver %s", _staticNameServerIP.toString().c_str());
+    logTraceP("Hostname %s", _hostName);
+    logTraceP("MAC: %02X:%02X:%02X:%02X:%02X:%02X", _mac[0], _mac[1], _mac[2], _mac[3], _mac[4], _mac[5]);
+    logTraceP("NetworkType %i", _networkType);
+    logTraceP("LanMode %i", _lanMode);
+    logIndentDown();
 }
 
 NetworkModule openknxNetwork;
