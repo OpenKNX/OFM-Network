@@ -578,8 +578,8 @@ void NetworkModule::showNetworkInformations(bool console)
     if (established())
     {
         logInfoP("IP-Address: %s", localIP().toString().c_str());
-        logInfoP("Netmask: %s", gatewayIP().toString().c_str());
-        logInfoP("Gateway: %s", subnetMask().toString().c_str());
+        logInfoP("Netmask: %s", subnetMask().toString().c_str());
+        logInfoP("Gateway: %s", gatewayIP().toString().c_str());
         logInfoP("DNS: %s", nameServerIP().toString().c_str());
         logInfoP("Mode: %s", phyMode().c_str());
     }
