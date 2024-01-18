@@ -30,11 +30,6 @@ class NetworkModule : public OpenKNX::Module
     void init() override;
     void loop(bool configured) override;
     void setup(bool configured) override;
-    // uint16_t flashSize() override;
-    // void writeFlash() override;
-    // void readFlash(const bool configured, const uint8_t *data, const uint16_t size) override;
-    void writeToFlash();
-    void readFromFlash();
 
     void savePower() override;
     bool restorePower() override;
@@ -44,6 +39,10 @@ class NetworkModule : public OpenKNX::Module
     void showNetworkInformations(bool console = false);
 #ifndef ARDUINO_ARCH_ESP32
     void fillNetworkFile(UsbExchangeFile *file);
+    #ifdef KNX_IP_WIFI
+    void fillWifiFile(UsbExchangeFile *file);
+    bool readWifiFile(UsbExchangeFile *file);
+    #endif
 #endif
     void registerCallback(NetworkChangeCallback callback);
 
@@ -57,7 +56,11 @@ class NetworkModule : public OpenKNX::Module
     void macAddress(uint8_t *address);
 
   private:
+#if defined(NETWORK_FLASH_OFFSET) || (defined(NETWORK_FLASH) && defined(ARDUINO_ARCH_ESP32))
     OpenKNX::Flash::Driver _flash;
+    void writeToFlash();
+    void readFromFlash();
+#endif
 
     IPAddress GetIpProperty(uint8_t PropertyId);
     void SetIpProperty(uint8_t PropertyId, IPAddress IPAddress);

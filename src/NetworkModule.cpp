@@ -158,9 +158,9 @@ void NetworkModule::loadSettings()
         _useMDNS = ParamNET_mDNS;
 #endif
 
-        uint32_t start = millis();
+#if defined(NETWORK_FLASH_OFFSET) || (defined(NETWORK_FLASH) && defined(ARDUINO_ARCH_ESP32))
         writeToFlash();
-        logTraceP("Write network settings (%ims)", millis() - start);
+#endif
     }
     else
     {
@@ -172,9 +172,9 @@ void NetworkModule::loadSettings()
         memcpy(friendlyName, _hostName, 25);
         knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, friendlyName, length);
 
+#if defined(NETWORK_FLASH_OFFSET) || (defined(NETWORK_FLASH) && defined(ARDUINO_ARCH_ESP32))
         readFromFlash();
-
-        // TODO WLAN Fallback!!!
+#endif
     }
 
     if (_useStaticIP)
@@ -227,10 +227,12 @@ void NetworkModule::loadSettings()
 
 void NetworkModule::init()
 {
-#ifdef ARDUINO_ARCH_ESP32
+#if defined(NETWORK_FLASH_OFFSET) || (defined(NETWORK_FLASH) && defined(ARDUINO_ARCH_ESP32))
+    #ifdef ARDUINO_ARCH_ESP32
     _flash.init("network");
-#else
+    #else
     _flash.init("network", NETWORK_FLASH_OFFSET, NETWORK_FLASH_SIZE);
+    #endif
 #endif
 
     logInfoP("Initialize IP stack");
@@ -260,14 +262,15 @@ void NetworkModule::initIp()
     {
         logInfoP("Using DHCP");
     }
-    logIndentUp();
 
 #if defined(KNX_IP_W5500)
     if (_useStaticIP)
     {
         if (!KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP))
         {
+            logIndentUp();
             logErrorP("Invalid IP settings");
+            logIndentDown();
         }
     }
 
@@ -281,7 +284,15 @@ void NetworkModule::initIp()
         KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP);
     }
 
-    KNX_NETIF.begin((const char *)_wifiSSID, (const char *)_wifiPassword);
+    if (strlen(_wifiSSID) > 0)
+    {
+        logInfoP("Connecting to WLAN \"%s\" ...", _wifiSSID);
+        KNX_NETIF.begin(_wifiSSID, _wifiPassword);
+    }
+    else
+    {
+        logErrorP("No WLAN Settings found!");
+    }
 #elif defined(KNX_IP_GENERIC)
     // Lan mode only for w5500 available
     if (KNX_NETIF.hardwareStatus() == EthernetW5500)
@@ -322,13 +333,16 @@ void NetworkModule::initIp()
         }
     }
 #endif
-    logIndentDown();
 }
 
 void NetworkModule::setup(bool configured)
 {
 #ifndef ARDUINO_ARCH_ESP32
     openknxUsbExchangeModule.onLoad("Network.txt", [this](UsbExchangeFile *file) { this->fillNetworkFile(file); });
+    #ifdef KNX_IP_WIFI
+    openknxUsbExchangeModule.onLoad("Wifi.txt", [this](UsbExchangeFile *file) { this->fillWifiFile(file); });
+    openknxUsbExchangeModule.onEject("Wifi.txt", [this](UsbExchangeFile *file) { return this->readWifiFile(file); });
+    #endif
 #endif
 
     registerCallback([this](bool state) { if (state) this->showNetworkInformations(false); });
@@ -390,6 +404,72 @@ void NetworkModule::fillNetworkFile(UsbExchangeFile *file)
         writeLineToFile(file, "Mode: %s", phyMode().c_str());
     }
 }
+    #ifdef KNX_IP_WIFI
+void NetworkModule::fillWifiFile(UsbExchangeFile *file)
+{
+    writeLineToFile(file, "SSID");
+    writeLineToFile(file, "Password");
+}
+
+std::string trim(const std::string &str)
+{
+    auto start = std::find_if_not(str.begin(), str.end(), ::isspace);
+    auto end = std::find_if_not(str.rbegin(), str.rend(), ::isspace).base();
+    return (start < end ? std::string(start, end) : "");
+}
+
+bool NetworkModule::readWifiFile(UsbExchangeFile *file)
+{
+    openknx.watchdog.loop();
+    std::string ssid;
+    std::string password;
+
+    char tmp[100] = {};
+    if (file->fgets(tmp, 99) > 0) ssid = tmp;
+
+    memset(tmp, 0x0, 100);
+    if (file->fgets(tmp, 99) > 0) password = tmp;
+
+    ssid = trim(ssid);
+    password = trim(password);
+
+    logInfoP("Read Wifi settings from Wifi.txt");
+    logIndentUp();
+    if (ssid.length() == 0 || ssid.length() > 32 || password == "SSID")
+    {
+        logErrorP("SSID is invalid");
+        return false;
+    }
+    if (password.length() == 0 || password.length() > 63)
+    {
+        logErrorP("Password is invalid");
+        return false;
+    }
+
+    memset(_wifiSSID, 0x0, 33);
+    memset(_wifiPassword, 0x0, 64);
+
+    memcpy(_wifiSSID, ssid.c_str(), ssid.length());
+    memcpy(_wifiPassword, password.c_str(), password.length());
+    
+    openknx.watchdog.deactivate();
+
+    logInfoP("SSID: %s", _wifiSSID);
+    logInfoP("Password: %s", _wifiPassword);
+    logIndentDown();
+
+        #if defined(NETWORK_FLASH_OFFSET) || (defined(NETWORK_FLASH) && defined(ARDUINO_ARCH_ESP32))
+    writeToFlash();
+        #endif
+
+    logInfoP("Erase knx settings to load fallback wifi settings");
+    openknx.knxFlash.erase();
+
+    openknx.restart();
+
+    return true;
+}
+    #endif
 #endif
 
 void NetworkModule::checkIpStatus()
@@ -542,21 +622,34 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         showNetworkInformations(true);
         return true;
     }
-    if (!_useStaticIP && cmd == "net renew")
+
+#ifdef KNX_IP_WIFI
+    else if (cmd == "net recon" && strlen(_wifiSSID) > 0)
     {
-#ifdef KNX_IP_W5500
-        if (connected()) dhcp_renew(KNX_NETIF.getNetIf());
-#elif defined(KNX_IP_WIFI)
-        if (connected())
-        {
-            KNX_NETIF.disconnect();
-            KNX_NETIF.begin((const char *)NET_WifiSSID, (const char *)NET_WifiSSID);
-        }
-#elif defined(KNX_IP_GENERIC)
-        if (connected()) KNX_NETIF.maintain();
+        logInfoP("Connecting to WLAN \"%s\" ...", _wifiSSID);
+        // KNX_NETIF.disconnect();
+        KNX_NETIF.begin(_wifiSSID, _wifiPassword);
+    }
 #endif
+
+#ifndef KNX_IP_WIFI
+    else if (!_useStaticIP && cmd == "net renew")
+    {
+        if (!connected())
+        {
+            logErrorP("not connected");
+            return true;
+        }
+
+    #ifdef KNX_IP_GENERIC
+        dhcp_renew(KNX_NETIF.getNetIf());
+    #else
+        KNX_NETIF.maintain();
+    #endif
         return true;
     }
+#endif
+
     return false;
 }
 
@@ -584,8 +677,9 @@ void NetworkModule::showNetworkInformations(bool console)
         logInfoP("Mode: %s", phyMode().c_str());
     }
 
-#if defined(KNX_IP_WIFI)
-    logInfoP("WLAN-SSID: %s", KNX_NETIF.SSID());
+#ifdef KNX_IP_WIFI
+    std::string wlanInfo = std::string(_wifiSSID) + " (" + std::to_string(KNX_NETIF.RSSI()) + "dBm)";
+    logInfoP("WLAN: %s", wlanInfo.c_str());
 #endif
 
     if (console)
@@ -598,8 +692,14 @@ void NetworkModule::showNetworkInformations(bool console)
 void NetworkModule::showHelp()
 {
     openknx.console.printHelpLine("net, n", "Show network informations");
-    if (!_useStaticIP)
-        openknx.console.printHelpLine("net renew", "Renew DHCP Address");
+
+#ifdef KNX_IP_WIFI
+    if (strlen(_wifiSSID) > 0) openknx.console.printHelpLine("net recon", "Reconnect to network");
+#endif
+
+#ifndef KNX_IP_WIFI
+    if (!_useStaticIP) openknx.console.printHelpLine("net renew", "Renew DHCP Address");
+#endif
 }
 
 // Link status
@@ -693,11 +793,17 @@ bool NetworkModule::restorePower()
     return false;
 }
 
+#if defined(NETWORK_FLASH_OFFSET) || (defined(NETWORK_FLASH) && defined(ARDUINO_ARCH_ESP32))
 /*
  * Write current network settings
  */
 void NetworkModule::writeToFlash()
 {
+
+    logInfoP("writeToFlash");
+    uint32_t start = millis();
+    (void)(start); // ignore unused
+
     uint16_t relAddress = 0;
     relAddress = _flash.writeInt(relAddress, OPENKNX_NETWORK_MAGIC);
     relAddress = _flash.writeByte(relAddress, 1); // version
@@ -720,12 +826,13 @@ void NetworkModule::writeToFlash()
     types |= (_lanMode << 4) & 0xF0;
     relAddress = _flash.writeByte(relAddress, types);
 
-#if defined(KNX_IP_WIFI) || true
+    #if defined(KNX_IP_WIFI) || true
     relAddress = _flash.write(100, (uint8_t *)_wifiSSID, 32);
     relAddress = _flash.write(132, (uint8_t *)_wifiPassword, 32);
-#endif
+    #endif
 
     _flash.commit();
+    logInfoP("Write network settings (%ims)", millis() - start);
 }
 
 void NetworkModule::readFromFlash()
@@ -736,7 +843,7 @@ void NetworkModule::readFromFlash()
     const uint8_t version = _flash.readByte(4);
     if (version != 1) return;
 
-    logDebugP("Read ip settings from flash fallback (knx is unconfigured)");
+    logDebugP("Restore ip settings from flash fallback (knx is unconfigured)");
     logIndentUp();
 
     uint32_t options = _flash.readByte(5);
@@ -748,17 +855,23 @@ void NetworkModule::readFromFlash()
     _staticGatewayIP = IPAddress(_flash.readInt(14));
     _staticNameServerIP = IPAddress(_flash.readInt(18));
     // Reserved NameServer
-    _flash.read(26, (uint8_t *)_hostName, 24);
-    _flash.read(50, _mac, 6);
+
+    char hostName[25] = {};
+    _flash.read(26, (uint8_t *)hostName, 24);
+    if (strlen(hostName) > 0) memcpy(_hostName, hostName, 24);
+
+    char mac[6] = {};
+    _flash.read(50, (uint8_t *)mac, 6);
+    if (memcmp(mac, "\0\0\0\0\0\0", 6) == 0) memcpy(_mac, mac, 6);
 
     uint8_t types = _flash.readByte(56);
     _networkType = types & 0x0F;
     _lanMode = (types >> 4) & 0xF0;
 
-#if defined(KNX_IP_WIFI) || true
+    #if defined(KNX_IP_WIFI) || true
     _flash.read(100, (uint8_t *)_wifiSSID, 32);
     _flash.read(132, (uint8_t *)_wifiPassword, 63);
-#endif
+    #endif
 
     logTraceP("Version %i", version);
     logTraceP("MDNS %i", _useMDNS);
@@ -773,5 +886,6 @@ void NetworkModule::readFromFlash()
     logTraceP("LanMode %i", _lanMode);
     logIndentDown();
 }
+#endif
 
 NetworkModule openknxNetwork;
