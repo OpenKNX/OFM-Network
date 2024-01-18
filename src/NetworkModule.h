@@ -3,7 +3,16 @@
 #include "strings.h"
 #include <functional>
 
-#ifndef ARDUINO_ARCH_ESP32
+
+#ifdef KNX_IP_WIFI
+    #define HAS_WIFI
+#endif
+
+#ifdef ARDUINO_ARCH_RP2040
+    #define HAS_USB
+#endif
+
+#ifdef HAS_USB
     #include "UsbExchangeModule.h"
 #endif
 
@@ -17,6 +26,11 @@
 #else
     #error "no Ethernet stack specified, #define KNX_IP_WIFI or KNX_IP_W5500"
 #endif
+
+#if defined(ARDUINO_ARCH_RP2040) && (!defined(NETWORK_FLASH_OFFSET) || !defined(NETWORK_FLASH_SIZE))
+#pragma warn "You need to specify NETWORK_FLASH_OFFSET and NETWORK_FLASH_SIZE"
+#endif
+
 
 #define OPENKNX_NETWORK_MAGIC 4150479753
 
@@ -37,9 +51,9 @@ class NetworkModule : public OpenKNX::Module
     bool processCommand(const std::string cmd, bool debugKo);
     void showHelp() override;
     void showNetworkInformations(bool console = false);
-#ifndef ARDUINO_ARCH_ESP32
+#ifdef HAS_USB
     void fillNetworkFile(UsbExchangeFile *file);
-    #ifdef KNX_IP_WIFI
+    #ifdef HAS_WIFI
     void fillWifiFile(UsbExchangeFile *file);
     bool readWifiFile(UsbExchangeFile *file);
     #endif
@@ -55,12 +69,14 @@ class NetworkModule : public OpenKNX::Module
     std::string phyMode();
     void macAddress(uint8_t *address);
 
+#if defined(HAS_WIFI)
+    void wifiFallback(const char *ssid, const char *password);
+#endif
+
   private:
-#if defined(NETWORK_FLASH_OFFSET) || (defined(NETWORK_FLASH) && defined(ARDUINO_ARCH_ESP32))
     OpenKNX::Flash::Driver _flash;
     void writeToFlash();
     void readFromFlash();
-#endif
 
     IPAddress GetIpProperty(uint8_t PropertyId);
     void SetIpProperty(uint8_t PropertyId, IPAddress IPAddress);
@@ -80,7 +96,7 @@ class NetworkModule : public OpenKNX::Module
 
     uint8_t _mac[6] = {};
     char _hostName[25] = {};
-#if defined(KNX_IP_WIFI) || true
+#ifdef HAS_WIFI
     char _wifiSSID[33] = {};
     char _wifiPassword[64] = {};
 #endif
