@@ -113,22 +113,6 @@ void NetworkModule::loadSettings()
         }
 #endif
 
-#ifdef ParamNET_CustomMacAddress
-        // custom mac
-        if (ParamNET_CustomMacAddress)
-        {
-
-            std::string macAddress = "";
-            macAddress.append((const char *)ParamNET_MacAddress);
-
-            uint8_t index = 0;
-            for (size_t i = 0; i < 17; i += 3)
-            {
-                _mac[index++] = static_cast<uint8_t>(std::stoi(macAddress.substr(i, 2), nullptr, 16));
-            }
-        }
-#endif
-
 #if !defined(ParamNET_HostAddress) || !defined(ParamNET_SubnetMask) || !defined(ParamNET_GatewayAddress) || !defined(ParamNET_NameserverAddress) || !defined(ParamNET_StaticIP) || defined(OPENKNX_NETWORK_USEIPPROP)
 
         logTraceP("Read ip settings from properties");
@@ -144,21 +128,12 @@ void NetworkModule::loadSettings()
         _staticNameServerIP = htonl(ParamNET_NameserverAddress);
         _useStaticIP = ParamNET_StaticIP;
 
-    #ifdef HAS_WIFI
-        memcpy(_wifiSSID, ParamNET_WifiSSID, 32);
-        memcpy(_wifiPassword, ParamNET_WifiPassword, 63);
-    #endif
+        // #ifdef HAS_WIFI
+        //     memcpy(_wifiSSID, ParamNET_WifiSSID, 32);
+        //     memcpy(_wifiPassword, ParamNET_WifiPassword, 63);
+        // #endif
 
 #endif
-
-        _lanMode = ParamNET_LanMode;
-        _networkType = ParamNET_NetworkType;
-
-#ifdef ParamNET_mDNS
-        _useMDNS = ParamNET_mDNS;
-#endif
-
-        writeToFlash();
     }
     else
     {
@@ -169,8 +144,6 @@ void NetworkModule::loadSettings()
         uint8_t *friendlyName = new uint8_t[30];
         memcpy(friendlyName, _hostName, 25);
         knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, friendlyName, length);
-
-        readFromFlash();
     }
 
     if (_useStaticIP)
@@ -223,13 +196,6 @@ void NetworkModule::loadSettings()
 
 void NetworkModule::init()
 {
-
-#ifdef ARDUINO_ARCH_ESP32
-    _flash.init("network");
-#else
-    _flash.init("network", NETWORK_FLASH_OFFSET, NETWORK_FLASH_SIZE);
-#endif
-
     logInfoP("Initialize IP stack");
     logIndentUp();
     initPhy();
@@ -335,8 +301,8 @@ void NetworkModule::setup(bool configured)
 #ifdef HAS_USB
     openknxUsbExchangeModule.onLoad("Network.txt", [this](UsbExchangeFile *file) { this->fillNetworkFile(file); });
     #ifdef HAS_WIFI
-    openknxUsbExchangeModule.onLoad("Wifi.txt", [this](UsbExchangeFile *file) { this->fillWifiFile(file); });
-    openknxUsbExchangeModule.onEject("Wifi.txt", [this](UsbExchangeFile *file) { return this->readWifiFile(file); });
+    // openknxUsbExchangeModule.onLoad("Wifi.txt", [this](UsbExchangeFile *file) { this->fillWifiFile(file); });
+    // openknxUsbExchangeModule.onEject("Wifi.txt", [this](UsbExchangeFile *file) { return this->readWifiFile(file); });
     #endif
 #endif
 
@@ -415,35 +381,33 @@ std::string trim(const std::string &str)
 
 bool NetworkModule::readWifiFile(UsbExchangeFile *file)
 {
-    openknx.watchdog.loop();
-    std::string ssid;
-    std::string password;
+    // openknx.watchdog.loop();
+    // std::string ssid;
+    // std::string password;
 
-    char tmp[100] = {};
-    if (file->fgets(tmp, 99) > 0) ssid = tmp;
+    // char tmp[100] = {};
+    // if (file->fgets(tmp, 99) > 0) ssid = tmp;
 
-    memset(tmp, 0x0, 100);
-    if (file->fgets(tmp, 99) > 0) password = tmp;
+    // memset(tmp, 0x0, 100);
+    // if (file->fgets(tmp, 99) > 0) password = tmp;
 
-    ssid = trim(ssid);
-    password = trim(password);
+    // ssid = trim(ssid);
+    // password = trim(password);
 
-    logInfoP("Read Wifi settings from Wifi.txt");
-    logIndentUp();
-    if (ssid.length() == 0 || ssid.length() > 32 || password == "SSID")
-    {
-        logErrorP("SSID is invalid");
-        return false;
-    }
-    if (password.length() == 0 || password.length() > 63)
-    {
-        logErrorP("Password is invalid");
-        return false;
-    }
+    // logInfoP("Read Wifi settings from Wifi.txt");
+    // logIndentUp();
+    // if (ssid.length() == 0 || ssid.length() > 32 || password == "SSID")
+    // {
+    //     logErrorP("SSID is invalid");
+    //     return false;
+    // }
+    // if (password.length() == 0 || password.length() > 63)
+    // {
+    //     logErrorP("Password is invalid");
+    //     return false;
+    // }
 
-    wifiFallback(ssid.c_str(), password.c_str());
-
-    logIndentDown();
+    // logIndentDown();
 
     return true;
 }
@@ -766,121 +730,5 @@ bool NetworkModule::restorePower()
     delay(1000);
     return false;
 }
-
-/*
- * Write current network settings
- */
-void NetworkModule::writeToFlash()
-{
-
-    logInfoP("writeToFlash");
-    uint32_t start = millis();
-    (void)(start); // ignore unused
-
-    uint16_t relAddress = 0;
-    relAddress = _flash.writeInt(relAddress, OPENKNX_NETWORK_MAGIC);
-    relAddress = _flash.writeByte(relAddress, 1); // version
-
-    uint8_t options = 0;
-    options |= ((uint8_t)_useStaticIP) & 0b00000001;
-    options |= ((uint8_t)_useMDNS << 1) & 0b00000010;
-
-    relAddress = _flash.writeByte(relAddress, options);
-    relAddress = _flash.writeInt(relAddress, (uint32_t)_staticLocalIP);
-    relAddress = _flash.writeInt(relAddress, (uint32_t)_staticSubnetMask);
-    relAddress = _flash.writeInt(relAddress, (uint32_t)_staticGatewayIP);
-    relAddress = _flash.writeInt(relAddress, (uint32_t)_staticNameServerIP);
-    relAddress = _flash.writeInt(relAddress, 0xFFFFFFFF); // DNS2 reserved
-    relAddress = _flash.write(relAddress, (uint8_t *)_hostName, 24);
-    relAddress = _flash.write(relAddress, (uint8_t *)_mac, 6);
-
-    uint32_t types = 0;
-    types |= (_networkType) & 0x0F;
-    types |= (_lanMode << 4) & 0xF0;
-    relAddress = _flash.writeByte(relAddress, types);
-
-    #if defined(KNX_IP_WIFI)
-    relAddress = _flash.write(100, (uint8_t *)_wifiSSID, 32);
-    relAddress = _flash.write(132, (uint8_t *)_wifiPassword, 32);
-    #endif
-
-    _flash.commit();
-    logInfoP("Write network settings (%ims)", millis() - start);
-}
-
-void NetworkModule::readFromFlash()
-{
-    const uint32_t magic = _flash.readInt(0);
-    if (magic != OPENKNX_NETWORK_MAGIC) return;
-
-    const uint8_t version = _flash.readByte(4);
-    if (version != 1) return;
-
-    logDebugP("Restore ip settings from flash fallback (knx is unconfigured)");
-    logIndentUp();
-
-    uint32_t options = _flash.readByte(5);
-    _useStaticIP = options & 0x01;
-    _useMDNS = (options >> 1) & 0x01;
-
-    _staticLocalIP = IPAddress(_flash.readInt(6));
-    _staticSubnetMask = IPAddress(_flash.readInt(10));
-    _staticGatewayIP = IPAddress(_flash.readInt(14));
-    _staticNameServerIP = IPAddress(_flash.readInt(18));
-    // Reserved NameServer
-
-    char hostName[25] = {};
-    _flash.read(26, (uint8_t *)hostName, 24);
-    if (strlen(hostName) > 0) memcpy(_hostName, hostName, 24);
-
-    char mac[6] = {};
-    _flash.read(50, (uint8_t *)mac, 6);
-    if (memcmp(mac, "\0\0\0\0\0\0", 6) == 0) memcpy(_mac, mac, 6);
-
-    uint8_t types = _flash.readByte(56);
-    _networkType = types & 0x0F;
-    _lanMode = (types >> 4) & 0xF0;
-
-    #if defined(KNX_IP_WIFI)
-    _flash.read(100, (uint8_t *)_wifiSSID, 32);
-    _flash.read(132, (uint8_t *)_wifiPassword, 63);
-    #endif
-
-    logTraceP("Version %i", version);
-    logTraceP("MDNS %i", _useMDNS);
-    logTraceP("Static %i", _useStaticIP);
-    logTraceP("LocalIP %s", _staticLocalIP.toString().c_str());
-    logTraceP("Subnet %s", _staticSubnetMask.toString().c_str());
-    logTraceP("Gateway %s", _staticGatewayIP.toString().c_str());
-    logTraceP("Nameserver %s", _staticNameServerIP.toString().c_str());
-    logTraceP("Hostname %s", _hostName);
-    logTraceP("MAC: %02X:%02X:%02X:%02X:%02X:%02X", _mac[0], _mac[1], _mac[2], _mac[3], _mac[4], _mac[5]);
-    logTraceP("NetworkType %i", _networkType);
-    logTraceP("LanMode %i", _lanMode);
-    logIndentDown();
-}
-
-#if defined(HAS_WIFI)
-void NetworkModule::wifiFallback(const char *ssid, const char *password)
-{
-    memset(_wifiSSID, 0x0, 33);
-    memset(_wifiPassword, 0x0, 64);
-
-    memcpy(_wifiSSID, ssid, strlen(ssid));
-    memcpy(_wifiPassword, password, strlen(password));
-
-    openknx.watchdog.deactivate();
-
-    logInfoP("Write fallback wifi SSID: %s Password: %s", _wifiSSID, _wifiPassword);
-    #if defined(NETWORK_FLASH_OFFSET) || (defined(NETWORK_FLASH) && defined(ARDUINO_ARCH_ESP32))
-    writeToFlash();
-    #endif
-
-    logInfoP("Erase knx settings to load fallback wifi settings");
-    openknx.knxFlash.erase();
-
-    openknx.restart();
-}
-#endif
 
 NetworkModule openknxNetwork;

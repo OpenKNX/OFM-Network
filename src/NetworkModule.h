@@ -27,11 +27,6 @@
     #error "no Ethernet stack specified, #define KNX_IP_WIFI or KNX_IP_W5500"
 #endif
 
-#if defined(ARDUINO_ARCH_RP2040) && (!defined(NETWORK_FLASH_OFFSET) || !defined(NETWORK_FLASH_SIZE))
-#pragma warn "You need to specify NETWORK_FLASH_OFFSET and NETWORK_FLASH_SIZE"
-#endif
-
-
 #define OPENKNX_NETWORK_MAGIC 4150479753
 
 typedef std::function<void(bool)> NetworkChangeCallback;
@@ -69,15 +64,7 @@ class NetworkModule : public OpenKNX::Module
     std::string phyMode();
     void macAddress(uint8_t *address);
 
-#if defined(HAS_WIFI)
-    void wifiFallback(const char *ssid, const char *password);
-#endif
-
   private:
-    OpenKNX::Flash::Driver _flash;
-    void writeToFlash();
-    void readFromFlash();
-
     IPAddress GetIpProperty(uint8_t PropertyId);
     void SetIpProperty(uint8_t PropertyId, IPAddress IPAddress);
     uint8_t GetByteProperty(uint8_t PropertyId);
@@ -87,8 +74,6 @@ class NetworkModule : public OpenKNX::Module
     bool _ipShown = false;
     bool _useStaticIP = false;
     bool _useMDNS = false;
-    uint8_t _lanMode = 0;
-    uint8_t _networkType = 0;
     IPAddress _staticLocalIP;
     IPAddress _staticSubnetMask;
     IPAddress _staticGatewayIP;
