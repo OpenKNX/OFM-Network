@@ -20,12 +20,6 @@
                   <Enumeration Text="Anpassen" Value="1" Id="%ENID%" />
                 </TypeRestriction>
               </ParameterType>
-              <ParameterType Id="%AID%_PT-DHCP" Name="DHCP">
-                <TypeRestriction Base="Value" SizeInBit="1">
-                  <Enumeration Text="Ja" Value="0" Id="%ENID%" />
-                  <Enumeration Text="Nein" Value="1" Id="%ENID%" />
-                </TypeRestriction>
-              </ParameterType>
               <ParameterType Id="%AID%_PT-HostAddress" Name="HostAddress">
                 <TypeIPAddress AddressType="HostAddress" />
               </ParameterType>
@@ -37,15 +31,6 @@
               </ParameterType>
               <ParameterType Id="%AID%_PT-Hostname" Name="Hostname" ValidationErrorRef="%AID%_M-%TT%00001">
                 <TypeText SizeInBit="192" Pattern="^[A-Za-z](?:[A-Za-z0-9\-]*[A-Za-z0-9])*$"/>
-              </ParameterType>
-              <ParameterType Id="%AID%_PT-WifiSSID" Name="WifiSSID">
-                <TypeText SizeInBit="256" />
-              </ParameterType>
-              <ParameterType Id="%AID%_PT-WifiPassword" Name="WifiPassword">
-                <TypeText SizeInBit="504" />
-              </ParameterType>
-              <ParameterType Id="%AID%_PT-MacAddress" Name="MacAddress" ValidationErrorRef="%AID%_M-%TT%00002">
-                <TypeText SizeInBit="136" Pattern="^(?:[0-9A-Fa-f]{2}:){5}(?:[0-9A-Fa-f]{2})$" />
               </ParameterType>
               <ParameterType Id="%AID%_PT-LanMode" Name="LanMode">
                 <TypeRestriction Base="Value" SizeInBit="4">
@@ -75,9 +60,8 @@
               <Union SizeInBit="8">
                 <Memory CodeSegment="%MID%" Offset="16" BitOffset="0" />
                 <Parameter Id="%AID%_UP-%TT%00001" Name="CustomHostname"     ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="0" Text="Hostname anpassen" Value="0" />
-                <Parameter Id="%AID%_UP-%TT%00002" Name="StaticIP"           ParameterType="%AID%_PT-DHCP"               Offset="0" BitOffset="1" Text="DHCP" Value="0" />
-                <Parameter Id="%AID%_UP-%TT%00003" Name="CustomMacAddress"   ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="2" Text="MAC-Adresse anpassen" Value="0" />
-                <!-- 5 bits free -->
+                <Parameter Id="%AID%_UP-%TT%00002" Name="StaticIP"           ParameterType="%AID%_PT-OnOffYesNoInverted" Offset="0" BitOffset="1" Text="DHCP" Value="0" />
+                <!-- 6 bits free -->
               </Union>
 
               <!-- Services -->
@@ -112,7 +96,6 @@
               <ParameterRef Id="%AID%_P-%TT%01000_R-%TT%0100000" RefId="%AID%_P-%TT%01000" />
               <ParameterRef Id="%AID%_UP-%TT%00001_R-%TT%0000101" RefId="%AID%_UP-%TT%00001" />
               <ParameterRef Id="%AID%_UP-%TT%00002_R-%TT%0000201" RefId="%AID%_UP-%TT%00002" />
-              <ParameterRef Id="%AID%_UP-%TT%00003_R-%TT%0000301" RefId="%AID%_UP-%TT%00003" />
               <ParameterRef Id="%AID%_P-%TT%00010_R-%TT%0001001" RefId="%AID%_P-%TT%00010" />
               <ParameterRef Id="%AID%_UP-%TT%00011_R-%TT%0001101" RefId="%AID%_UP-%TT%00011" />
               <ParameterRef Id="%AID%_UP-%TT%00012_R-%TT%0001201" RefId="%AID%_UP-%TT%00012" />
@@ -137,7 +120,7 @@
                 <!-- Hidden -->
                 <ParameterRefRef RefId="%AID%_P-%TT%01000_R-%TT%0100000" />
 
-                <ParameterSeparator Id="%AID%_PS-nnn" Text="IP-Einstellung" UIHint="Headline" />
+                <ParameterSeparator Id="%AID%_PS-nnn" Text="IP-Adresse" UIHint="Headline" />
                 <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000"><!-- Static 0 -->
                   <when test="%NET_IPConfigTool%"> <!-- default -->
                     <ParameterRefRef RefId="%AID%_UP-%TT%00002_R-%TT%0000201" IndentLevel="1" HelpContext="NET-IpAddress" />
