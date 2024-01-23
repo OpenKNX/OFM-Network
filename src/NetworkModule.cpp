@@ -240,7 +240,7 @@ void NetworkModule::initIp()
 
     if (strlen(_wifiSSID) > 0)
     {
-        logInfoP("Connecting to WiFi \"%s\" ...", _wifiSSID);
+        logInfoP("Connecting to WiFi \"%s\"", _wifiSSID);
         KNX_NETIF.begin(_wifiSSID, _wifiPassphrase);
     }
     else
@@ -569,7 +569,7 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 #ifdef HAS_WIFI
     else if (cmd == "net recon" && strlen(_wifiSSID) > 0)
     {
-        logInfoP("Connecting to WiFi \"%s\" ...", _wifiSSID);
+        logInfoP("Connecting to WiFi \"%s\"", _wifiSSID);
         // KNX_NETIF.disconnect();
         KNX_NETIF.begin(_wifiSSID, _wifiPassphrase);
         return true;
