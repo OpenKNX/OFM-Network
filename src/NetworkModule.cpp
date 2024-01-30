@@ -1,4 +1,5 @@
 #include "NetworkModule.h"
+#include "ModuleVersionCheck.h"
 
 #define MDNS_DEBUG_PORT Serial
 #define OPENKNX_MDNS_FULL
