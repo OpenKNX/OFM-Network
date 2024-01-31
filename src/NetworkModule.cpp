@@ -1,4 +1,5 @@
 #include "NetworkModule.h"
+#include "ModuleVersionCheck.h"
 
 #define MDNS_DEBUG_PORT Serial
 #define OPENKNX_MDNS_FULL
@@ -86,8 +87,11 @@ void NetworkModule::initPhy()
 
 void NetworkModule::loadSettings()
 {
-    logDebugP("Load settings");
-    logIndentUp();
+#ifdef HAS_WIFI
+    #ifdef HAS_USB
+    readWifiSettingsFromFile();
+    #endif
+#endif
 
     // build default hostname
     memcpy(_hostName, "OpenKNX-", 8);
@@ -100,39 +104,31 @@ void NetworkModule::loadSettings()
     uint32_t serial = htonl(openknx.info.serialNumber());
     memcpy(_mac + 2, &serial, 4);
 
-    logTraceP("Default mac: %02X:%02X:%02X:%02X:%02X:%02X", _mac[0], _mac[1], _mac[2], _mac[3], _mac[4], _mac[5]);
-
     if (knx.configured())
     {
-        logDebugP("Read hostname & mac address from parameters");
         // custom hostname
 #ifdef ParamNET_CustomHostname
         if (ParamNET_CustomHostname)
         {
+            logDebugP("Read hostname from parameters");
             memcpy(_hostName, ParamNET_HostName, 24);
         }
 #endif
 
 #if !defined(ParamNET_HostAddress) || !defined(ParamNET_SubnetMask) || !defined(ParamNET_GatewayAddress) || !defined(ParamNET_NameserverAddress) || !defined(ParamNET_StaticIP) || defined(OPENKNX_NETWORK_USEIPPROP)
 
-        logTraceP("Read ip settings from properties");
+        logInfoP("Read ip settings from properties");
         _staticGatewayIP = GetIpProperty(PID_DEFAULT_GATEWAY);
         _staticSubnetMask = GetIpProperty(PID_SUBNET_MASK);
         _staticLocalIP = GetIpProperty(PID_IP_ADDRESS);
         _useStaticIP = GetByteProperty(PID_IP_ASSIGNMENT_METHOD) == 1; // see 2.5.6 of 03_08_03
 #else
-        logTraceP("Read ip settings from parameters");
+        logInfoP("Read ip settings from parameters");
         _staticLocalIP = htonl(ParamNET_HostAddress);
         _staticSubnetMask = htonl(ParamNET_SubnetMask);
         _staticGatewayIP = htonl(ParamNET_GatewayAddress);
         _staticNameServerIP = htonl(ParamNET_NameserverAddress);
         _useStaticIP = ParamNET_StaticIP;
-
-        // #ifdef HAS_WIFI
-        //     memcpy(_wifiSSID, ParamNET_WifiSSID, 32);
-        //     memcpy(_wifiPassword, ParamNET_WifiPassword, 63);
-        // #endif
-
 #endif
     }
     else
@@ -190,8 +186,6 @@ void NetworkModule::loadSettings()
     _mDNSDeviceServiceNameTXT = (char *)malloc(1);
     #endif
 #endif
-
-    logIndentDown();
 }
 
 void NetworkModule::init()
@@ -247,12 +241,12 @@ void NetworkModule::initIp()
 
     if (strlen(_wifiSSID) > 0)
     {
-        logInfoP("Connecting to WLAN \"%s\" ...", _wifiSSID);
-        KNX_NETIF.begin(_wifiSSID, _wifiPassword);
+        logInfoP("Connecting to WiFi \"%s\"", _wifiSSID);
+        KNX_NETIF.begin(_wifiSSID, _wifiPassphrase);
     }
     else
     {
-        logErrorP("No WLAN Settings found!");
+        logErrorP("No WiFI Settings found!");
     }
 #elif defined(KNX_IP_GENERIC)
     // Lan mode only for w5500 available
@@ -365,51 +359,59 @@ void NetworkModule::fillNetworkFile(UsbExchangeFile *file)
         writeLineToFile(file, "Mode: %s", phyMode().c_str());
     }
 }
-    #if defined(HAS_WIFI)
-void NetworkModule::fillWifiFile(UsbExchangeFile *file)
+    #ifdef HAS_WIFI
+void NetworkModule::readWifiSettingsFromFile()
 {
-    writeLineToFile(file, "SSID");
-    writeLineToFile(file, "Password");
-}
+    logInfoP("Read Wifi settings from WIFI.TXT");
+    logIndentUp();
 
-std::string trim(const std::string &str)
-{
-    auto start = std::find_if_not(str.begin(), str.end(), ::isspace);
-    auto end = std::find_if_not(str.rbegin(), str.rend(), ::isspace).base();
-    return (start < end ? std::string(start, end) : "");
-}
+    File file = LittleFS.open("/WIFI.TXT", "r");
+    if (!file)
+    {
+        logErrorP("File /WIFI.TXT not found!");
+        logIndentDown();
+        return;
+    }
 
-bool NetworkModule::readWifiFile(UsbExchangeFile *file)
-{
-    // openknx.watchdog.loop();
-    // std::string ssid;
-    // std::string password;
+    int pos = 0;
+    char buffer[100] = {};
+    uint8_t found = 0;
+    while (file.available())
+    {
+        uint8_t value = 0;
+        file.read(&value, 1);
 
-    // char tmp[100] = {};
-    // if (file->fgets(tmp, 99) > 0) ssid = tmp;
+        // Copy char
+        if (value != '\n' && value != '\r')
+        {
+            buffer[pos] = value;
+            pos++;
+        }
 
-    // memset(tmp, 0x0, 100);
-    // if (file->fgets(tmp, 99) > 0) password = tmp;
+        if (value == '\n' || value == '\r' || !file.available())
+        {
+            if (pos > 0)
+            {
+                found++;
+                if (found == 1) memcpy(_wifiSSID, buffer, pos);
+                if (found == 2) memcpy(_wifiPassphrase, buffer, pos);
+                logTraceP("%i -> %i: %s", found, pos, buffer);
 
-    // ssid = trim(ssid);
-    // password = trim(password);
+                // Reset buffer
+                memset(buffer, 0x0, 100);
+                pos = 0;
+            }
+        }
 
-    // logInfoP("Read Wifi settings from Wifi.txt");
-    // logIndentUp();
-    // if (ssid.length() == 0 || ssid.length() > 32 || password == "SSID")
-    // {
-    //     logErrorP("SSID is invalid");
-    //     return false;
-    // }
-    // if (password.length() == 0 || password.length() > 63)
-    // {
-    //     logErrorP("Password is invalid");
-    //     return false;
-    // }
+        // ssid and passphrase found
+        if (found >= 2) break;
+    }
 
-    // logIndentDown();
+    if (found > 0) logDebugP("SSID: %s", _wifiSSID);
+    if (found == 2) logDebugP("Passphrase with %i chars", strlen(_wifiPassphrase));
+    if (found == 1) logErrorP("No wifi phassphrase found");
 
-    return true;
+    logIndentDown();
 }
     #endif
 #endif
@@ -568,9 +570,10 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 #ifdef HAS_WIFI
     else if (cmd == "net recon" && strlen(_wifiSSID) > 0)
     {
-        logInfoP("Connecting to WLAN \"%s\" ...", _wifiSSID);
+        logInfoP("Connecting to WiFi \"%s\"", _wifiSSID);
         // KNX_NETIF.disconnect();
-        KNX_NETIF.begin(_wifiSSID, _wifiPassword);
+        KNX_NETIF.begin(_wifiSSID, _wifiPassphrase);
+        return true;
     }
 #else
     else if (!_useStaticIP && cmd == "net renew")
@@ -618,8 +621,8 @@ void NetworkModule::showNetworkInformations(bool console)
     }
 
 #ifdef HAS_WIFI
-    std::string wlanInfo = std::string(_wifiSSID) + " (" + std::to_string(KNX_NETIF.RSSI()) + "dBm)";
-    logInfoP("WLAN: %s", wlanInfo.c_str());
+    std::string wifiInfo = std::string(_wifiSSID) + " (" + std::to_string(KNX_NETIF.RSSI()) + "dBm)";
+    logInfoP("Wifi: %s", wifiInfo.c_str());
 #endif
 
     if (console)

@@ -3,7 +3,6 @@
 #include "strings.h"
 #include <functional>
 
-
 #ifdef KNX_IP_WIFI
     #define HAS_WIFI
 #endif
@@ -49,8 +48,7 @@ class NetworkModule : public OpenKNX::Module
 #ifdef HAS_USB
     void fillNetworkFile(UsbExchangeFile *file);
     #ifdef HAS_WIFI
-    void fillWifiFile(UsbExchangeFile *file);
-    bool readWifiFile(UsbExchangeFile *file);
+    void readWifiSettingsFromFile();
     #endif
 #endif
     void registerCallback(NetworkChangeCallback callback);
@@ -81,10 +79,6 @@ class NetworkModule : public OpenKNX::Module
 
     uint8_t _mac[6] = {};
     char _hostName[25] = {};
-#ifdef HAS_WIFI
-    char _wifiSSID[33] = {};
-    char _wifiPassword[64] = {};
-#endif
 
     char *_mDNSHttpServiceName = nullptr;
     char *_mDNSDeviceServiceName = nullptr;
@@ -99,6 +93,11 @@ class NetworkModule : public OpenKNX::Module
     void checkIpStatus();
     void loadCallbacks(bool state);
     void handleMDNS();
+
+#ifdef HAS_WIFI
+    char _wifiSSID[33] = {};
+    char _wifiPassphrase[64] = {};
+#endif
 
     std::vector<NetworkChangeCallback> _callback;
 };
