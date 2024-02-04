@@ -60,7 +60,7 @@ void NetworkModule::initPhy()
     KNX_NETIF.init(PIN_ETH_SS, &ETH_SPI_INTERFACE);
 #endif
 
-#if defined(KNX_IP_W5500) or defined(KNX_IP_GENERIC)
+#ifdef KNX_IP_GENERIC
     if (KNX_NETIF.hardwareStatus() == EthernetNoHardware)
     {
         openknx.hardware.fatalError(7, "Error communicating with Ethernet chip");
