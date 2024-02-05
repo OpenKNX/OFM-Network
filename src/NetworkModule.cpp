@@ -9,6 +9,13 @@
     #include <MDNS_Generic.h>
 EthernetUDP udp;
 MDNS mdns(udp);
+
+#elif ARDUINO_ARCH_ESP32
+    #ifdef CONFIG_ETH_ENABLED
+        #define KNX_NETIF ETH
+    #else
+        #define KNX_NETIF WiFi
+    #endif
 #else
     #include "LEAmDNS.h"
     #ifdef KNX_IP_W5500
@@ -198,6 +205,40 @@ void NetworkModule::init()
     logIndentDown();
 }
 
+#ifdef ARDUINO_ARCH_ESP32
+void NetworkModule::esp32WifiEvent(WiFiEvent_t event)
+{
+    switch (event)
+    {
+        case ARDUINO_EVENT_ETH_START:
+            // logInfoP("ETH Started");
+            // The hostname must be set after the interface is started, but needs
+            // to be set before DHCP, so set it from the event handler thread.
+            KNX_NETIF.setHostname(_hostName);
+            break;
+        case ARDUINO_EVENT_ETH_CONNECTED:
+            // logInfoP("ETH Connected");
+            espConnected = true;
+            break;
+        case ARDUINO_EVENT_ETH_GOT_IP:
+            // logInfoP("ETH Got IP");
+            // ETH.printInfo(Serial);
+            // eth_connected = true;
+            break;
+        case ARDUINO_EVENT_ETH_DISCONNECTED:
+            // logInfoP("ETH Disconnected");
+            espConnected = false;
+            break;
+        case ARDUINO_EVENT_ETH_STOP:
+            // logInfoP("ETH Stopped");
+            espConnected = false;
+            break;
+        default:
+            break;
+    }
+}
+#endif
+
 void NetworkModule::initIp()
 {
 
@@ -205,6 +246,8 @@ void NetworkModule::initIp()
     logInfoP("Hostname: %s", _hostName);
 #ifdef KNX_IP_GENERIC
     KNX_NETIF.setHostname(_hostName);
+#elif defined(ARDUINO_ARCH_ESP32)
+    // will do by callback
 #else
     KNX_NETIF.hostname(_hostName);
 #endif
@@ -217,6 +260,24 @@ void NetworkModule::initIp()
     {
         logInfoP("Using DHCP");
     }
+
+#ifdef ARDUINO_ARCH_ESP32
+    logInfoP("WiFi.onEvent");
+    WiFi.onEvent([](WiFiEvent_t event) -> void { openknxNetwork.esp32WifiEvent(event); });
+
+    if (_useStaticIP)
+    {
+        if (!KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP))
+        {
+            logIndentUp();
+            logErrorP("Invalid IP settings");
+            logIndentDown();
+        }
+    }
+
+    KNX_NETIF.begin();
+    delay(1000);
+#endif
 
 #if defined(KNX_IP_W5500)
     if (_useStaticIP)
@@ -317,6 +378,7 @@ void NetworkModule::setup(bool configured)
                 mdns.removeAllServiceRecords();
             }
         });
+#elif defined(ARDUINO_ARCH_ESP32)
 #else
         logDebugP("Start mDNS");
         if (!MDNS.begin(_hostName)) logErrorP("Hostname not applied (mDNS)");
@@ -486,6 +548,7 @@ void NetworkModule::handleMDNS()
 {
 #ifdef KNX_IP_GENERIC
     mdns.run();
+#elif defined(ARDUINO_ARCH_ESP32)
 #else
     MDNS.update();
 #endif
@@ -586,6 +649,8 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 
     #ifdef KNX_IP_GENERIC
         KNX_NETIF.maintain();
+    #elif defined(ARDUINO_ARCH_ESP32)
+            // TODO
     #else
         dhcp_renew(KNX_NETIF.getNetIf());
     #endif
@@ -652,6 +717,8 @@ inline bool NetworkModule::connected()
     return KNX_NETIF.isLinked();
 #elif defined(KNX_IP_WIFI)
     return KNX_NETIF.isConnected();
+#elif defined(ARDUINO_ARCH_ESP32)
+    return espConnected;
 #elif defined(KNX_IP_GENERIC)
     return KNX_NETIF.linkStatus() == LinkON;
 #endif
@@ -662,7 +729,7 @@ inline bool NetworkModule::established()
 {
     if (!connected()) return false;
 
-    return localIP() != IPAddress(0);
+    return localIP() != IPAddress();
 }
 
 inline IPAddress NetworkModule::localIP()
@@ -684,6 +751,8 @@ inline IPAddress NetworkModule::nameServerIP()
 {
 #if defined(KNX_IP_W5500) || defined(KNX_IP_WIFI)
     return IPAddress(dns_getserver(0));
+#elif defined(ARDUINO_ARCH_ESP32)
+    return KNX_NETIF.dnsIP();
 #elif defined(KNX_IP_GENERIC)
     return KNX_NETIF.dnsServerIP();
 #endif
@@ -713,7 +782,7 @@ inline void NetworkModule::macAddress(uint8_t *address)
 {
 #if defined(KNX_IP_W5500)
     memcpy(address, KNX_NETIF.getNetIf()->hwaddr, 6);
-#elif defined(KNX_IP_WIFI)
+#elif defined(KNX_IP_WIFI) || defined(ARDUINO_ARCH_ESP32)
     KNX_NETIF.macAddress(address);
 #elif defined(KNX_IP_GENERIC)
     KNX_NETIF.MACAddress(address);

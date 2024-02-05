@@ -22,11 +22,14 @@
     #include <WiFi.h>
 #elif defined(KNX_IP_GENERIC)
 
+#elif defined(ARDUINO_ARCH_ESP32)
+    #include <ESPmDNS.h>
+    #include <ETH.h>
+    #include <vector>
+
 #else
     #error "no Ethernet stack specified, #define KNX_IP_WIFI or KNX_IP_W5500"
 #endif
-
-#define OPENKNX_NETWORK_MAGIC 4150479753
 
 typedef std::function<void(bool)> NetworkChangeCallback;
 
@@ -62,6 +65,10 @@ class NetworkModule : public OpenKNX::Module
     std::string phyMode();
     void macAddress(uint8_t *address);
 
+#ifdef ARDUINO_ARCH_ESP32
+    void esp32WifiEvent(WiFiEvent_t event);
+#endif
+
   private:
     IPAddress GetIpProperty(uint8_t PropertyId);
     void SetIpProperty(uint8_t PropertyId, IPAddress IPAddress);
@@ -76,6 +83,10 @@ class NetworkModule : public OpenKNX::Module
     IPAddress _staticSubnetMask;
     IPAddress _staticGatewayIP;
     IPAddress _staticNameServerIP;
+
+#ifdef ARDUINO_ARCH_ESP32
+    bool espConnected = false;
+#endif
 
     uint8_t _mac[6] = {};
     char _hostName[25] = {};
