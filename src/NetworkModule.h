@@ -24,7 +24,9 @@
 
 #elif defined(ARDUINO_ARCH_ESP32)
     #include <ESPmDNS.h>
-    #include <ETH.h>
+    #ifdef CONFIG_ETH_ENABLED
+        #include <ETH.h>
+    #endif
     #include <vector>
 
 #else

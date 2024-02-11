@@ -211,26 +211,26 @@ void NetworkModule::esp32WifiEvent(WiFiEvent_t event)
     switch (event)
     {
         case ARDUINO_EVENT_ETH_START:
-            // logInfoP("ETH Started");
+            logTraceP("ETH Started");
             // The hostname must be set after the interface is started, but needs
             // to be set before DHCP, so set it from the event handler thread.
             KNX_NETIF.setHostname(_hostName);
             break;
         case ARDUINO_EVENT_ETH_CONNECTED:
-            // logInfoP("ETH Connected");
+            logTraceP("ETH Connected");
             espConnected = true;
             break;
         case ARDUINO_EVENT_ETH_GOT_IP:
-            // logInfoP("ETH Got IP");
+            logTraceP("ETH Got IP");
             // ETH.printInfo(Serial);
             // eth_connected = true;
             break;
         case ARDUINO_EVENT_ETH_DISCONNECTED:
-            // logInfoP("ETH Disconnected");
+            logTraceP("ETH Disconnected");
             espConnected = false;
             break;
         case ARDUINO_EVENT_ETH_STOP:
-            // logInfoP("ETH Stopped");
+            logTraceP("ETH Stopped");
             espConnected = false;
             break;
         default:
@@ -265,6 +265,11 @@ void NetworkModule::initIp()
     logInfoP("WiFi.onEvent");
     WiFi.onEvent([](WiFiEvent_t event) -> void { openknxNetwork.esp32WifiEvent(event); });
 
+    logDebugP("KNX_NETIF.begin");
+    KNX_NETIF.begin();
+    logDebugP("KNX_NETIF.begin done");
+
+    // Static IP must configured after dhcp!!!
     if (_useStaticIP)
     {
         if (!KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP))
@@ -274,9 +279,6 @@ void NetworkModule::initIp()
             logIndentDown();
         }
     }
-
-    KNX_NETIF.begin();
-    delay(1000);
 #endif
 
 #if defined(KNX_IP_W5500)
