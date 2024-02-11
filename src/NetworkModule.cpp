@@ -104,8 +104,27 @@ void NetworkModule::loadSettings()
     uint32_t serial = htonl(openknx.info.serialNumber());
     memcpy(_mac + 2, &serial, 4);
 
+
+#if !defined(ParamNET_HostAddress) || !defined(ParamNET_SubnetMask) || !defined(ParamNET_GatewayAddress) || !defined(ParamNET_NameserverAddress) || !defined(ParamNET_StaticIP) || defined(OPENKNX_NETWORK_USEIPPROP)
+
+    logInfoP("Read ip settings from properties");
+    _staticGatewayIP = GetIpProperty(PID_DEFAULT_GATEWAY);
+    _staticSubnetMask = GetIpProperty(PID_SUBNET_MASK);
+    _staticLocalIP = GetIpProperty(PID_IP_ADDRESS);
+    _useStaticIP = GetByteProperty(PID_IP_ASSIGNMENT_METHOD) == 1; // see 2.5.6 of 03_08_03
+
     if (knx.configured())
     {
+#else
+    if (knx.configured())
+    {
+        logInfoP("Read ip settings from parameters");
+        _staticLocalIP = htonl(ParamNET_HostAddress);
+        _staticSubnetMask = htonl(ParamNET_SubnetMask);
+        _staticGatewayIP = htonl(ParamNET_GatewayAddress);
+        _staticNameServerIP = htonl(ParamNET_NameserverAddress);
+        _useStaticIP = ParamNET_StaticIP;
+#endif
         // custom hostname
 #ifdef ParamNET_CustomHostname
         if (ParamNET_CustomHostname)
@@ -113,22 +132,6 @@ void NetworkModule::loadSettings()
             logDebugP("Read hostname from parameters");
             memcpy(_hostName, ParamNET_HostName, 24);
         }
-#endif
-
-#if !defined(ParamNET_HostAddress) || !defined(ParamNET_SubnetMask) || !defined(ParamNET_GatewayAddress) || !defined(ParamNET_NameserverAddress) || !defined(ParamNET_StaticIP) || defined(OPENKNX_NETWORK_USEIPPROP)
-
-        logInfoP("Read ip settings from properties");
-        _staticGatewayIP = GetIpProperty(PID_DEFAULT_GATEWAY);
-        _staticSubnetMask = GetIpProperty(PID_SUBNET_MASK);
-        _staticLocalIP = GetIpProperty(PID_IP_ADDRESS);
-        _useStaticIP = GetByteProperty(PID_IP_ASSIGNMENT_METHOD) == 1; // see 2.5.6 of 03_08_03
-#else
-        logInfoP("Read ip settings from parameters");
-        _staticLocalIP = htonl(ParamNET_HostAddress);
-        _staticSubnetMask = htonl(ParamNET_SubnetMask);
-        _staticGatewayIP = htonl(ParamNET_GatewayAddress);
-        _staticNameServerIP = htonl(ParamNET_NameserverAddress);
-        _useStaticIP = ParamNET_StaticIP;
 #endif
     }
     else
@@ -497,6 +500,8 @@ IPAddress NetworkModule::GetIpProperty(uint8_t PropertyId)
     uint8_t *data;
     uint32_t length;
     knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PropertyId, NoOfElem, 1, &data, length);
+    if(NoOfElem == 0)
+        return IPAddress(0);
     IPAddress ret = (data[3] << 24) + (data[2] << 16) + (data[1] << 8) + data[0];
     delete[] data;
     return ret;
@@ -522,6 +527,8 @@ uint8_t NetworkModule::GetByteProperty(uint8_t PropertyId)
     uint8_t ret;
     uint32_t length;
     knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PropertyId, NoOfElem, 1, &data, length);
+    if(NoOfElem == 0)
+        return 0;
     ret = data[0];
     delete[] data;
     return ret;
