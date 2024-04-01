@@ -12,7 +12,11 @@ MDNS mdns(udp);
 #else
     #include "LEAmDNS.h"
     #ifdef KNX_IP_W5500
+        #ifdef PIN_ETH_IRQ
+Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE, PIN_ETH_IRQ);
+        #else
 Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE);
+        #endif
     #endif
 WiFiUDP Udp;
 #endif
