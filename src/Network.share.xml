@@ -115,8 +115,8 @@
             </Messages>
           </Static>
           <Dynamic>
-            <ChannelIndependentBlock>
-              <ParameterBlock Id="%AID%_PB-nnn" Name="Network" Text="Netzwerk" Icon="ethernet" HelpContext="Empty">
+            <Channel Id="%AID%_CH-%PREFIX%" Number="%PREFIX%" Name="Main" Text="Netzwerk" Icon="ethernet" HelpContext="Empty">
+              <ParameterBlock Id="%AID%_PB-nnn" Name="Basic" Text="Allgemein" Icon="cog-outline" HelpContext="Empty">
                 <!-- Hidden -->
                 <ParameterRefRef RefId="%AID%_P-%TT%01000_R-%TT%0100000" />
 
@@ -145,13 +145,6 @@
                 <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000">
                   <when test="!=%NET_ServiceHTTP%">
                     <ParameterRefRef RefId="%AID%_UP-%TT%00032_R-%TT%0003201" IndentLevel="1" />
-                    <choose ParamRefId="%AID%_UP-%TT%00032_R-%TT%0003201">
-                      <when test="1">
-                        <ParameterBlock Id="%AID%_PB-nnn" Name="HTTP" Text="Webserver" Icon="web" HelpContext="Empty">
-                          <ParameterSeparator Id="%AID%_PS-nnn" Text="Webservereinstellung" UIHint="Headline" />
-                        </ParameterBlock>
-                      </when>
-                    </choose>
                   </when>
                 </choose>
 
@@ -165,9 +158,6 @@
                       </when>
                       <when test="1">
                         <Assign TargetParamRefRef="%AID%_P-1000010_R-100001001" Value="1" />
-                        <ParameterBlock Id="%AID%_PB-nnn" Name="NTP" Text="Zeitgeber" Icon="clock-outline" HelpContext="Empty">
-                          <ParameterSeparator Id="%AID%_PS-nnn" Text="Zeitgeber (NTP)" UIHint="Headline" />
-                        </ParameterBlock>
                       </when>
                     </choose>
                   </when>
@@ -183,7 +173,27 @@
 
                 <ParameterRefRef RefId="%AID%_UP-%TT%00052_R-%TT%0005201" IndentLevel="1" HelpContext="NET-LanMode" />
               </ParameterBlock>
-            </ChannelIndependentBlock>
+
+
+                <!-- HTTP -->
+                <choose ParamRefId="%AID%_UP-%TT%00032_R-%TT%0003201">
+                  <when test="1">
+                    <ParameterBlock Id="%AID%_PB-nnn" Name="HTTP" Text="Webserver" Icon="web" HelpContext="Empty">
+                      <ParameterSeparator Id="%AID%_PS-nnn" Text="Webservereinstellung" UIHint="Headline" />
+                    </ParameterBlock>
+                  </when>
+                </choose>
+
+                <!-- NTP -->
+                <choose ParamRefId="%AID%_UP-%TT%00033_R-%TT%0003301">
+                  <when test="1">
+                    <ParameterBlock Id="%AID%_PB-nnn" Name="NTP" Text="Zeitgeber" Icon="clock-outline" HelpContext="Empty">
+                      <ParameterSeparator Id="%AID%_PS-nnn" Text="Zeitgeber (NTP)" UIHint="Headline" />
+                    </ParameterBlock>
+                  </when>
+                </choose>
+
+            </Channel>
           </Dynamic>
         </ApplicationProgram>
       </ApplicationPrograms>
