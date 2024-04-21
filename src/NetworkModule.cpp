@@ -19,6 +19,7 @@ MDNS mdns(udp);
 #else
     #include "LEAmDNS.h"
     #ifdef KNX_IP_W5500
+        #include "W5500lwIP.h"
         #ifdef PIN_ETH_INT
 Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE, PIN_ETH_INT);
         #else
@@ -296,6 +297,7 @@ void NetworkModule::initIp()
         }
     }
 
+    KNX_NETIF.setSPISpeed(OPENKNX_NET_SPI_SPEED);
     if (!KNX_NETIF.begin((const uint8_t *)_mac))
     {
         openknx.hardware.fatalError(7, "Error communicating with W5500 Ethernet chip");
@@ -508,11 +510,13 @@ void NetworkModule::checkLinkStatus()
     {
         logInfoP("Link connected");
 #if defined(KNX_IP_W5500)
-        netif_set_link_up(KNX_NETIF.getNetIf());
-        if (_useStaticIP)
-            netif_set_ipaddr(KNX_NETIF.getNetIf(), _staticLocalIP);
-        else
-            dhcp_network_changed_link_up(KNX_NETIF.getNetIf());
+        // ethernet_arch_lwip_begin();
+        // netif_set_link_up(KNX_NETIF.getNetIf());
+        // if (_useStaticIP)
+        // netif_set_ipaddr(KNX_NETIF.getNetIf(), _staticLocalIP);
+        // else
+        // dhcp_network_changed_link_up(KNX_NETIF.getNetIf());
+        // ethernet_arch_lwip_end();
 #elif defined(KNX_IP_GENERIC)
         if (!established()) KNX_NETIF.maintain();
 #endif
@@ -523,8 +527,10 @@ void NetworkModule::checkLinkStatus()
     {
         _ipShown = false;
 #if defined(KNX_IP_W5500)
-        netif_set_ipaddr(KNX_NETIF.getNetIf(), 0);
-        netif_set_link_down(KNX_NETIF.getNetIf());
+        // ethernet_arch_lwip_begin();
+        // netif_set_ipaddr(KNX_NETIF.getNetIf(), 0);
+        // netif_set_link_down(KNX_NETIF.getNetIf());
+        // ethernet_arch_lwip_end();
 #endif
         loadCallbacks(false);
         logInfoP("Link disconnected");

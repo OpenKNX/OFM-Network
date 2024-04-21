@@ -33,6 +33,10 @@
     #error "no Ethernet stack specified, #define KNX_IP_WIFI or KNX_IP_W5500"
 #endif
 
+#ifndef OPENKNX_NET_SPI_SPEED
+    #define OPENKNX_NET_SPI_SPEED 28000000
+#endif
+
 typedef std::function<void(bool)> NetworkChangeCallback;
 
 class NetworkModule : public OpenKNX::Module
