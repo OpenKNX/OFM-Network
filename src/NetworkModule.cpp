@@ -1,3 +1,4 @@
+#ifndef OPENKNX_NET_IGNORE 
 #include "NetworkModule.h"
 #include "ModuleVersionCheck.h"
 
@@ -816,3 +817,4 @@ bool NetworkModule::restorePower()
 }
 
 NetworkModule openknxNetwork;
+#endif
