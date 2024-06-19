@@ -54,12 +54,16 @@ class NetworkModule : public OpenKNX::Module
     bool processCommand(const std::string cmd, bool debugKo);
     void showHelp() override;
     void showNetworkInformations(bool console = false);
+
+#ifdef HAS_WIFI
+    void saveWifiSettings(const char *ssid, const char *passphrase);
+    void readWifiSettings();
+#endif
+
 #ifdef HAS_USB
     void fillNetworkFile(UsbExchangeFile *file);
-    #ifdef HAS_WIFI
-    void readWifiSettingsFromFile();
-    #endif
 #endif
+
     void registerCallback(NetworkChangeCallback callback);
 
     bool connected();
