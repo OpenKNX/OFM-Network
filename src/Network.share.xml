@@ -3,6 +3,8 @@
 <KNX xmlns:op="http://github.com/OpenKNX/OpenKNXproducer" xmlns="http://knx.org/xml/project/20" CreatedBy="KNX MT" ToolVersion="5.1.255.16695">
   <!-- Enable IPTool of ETS. This hide ip settings in network tab -->
   <op:config name="%NET_IPConfigTool%" value="0" />
+  <op:config name="%NET_WifiTool%" value="0" />
+  <op:config name="%NET_LanMode%" value="0" />
 
   <!-- Prepare: Not ready to use -->
   <op:config name="%NET_ServiceHTTP%" value="0" />
@@ -30,7 +32,13 @@
                 <TypeIPAddress AddressType="GatewayAddress" />
               </ParameterType>
               <ParameterType Id="%AID%_PT-Hostname" Name="Hostname" ValidationErrorRef="%AID%_M-%TT%00001">
-                <TypeText SizeInBit="192" Pattern="^[A-Za-z](?:[A-Za-z0-9\-]*[A-Za-z0-9])*$"/>
+                <TypeText SizeInBit="192" Pattern="^([A-Za-z](?:[A-Za-z0-9\-]*[A-Za-z0-9])*|)$"/>
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-WifiSSID" Name="WifiSSID">
+                <TypeText SizeInBit="256" />
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-WifiPassword" Name="WifiPassword">
+                <TypeText SizeInBit="504" />
               </ParameterType>
               <ParameterType Id="%AID%_PT-LanMode" Name="LanMode">
                 <TypeRestriction Base="Value" SizeInBit="4">
@@ -45,6 +53,8 @@
             <Parameters>
               <!-- helper to check against a certain value in the case of a choose -->
               <Parameter Id="%AID%_P-%TT%01000" Name="SelectHelper"          ParameterType="%AID%_PT-ValueDpt5"         Text=""        Value="0" Access="None" />
+              <Parameter Id="%AID%_P-%TT%01001" Name="WifiSSID"              ParameterType="%AID%_PT-WifiSSID"          Text="SSID"    Value="" />
+              <Parameter Id="%AID%_P-%TT%01002" Name="WifiPassword"          ParameterType="%AID%_PT-WifiPassword"      Text="PSK"     Value=""/>
 
               <!-- IP Config -->
               <Union SizeInBit="128"><!-- 16bytes-->
@@ -94,6 +104,8 @@
             </Parameters>
             <ParameterRefs>
               <ParameterRef Id="%AID%_P-%TT%01000_R-%TT%0100000" RefId="%AID%_P-%TT%01000" />
+              <ParameterRef Id="%AID%_P-%TT%01001_R-%TT%0100100" RefId="%AID%_P-%TT%01001" />
+              <ParameterRef Id="%AID%_P-%TT%01002_R-%TT%0100200" RefId="%AID%_P-%TT%01002" />
               <ParameterRef Id="%AID%_UP-%TT%00001_R-%TT%0000101" RefId="%AID%_UP-%TT%00001" />
               <ParameterRef Id="%AID%_UP-%TT%00002_R-%TT%0000201" RefId="%AID%_UP-%TT%00002" />
               <ParameterRef Id="%AID%_P-%TT%00010_R-%TT%0001001" RefId="%AID%_P-%TT%00010" />
@@ -113,6 +125,9 @@
             <Messages>
               <Message Id="%AID%_M-%TT%00001" Name="InvalidHostName" Text="Darf nur 24 Zeichen lang sein und muss aus Buchstaben, Zahlen und Bindestriche bestehen." />
             </Messages>
+            <Script>
+              <op:include href="Network.script.js" prefix="NET" type="script" />
+            </Script>  
           </Static>
           <Dynamic>
             <Channel Id="%AID%_CH-%PREFIX%" Number="%PREFIX%" Name="Main" Text="Netzwerk" Icon="ethernet" HelpContext="Empty">
@@ -164,6 +179,7 @@
                 </choose>
 
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="Erweiterte Einstellung" UIHint="Headline" />
+                <!-- Hostname -->
                 <ParameterRefRef RefId="%AID%_UP-%TT%00001_R-%TT%0000101" IndentLevel="1" HelpContext="NET-Hostname" />
                 <choose ParamRefId="%AID%_UP-%TT%00001_R-%TT%0000101">
                   <when test="1">
@@ -171,27 +187,57 @@
                   </when>
                 </choose>
 
-                <ParameterRefRef RefId="%AID%_UP-%TT%00052_R-%TT%0005201" IndentLevel="1" HelpContext="NET-LanMode" />
+                <!-- LanMode -->
+                <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000">
+                  <when test="!=%NET_LanMode%">
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00052_R-%TT%0005201" IndentLevel="1" HelpContext="NET-LanMode" />
+                  </when>
+                </choose>
               </ParameterBlock>
 
+              <!-- HTTP -->
+              <choose ParamRefId="%AID%_UP-%TT%00032_R-%TT%0003201">
+                <when test="1">
+                  <ParameterBlock Id="%AID%_PB-nnn" Name="HTTP" Text="Webserver" Icon="web" HelpContext="Empty">
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="Webservereinstellung" UIHint="Headline" />
+                  </ParameterBlock>
+                </when>
+              </choose>
 
-                <!-- HTTP -->
-                <choose ParamRefId="%AID%_UP-%TT%00032_R-%TT%0003201">
-                  <when test="1">
-                    <ParameterBlock Id="%AID%_PB-nnn" Name="HTTP" Text="Webserver" Icon="web" HelpContext="Empty">
-                      <ParameterSeparator Id="%AID%_PS-nnn" Text="Webservereinstellung" UIHint="Headline" />
-                    </ParameterBlock>
-                  </when>
-                </choose>
+              <!-- NTP -->
+              <choose ParamRefId="%AID%_UP-%TT%00033_R-%TT%0003301">
+                <when test="1">
+                  <ParameterBlock Id="%AID%_PB-nnn" Name="NTP" Text="Zeitgeber" Icon="clock-outline" HelpContext="Empty">
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="Zeitgeber (NTP)" UIHint="Headline" />
+                  </ParameterBlock>
+                </when>
+              </choose>
 
-                <!-- NTP -->
-                <choose ParamRefId="%AID%_UP-%TT%00033_R-%TT%0003301">
-                  <when test="1">
-                    <ParameterBlock Id="%AID%_PB-nnn" Name="NTP" Text="Zeitgeber" Icon="clock-outline" HelpContext="Empty">
-                      <ParameterSeparator Id="%AID%_PS-nnn" Text="Zeitgeber (NTP)" UIHint="Headline" />
+              <!-- WiFi -->
+              <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000"><!-- Static 0 -->
+                <when test="!=%NET_WifiTool%"> <!-- default -->
+                  <ParameterBlock Id="%AID%_PB-nnn" Name="WiFi" Text="WiFi-Assistent" Icon="wifi" HelpContext="NET-WiFi-Assistent">
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="Wifi-Assistent" UIHint="Headline" />
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="Dieser WiFi-Assistent ermöglicht das Übertragen von WiFi-Zugangsdaten auf das Gerät. Voraussetzung ist, dass die verwendete Software bzw. Hardware WiFi-Support integriert hat." />
+                    
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="Einstellungen" UIHint="Headline" />
+                    <ParameterRefRef RefId="%AID%_P-%TT%01001_R-%TT%0100100" IndentLevel="1" />
+                    <ParameterRefRef RefId="%AID%_P-%TT%01002_R-%TT%0100200" IndentLevel="1" />
+
+                    <ParameterBlock Id="%AID%_PB-nnn" Name="A" Inline="true" Layout="Grid">
+                      <Rows>
+                        <Row Id="%AID%_PB-nnn_R-1" Name="Row1" />
+                      </Rows>
+                      <Columns>
+                        <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="46%" />
+                        <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="53%" />
+                      </Columns>
+                      <Button Id="%AID%_MD-%TT%000100_B-%TT%00000" Text="Übertragen" EventHandlerOnline="ConnectionOriented" EventHandler="sendWifiSettings" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
                     </ParameterBlock>
-                  </when>
-                </choose>
+
+                  </ParameterBlock>
+                </when>
+              </choose>
 
             </Channel>
           </Dynamic>

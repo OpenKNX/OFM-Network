@@ -4,16 +4,15 @@ This module provides the network functionality for the OpenKNX stack.
 
 ## Platforms
 
-| Plattform | Ethernet | Stack      | Define         | Note                             |
-| --------- | -------- | ---------- | -------------- | -------------------------------- |
-| Header    | W5500    | Integrated | KNX_IP_W5500   | high latency + problems with knx |
-| Header    | WIFI     | Integrated | KNX_IP_WIFI    | high latency + problems with knx |
-| Header    | W5500    | Integrated | KNX_IP_GENERIC | low latency, limmited socket     |
+* ARDUINO_ARCH_ESP32
+* ARDUINO_ARCH_RP2040
 
-## Platformio.ini
+## Defines
 
-```ini
-# Required when building firmware with Ethernet_Generic (typical for rp2040 with LAN).
-lib_deps =
-  ${Network_Generic.lib_deps}
-```
+| Arch   | Type | Stack      | Define      | Note                                                          |
+| ------ | ---- | ---------- | ----------- | ------------------------------------------------------------- |
+| ESP32  | WiFi | Integrated | KNX_IP_WIFI |                                                               |
+| ESP32  | LAN  | Integrated | KNX_IP_LAN  | You need to set right board and presumably CONFIG_ETH_ENABLED |
+| RP2040 | WiFi | Integrated | KNX_IP_WIFI |                                                               |
+| RP2040 | LAN  | Integrated | KNX_IP_LAN  |                                                               |
+

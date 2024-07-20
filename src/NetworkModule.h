@@ -3,38 +3,38 @@
 #include "strings.h"
 #include <functional>
 
-#ifdef KNX_IP_WIFI
-    #define HAS_WIFI
-#endif
+#if defined(ARDUINO_ARCH_ESP32)
+    #include <ESPmDNS.h>
+    #include <Preferences.h>
+    #include <vector>
+    #if defined(KNX_IP_LAN)
+        #include <ETH.h>
+        #define KNX_NETIF ETH
+    #elif defined(KNX_IP_WIFI)
+        #include <WiFi.h>
+    #endif
+#elif defined(ARDUINO_ARCH_RP2040)
+    #ifndef OPENKNX_USB_EXCHANGE_IGNORE
+        #define HAS_USB
+    #endif
 
-#ifdef ARDUINO_ARCH_RP2040
-    #define HAS_USB
+    #ifndef OPENKNX_NET_SPI_SPEED
+        #define OPENKNX_NET_SPI_SPEED 28000000
+    #endif
+
+    #if defined(KNX_IP_LAN)
+        #include <W5500lwIP.h>
+        #include <lwip/dhcp.h>
+    #elif defined(KNX_IP_WIFI)
+        #include "LittleFS.h"
+        #include <WiFi.h>
+    #endif
+#else
+    #pragma warn "Unsupported platform"
 #endif
 
 #ifdef HAS_USB
     #include "UsbExchangeModule.h"
-#endif
-
-#if defined(KNX_IP_W5500)
-    #include <W5500lwIP.h>
-    #include <lwip/dhcp.h>
-#elif defined(KNX_IP_WIFI)
-    #include <WiFi.h>
-#elif defined(KNX_IP_GENERIC)
-
-#elif defined(ARDUINO_ARCH_ESP32)
-    #include <ESPmDNS.h>
-    #ifdef CONFIG_ETH_ENABLED
-        #include <ETH.h>
-    #endif
-    #include <vector>
-
-#else
-    #error "no Ethernet stack specified, #define KNX_IP_WIFI or KNX_IP_W5500"
-#endif
-
-#ifndef OPENKNX_NET_SPI_SPEED
-    #define OPENKNX_NET_SPI_SPEED 28000000
 #endif
 
 typedef std::function<void(bool)> NetworkChangeCallback;
@@ -55,7 +55,9 @@ class NetworkModule : public OpenKNX::Module
     void showHelp() override;
     void showNetworkInformations(bool console = false);
 
-#ifdef HAS_WIFI
+    bool processFunctionProperty(uint8_t objectIndex, uint8_t propertyId, uint8_t length, uint8_t *data, uint8_t *resultData, uint8_t &resultLength) override;
+
+#ifdef KNX_IP_WIFI
     void saveWifiSettings(const char *ssid, const char *passphrase);
     void readWifiSettings();
 #endif
@@ -73,7 +75,6 @@ class NetworkModule : public OpenKNX::Module
     IPAddress gatewayIP();
     IPAddress nameServerIP();
     std::string phyMode();
-    void macAddress(uint8_t *address);
 
 #ifdef ARDUINO_ARCH_ESP32
     void esp32WifiEvent(WiFiEvent_t event);
@@ -98,7 +99,6 @@ class NetworkModule : public OpenKNX::Module
     bool espConnected = false;
 #endif
 
-    uint8_t _mac[6] = {};
     char _hostName[25] = {};
 
     char *_mDNSHttpServiceName = nullptr;
@@ -106,6 +106,7 @@ class NetworkModule : public OpenKNX::Module
     char *_mDNSDeviceServiceNameTXT = nullptr;
     bool _currentLinkState = false;
     uint32_t _lastLinkCheck = false;
+    uint32_t _restartTimer = 0;
 
     void initPhy();
     void initIp();
@@ -115,7 +116,7 @@ class NetworkModule : public OpenKNX::Module
     void loadCallbacks(bool state);
     void handleMDNS();
 
-#ifdef HAS_WIFI
+#ifdef KNX_IP_WIFI
     char _wifiSSID[33] = {};
     char _wifiPassphrase[64] = {};
 #endif
