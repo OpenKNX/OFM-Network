@@ -235,7 +235,7 @@ void NetworkModule::initIp()
 
     KNX_NETIF.setSPISpeed(OPENKNX_NET_SPI_SPEED);
     if (!KNX_NETIF.begin())
-        openknx.hardware.fatalError(7, "Error communicating with W5500 Ethernet chip");
+        openknx.hardware.fatalError(FATAL_NETWORK, "Error communicating with W5500 Ethernet chip");
         #endif
     #endif
 }
