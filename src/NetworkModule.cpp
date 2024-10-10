@@ -558,7 +558,7 @@ void NetworkModule::showHelp()
 }
 
 // Link status
-inline bool NetworkModule::connected()
+bool NetworkModule::connected()
 {
     if (_powerSave) return false;
 
@@ -574,29 +574,29 @@ inline bool NetworkModule::connected()
 }
 
 // IP Status
-inline bool NetworkModule::established()
+bool NetworkModule::established()
 {
     if (!connected()) return false;
 
     return localIP() != IPAddress();
 }
 
-inline IPAddress NetworkModule::localIP()
+IPAddress NetworkModule::localIP()
 {
     return KNX_NETIF.localIP();
 }
 
-inline IPAddress NetworkModule::subnetMask()
+IPAddress NetworkModule::subnetMask()
 {
     return KNX_NETIF.subnetMask();
 }
 
-inline IPAddress NetworkModule::gatewayIP()
+IPAddress NetworkModule::gatewayIP()
 {
     return KNX_NETIF.gatewayIP();
 }
 
-inline IPAddress NetworkModule::nameServerIP()
+IPAddress NetworkModule::nameServerIP()
 {
     #if defined(ARDUINO_ARCH_RP2040)
     return IPAddress(dns_getserver(0));
