@@ -620,8 +620,12 @@ void NetworkModule::savePower()
 
 bool NetworkModule::restorePower()
 {
-    delay(1000);
-    return false;
+    // TODO check all platforms
+    #if defined(PIN_ETH_RES)
+    digitalWrite(PIN_ETH_RES, HIGH);
+    #endif
+    _powerSave = false;
+    return true;
 }
 
     #ifdef KNX_IP_WIFI
