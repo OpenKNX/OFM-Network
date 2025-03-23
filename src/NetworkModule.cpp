@@ -557,21 +557,18 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
     #ifdef KNX_IP_WIFI
     else if (cmd.compare(0, 5, "wifi ") == 0 && cmd.length() > 8)
     {
-
-        std::istringstream iss(cmd);
-        std::string token;
-        std::string ssid;
-        std::string psk;
-
-        iss >> token; // wifi am anfang
-        iss >> ssid;  // ssid
-        iss >> psk;   // psk
-
-        logInfoP("WLAN SSID: %s", ssid.c_str());
-
-        saveWifiSettings(ssid.c_str(), psk.c_str());
-
-        return true;
+        std::string ssid_psk = cmd.substr(5);
+        size_t pos = ssid_psk.find("__"); // find pos of first double underscore, which separates the SSID from the PSK
+        if (pos != std::string::npos)
+        {
+            logInfoP("WLAN SSID: %s", ssid_psk.substr(0, pos).c_str());
+            saveWifiSettings(ssid_psk.substr(0, pos).c_str(), ssid_psk.substr(pos + 2 /*Seperator __ */).c_str());
+            return true;
+        }
+        else
+        {
+            logErrorP("Invalid command format. Use: wifi <SSID>__<PSK>. Seperator is: double underscore '__'");
+        }
     }
 
     // else if (cmd == "net recon" && strlen(_wifiSSID) > 0)
@@ -643,7 +640,7 @@ void NetworkModule::showHelp()
 
     #ifdef KNX_IP_WIFI
 
-    openknx.console.printHelpLine("wifi SSID PSK", "Set SSID and PSK");
+    openknx.console.printHelpLine("wifi SSID__PSK", "Set SSID and PSK seperated by __");
 
     // if (strlen(_wifiSSID) > 0) openknx.console.printHelpLine("net recon", "Reconnect to network");
     #else
