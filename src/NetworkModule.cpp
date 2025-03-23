@@ -555,23 +555,29 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
     }
 
     #ifdef KNX_IP_WIFI
-    else if (cmd.compare(0, 5, "wifi ") == 0 && cmd.length() > 8)
+    else if (cmd.compare(0, 4, "wifi") == 0 && cmd.length() > 6)
     {
+        // Command: "wifi<SEP><ssid><SEP><psk>" with <SEP>=" " compatible to previous command
+        char delimiter = cmd[4];
+        std::string ssid_psk = cmd.substr(5);
+        size_t pos = ssid_psk.find(delimiter);
 
-        std::istringstream iss(cmd);
-        std::string token;
-        std::string ssid;
-        std::string psk;
+        if (pos != std::string::npos)
+        {
+            std::string ssid = ssid_psk.substr(0, pos);
+            std::string psk = ssid_psk.substr(pos + 1);
 
-        iss >> token; // wifi am anfang
-        iss >> ssid;  // ssid
-        iss >> psk;   // psk
+            logInfoP("WLAN SSID: %s", ssid.c_str());
 
-        logInfoP("WLAN SSID: %s", ssid.c_str());
+            saveWifiSettings(ssid.c_str(), psk.c_str());
 
-        saveWifiSettings(ssid.c_str(), psk.c_str());
-
-        return true;
+            return true;
+        }
+        else
+        {
+            logErrorP("Expected format: wifi<Sep><SSID><Sep><PSK> with <Sep> single char not in <SSID>");
+            return false;
+        }
     }
 
     // else if (cmd == "net recon" && strlen(_wifiSSID) > 0)
