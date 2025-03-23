@@ -244,6 +244,7 @@ void NetworkModule::initIp()
     {
         KNX_NETIF.config(_staticLocalIP, _staticNameServerIP, _staticGatewayIP, _staticSubnetMask);
         logInfoP("Connecting to WiFi \"%s\"", _wifiSSID);
+        KNX_NETIF.setTimeout(2000); // 2000 ms = 4 seconds (timeout is multiplied by 2)
         KNX_NETIF.begin(_wifiSSID, _wifiPassphrase);
     }
         #else
