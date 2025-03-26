@@ -63,3 +63,83 @@ Beim kompilieren kann in den Webdateien automatisch eine Ersetzung von verschied
 |Platzhalter|Ersetzt durch|Standardwert|
 |---|---|---|
 |#webserver#base-uri#|WEBSERVER_BASE_URI|/openknx
+
+### Verwendung in Modulen
+Ander Module können eigene Pages oder Handler hinzufügen.  
+Diese werden dann auch in der Übersichtsseite angezeigt.  
+
+#### Pages (empfohlen)
+Pages bieten die Möglichkeit ohne einen Hander zu verbrauchen, eigene Webseiten zur Verfügung zu stellen. Die URL dazu baut immer auf der WEBSERVER_BASE_URI auf. Eine Angabe von /dali wäre also zum Beispiel unter /openknx/dali erreichbar.  
+Es werden auch alle anderen Anfragen weitergeleitet, die mit /openknx/dali beginnen (/openknx/dali.css oder /openknx/dali/monitor/lib.js)
+```C++
+WebserverPage _page = {
+    .uri = "/dali", // URL (Relativ von /<WEBSERVER_BASE_URI>), Gleichzeitig auch Link auf der Übersichtsseite
+    .name = "Dali Monitor", // Anzeigename auf der Übersichtsseite
+    .isVisible = true, // Soll der Handler auf der Übersichtseite angezeigt werden
+    .handler = page_handler, // Funktion welche die Anfragen bearbeitet
+    .arg = (void*)this // Argument um die Modulinstanz zu übergeben
+};
+openknxNetwork.addWebserverPage(_page);
+
+[...]
+
+static esp_err_t page_handler(const char *uri, httpd_req_t *req, void *arg)
+{
+    IotGateway *gw = (IotGateway *)arg;
+
+    if(strcmp(uri, "/dali") == 0)
+    {
+        httpd_resp_set_type(req, "text/html");
+        httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+        httpd_resp_send(req, file_index_html, file_index_html_len);
+        return ESP_OK;
+    }
+    else if(strcmp(uri, "/dali.css") == 0)
+    {
+      [...]
+    }
+    else if(strcmp(uri, "/dali.css") == 0)
+    {
+      [...]
+    }
+
+    httpd_resp_send_404(req);
+    return ESP_ERR_NOT_FOUND;
+}
+```
+
+#### Handler
+Es kann unter Umständen hilfreich sein, einen eigenen Handler zu definieren.  
+Dieser kann dann zum Beispiel für Websocket verbindungen verwendet werden.
+```C++
+httpd_uri_t ws = {
+    .uri = "/", // URL der Anwendung (absoluter Pfad)
+    .method = HTTP_GET, // Anzeigename auf der Übersichtsseite
+    .handler = ws_handler, // Funktion welche die Anfragen bearbeitet
+    .user_ctx = this, // Argument um die Modulinstanz zu übergeben
+    .is_websocket = true // Angabe ob es sich um einen Websockethandler handelt
+};
+WebserverHandler _ws = {
+    .httpd = ws, // Angabe des httpd_uri_t
+    .uri = "/", // Angabe der URL für den Link auf der Übersichtsseite
+    .name = "Dali Websocket", // Anzeigename auf der Übersichtsseite
+    .isVisible = false // Soll der Handler auf der Übersichtseite angezeigt werden
+};
+openknxNetwork.addWebserverHandler(_ws);
+
+[...]
+
+static esp_err_t ws_handler(httpd_req_t *req)
+{
+    IotGateway *gw = (IotGateway *)req->user_ctx;
+
+    if(req->method == HTTP_GET)
+    {
+      // Got new Websocket Connection
+      return ESP_OK
+    }
+
+  // Handle websocket packages
+  return ESP_OK;
+}
+```
