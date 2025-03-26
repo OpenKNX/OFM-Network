@@ -37,3 +37,29 @@ Hinweis: Der Hostname des Gerätes kann in der ETS im Abschnitt Netzwerk unter m
 ### RP2040 OTA
 
 Aktuelle ist der OTA Upload beim RP2040 noch nicht getestet.
+
+## Webserver (ESP32 only)
+
+### Defines
+|Define|Description|
+|---|---|
+|WEBSERVER_BASE_URI|Setzt die Hauptseite. Standard: /openknx
+|WEBSERVER_BASE_URI_USED|Wenn gesetzt, wird kein Handler für "/" registriert. (Umleitung auf "/WEBSERVER_BASE_URI")|
+
+
+### Webdateien
+Um automatisch html/js/css zu komprimieren und als Headerdatei  
+zur Verfügung zu stellen, muss folgendes in der .custom.ini eingetragen werden:
+```ini
+extra_scripts =
+  ${env.extra_scripts}
+  lib/OFM-Network/scripts/pio/minimize.py
+```
+Die Dateien müssen im Ordner /www sein und werden dann in den include Ordner als  
+char array gespeichert.
+
+### Automatische Ersetzung
+Beim kompilieren kann in den Webdateien automatisch eine Ersetzung von verschiedenen Variablen erfolgen:
+|Platzhalter|Ersetzt durch|Standardwert|
+|---|---|---|
+|#webserver#base-uri#|WEBSERVER_BASE_URI|/openknx

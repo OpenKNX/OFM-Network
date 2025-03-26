@@ -448,6 +448,9 @@ void NetworkModule::loop(bool configured)
 
     checkLinkStatus();
     handleOTA();
+#if defined(ARDUINO_ARCH_ESP32)
+    handleWebserver();
+#endif
 }
 
 void NetworkModule::handleOTA()
@@ -862,6 +865,162 @@ bool NetworkModule::processFunctionProperty(uint8_t objectIndex, uint8_t propert
     resultLength = 1;
     return false;
 }
+
+
+#if defined(ARDUINO_ARCH_ESP32)
+void NetworkModule::handleWebserver()
+{
+    if(_firstLoop)
+    {
+        _firstLoop = false;
+        httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+        config.uri_match_fn = httpd_uri_match_wildcard;
+
+        if (httpd_start(&_webserver, &config) == ESP_OK) {
+            // Registering the ws handler
+            logDebugP("Registering URI handlers");
+            logIndentUp();
+
+            #ifndef WEBUI_BASE_URI_USED
+            logDebugP("URI handler for /");
+            httpd_uri_t baseUri = {
+                .uri = "/",
+                .method = HTTP_GET,
+                .handler = webserver_base_handler,
+                .user_ctx = this
+            };
+            httpd_register_uri_handler(_webserver, &baseUri);
+            #endif
+
+            logDebugP("URI handler for %s", WEBSERVER_BASE_URI);
+            httpd_uri_t baseUri = {
+                .uri = (std::string(webserver_base_uri) + "*").c_str(),
+                .method = HTTP_GET,
+                .handler = webserver_base_handler,
+                .user_ctx = this
+            };
+            httpd_register_uri_handler(_webserver, &baseUri);
+
+            for(auto &handle : _webserverHandler)
+            {
+                logDebugP("URI handler for %s at %s", handle.name.c_str(), handle.uri);
+                httpd_register_uri_handler(_webserver, &handle.httpd);
+            }
+
+            for(auto &page : _webserverPages)
+            {
+                logDebugP("URI page for %s at %s", page.name.c_str(), page.uri);
+            }
+            logIndentDown();
+        } else {
+            logErrorP("Failed to start the server");
+        }
+    }
+}
+
+void NetworkModule::addWebserverHandler(WebserverHandler h)
+{
+    _webserverHandler.push_back(h);
+}
+
+void NetworkModule::addWebserverPage(WebserverPage p)
+{
+    _webserverPages.push_back(p);
+}
+
+httpd_handle_t NetworkModule::getWebserverHandler()
+{
+    return _webserver;
+}
+
+const char * NetworkModule::getWebserverBaseUri()
+{
+    return webserver_base_uri;
+}
+
+
+esp_err_t NetworkModule::webserver_base_handler(httpd_req_t *req)
+{
+    NetworkModule *ui = (NetworkModule *)req->user_ctx;
+
+    if(strcmp(req->uri, WEBSERVER_BASE_URI) == 0)
+    {
+        std::string response = index_html;
+        
+        response += "<h3>Web-Services:</h3><ul>";
+        for(auto &handle : ui->_webserverHandler)
+        {
+            if(handle.isVisible == false)
+                continue;
+            response += "<a href=\"";
+            response += handle.uri;
+            response += "\">";
+            response += handle.name;
+            response += "</a><br>";
+        }
+        for(auto &page : ui->_webserverPages)
+        {
+            if(page.isVisible == false)
+                continue;
+            response += "<a href=\"";
+            response += webserver_base_uri;
+            response += page.uri;
+            response += "\">";
+            response += page.name;
+            response += "</a><br>";
+        }
+        
+        response += "</ul><h3>Verwendete Module:</h3><ul>";
+
+        #ifdef KNX_Version
+        response += "<li>KNX - ";
+        response += KNX_Version;
+        response += "</li>";
+        #endif
+        #ifdef MODULE_Common_Version
+        response += "<li>Common - ";
+        response += MODULE_Common_Version;
+        response += "</li>";
+        #endif
+
+        for(auto &module : openknx.modules.list)
+        {
+            if(module == nullptr)
+                continue;
+            response += "<li>";
+            response += module->name();
+            response += " - ";
+            response += module->version();
+            response += "</li>";
+        }
+        response += "</ul></body></html>";
+        
+        httpd_resp_send(req, response.c_str(), HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+    else if(strcmp(req->uri, "/") == 0)
+    {
+        httpd_resp_set_type(req, "text/html");
+        httpd_resp_set_status(req, "301 Moved Permanently");
+        httpd_resp_set_hdr(req, "Location", WEBSERVER_BASE_URI);
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+    else
+    {
+        for(auto &page : ui->_webserverPages)
+        {
+            if(strncmp(req->uri + webserver_base_uri_len, page.uri.c_str(), page.uri.length()) == 0)
+            {
+                return page.handler(req->uri + webserver_base_uri_len, req, page.arg);
+            }
+        }
+    }
+
+    httpd_resp_send_404(req);
+    return ESP_OK;
+}
+#endif
 
 NetworkModule openknxNetwork;
 #endif
