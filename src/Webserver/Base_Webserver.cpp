@@ -92,7 +92,8 @@ int Base_Webserver::handleBase(WebRequest *req)
         }
         response += "</ul></body></html>";
 
-        req->setResponse("text/html", response.c_str());
+        const char* responseStr = response.c_str();
+        req->setResponse("text/html", responseStr);
         return 0;
     }
     else if(strcmp(req->uri, "/") == 0)
@@ -106,7 +107,7 @@ int Base_Webserver::handleBase(WebRequest *req)
     {
         for(auto &page : _pages)
         {
-            if(strncmp(req->uri + webserver_base_uri_len, page.uri.c_str(), page.uri.length()) == 0)
+            if(strncmp(req->uri + webserver_base_uri_len, page.uri, strlen(page.uri)) == 0)
             {
                 return page.handler(req->uri + webserver_base_uri_len, req, page.arg);
             }

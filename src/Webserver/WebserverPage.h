@@ -4,8 +4,8 @@
 #include <string>
 
 struct WebserverPage {
-    std::string uri;
-    std::string name;
+    const char *uri;
+    const char *name;
     bool isVisible = true;
     std::function<int(const char *uri, WebRequest *req, void *arg)> handler;
     void *arg;

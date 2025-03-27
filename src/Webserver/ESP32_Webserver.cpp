@@ -46,7 +46,7 @@ void ESP32_Webserver::begin()
 
         for(auto &page : _pages)
         {
-            logDebug("Webserver", "URI page for %s at %s", page.name.c_str(), page.uri);
+            logDebug("Webserver", "URI page for %s at %s", page.name, page.uri);
         }
         logIndentDown();
     } else {
