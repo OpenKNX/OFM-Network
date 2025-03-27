@@ -21,7 +21,7 @@ for define in defines:
         webserver_base_uri = define[1]
 
 if webserver_base_uri is None:
-    with open("lib/OFM-Network/src/NetworkModule.h", "r") as f:
+    with open("lib/OFM-Network/src/Webserver/Base_Webserver.h", "r") as f:
         content = f.read().splitlines()
         for line in content:
             if "#define WEBSERVER_BASE_URI" in line:
@@ -107,7 +107,7 @@ def process_files(input_dir):
             with open(output_file, 'w') as f_out:
                 f_out.write(f"#ifndef FILE_{variable_name.upper()}_H\n")
                 f_out.write(f"#define FILE_{variable_name.upper()}_H\n\n")
-                f_out.write(f"static const char file_{variable_name}[] = {{\n")
+                f_out.write(f"static const uint8_t file_{variable_name}[] = {{\n")
 
                 # Schreibe die Dateidaten als Hexadezimalwerte ins Array
                 for i, byte in enumerate(compressed_data):
