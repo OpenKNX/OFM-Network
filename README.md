@@ -77,38 +77,47 @@ WebserverPage _page = {
     .name = "Dali Monitor", // Anzeigename auf der Übersichtsseite
     .isVisible = true, // Soll der Handler auf der Übersichtseite angezeigt werden
     .handler = page_handler, // Funktion welche die Anfragen bearbeitet
-    .arg = (void*)this // Argument um die Modulinstanz zu übergeben
+    .arg = (void*)this // (Optional) Argument um die Modulinstanz zu übergeben
 };
-openknxNetwork.addWebserverPage(_page);
+openknxNetwork.webserver.addPage(_page);
 
 [...]
 
-static esp_err_t page_handler(const char *uri, httpd_req_t *req, void *arg)
+int MeinModul::page_handler(const char *uri, WebRequest *req, void *arg)
 {
-    IotGateway *gw = (IotGateway *)arg;
-
-    if(strcmp(uri, "/dali") == 0)
-    {
-        httpd_resp_set_type(req, "text/html");
-        httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
-        httpd_resp_send(req, file_index_html, file_index_html_len);
-        return ESP_OK;
-    }
-    else if(strcmp(uri, "/dali.css") == 0)
-    {
+  // uri wird ohne den prefix von WEBSERVER_BASE_URI angegeben
+  // die volle uri ist unter req->uri abrufbar
+  if(strcmp(uri, "/page") == 0)
+  {
+      std::string reponse = "Hier steht die Response drin";
+      // NULL Terminierte char arrays können auch ohne längenangabe hinzugefügt werden
+      req->setResponse("text/html", response.c_str());
+      req->addResponseHeader("Content-Encoding", "gzip");
+      return 0;
+  }
+  else if(strcmp(uri, "/dali.css") == 0)
+  {
+      req->setResponse("text/html", file_index_html, file_index_html_len);
+      req->addResponseHeader("Content-Encoding", "gzip");
+      return 0;
+  }
+  else if(strcmp(uri, "/dali.js") == 0)
+  {
       [...]
-    }
-    else if(strcmp(uri, "/dali.css") == 0)
-    {
-      [...]
-    }
+  }
 
-    httpd_resp_send_404(req);
-    return ESP_ERR_NOT_FOUND;
+  req->setStatusCode(404);
+  return -1;
 }
 ```
 
-#### Handler
+#### Links
+Mit Links kann man auf einen Wiki Eintrag oder auch das Repo verweisen.  
+```C++
+openknxNetwork.webserver.addLink("Wiki", "https://github.com/OpenKNX/OpenKNX.wiki");
+```
+
+#### Handler (ESP32 only)
 Es kann unter Umständen hilfreich sein, einen eigenen Handler zu definieren.  
 Dieser kann dann zum Beispiel für Websocket verbindungen verwendet werden.
 ```C++
