@@ -38,7 +38,10 @@ Hinweis: Der Hostname des Gerätes kann in der ETS im Abschnitt Netzwerk unter m
 
 Aktuelle ist der OTA Upload beim RP2040 noch nicht getestet.
 
-## Webserver (ESP32 only)
+## Webserver
+
+Aktuell ist der Webserver verfügbar für folgenden Platformen:  
+ - ESP32
 
 ### Defines
 |Define|Description|
