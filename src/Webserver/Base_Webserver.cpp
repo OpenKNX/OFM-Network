@@ -92,8 +92,7 @@ int Base_Webserver::handleBase(WebRequest *req)
         }
         response += "</ul></body></html>";
 
-        const char* responseStr = response.c_str();
-        req->setResponse("text/html", responseStr);
+        req->setResponse("text/html", response.c_str());
         return 0;
     }
     else if(strcmp(req->uri, "/") == 0)

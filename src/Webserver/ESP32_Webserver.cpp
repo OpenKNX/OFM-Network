@@ -90,5 +90,6 @@ esp_err_t ESP32_Webserver::handleRequest(httpd_req_t *req)
     httpd_resp_set_type(req, request.getResponseType());
     httpd_resp_send(req, request.getResponseBody(), request.getResponseBodyLength());
 
+    free(request.getResponseBody());
     return response;
 }
