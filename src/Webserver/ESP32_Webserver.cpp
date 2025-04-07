@@ -48,6 +48,16 @@ void ESP32_Webserver::begin()
         {
             logDebug("Webserver", "URI page for %s at %s", page.name.c_str(), page.uri);
         }
+        
+        for(auto &socket : _sockets)
+        {
+            logDebug("Webserver", "Socket for %s at %s", socket.name, socket.uri);
+        }
+
+        for(auto &file : _files)
+        {
+            logDebug("Webserver", "File at %s", file.uri);
+        }
         logIndentDown();
     } else {
         logError("Webserver", "Failed to start the server");

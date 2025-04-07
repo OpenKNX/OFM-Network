@@ -3,6 +3,7 @@
 #include "WebserverPage.h"
 #include "WebserverLink.h"
 #include "WebRequest.h"
+#include "WebserverFile.h"
 
 #ifndef WEBSERVER_BASE_URI
 #define WEBSERVER_BASE_URI "/openknx"
@@ -17,11 +18,13 @@ class Base_Webserver
     protected:
         std::vector<WebserverPage> _pages;
         std::vector<WebserverLink> _links;
+        std::vector<WebserverFile> _files;
         int handleBase(WebRequest *request);
 
     public:
         void addPage(WebserverPage p);
         void addLink(WebserverLink l);
         void addLink(std::string name, std::string url);
+        void addStaticFile(std::string url, const char *type, const uint8_t *data, int size);
         const char* getBaseUri();
 };

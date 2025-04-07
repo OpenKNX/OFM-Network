@@ -32,16 +32,6 @@ int Base_Webserver::handleBase(WebRequest *req)
         std::string response = index_html;
         
         response += "<h3>Web-Services:</h3><ul>";
-        // for(auto &handle : ui->_serverHandler)
-        // {
-        //     if(handle.isVisible == false)
-        //         continue;
-        //     response += "<a href=\"";
-        //     response += handle.uri;
-        //     response += "\">";
-        //     response += handle.name;
-        //     response += "</a><br>";
-        // }
         for(auto &page : _pages)
         {
             if(page.isVisible == false)
@@ -104,6 +94,15 @@ int Base_Webserver::handleBase(WebRequest *req)
     }
     else
     {
+        for(auto &file : _files)
+        {
+            if(strncmp(req->uri + webserver_base_uri_len, file.uri.c_str(), file.uri.length()) == 0)
+            {
+                req->setResponse(file.type, file.data, file.size);
+                return 0;
+            }
+        }
+
         for(auto &page : _pages)
         {
             if(strncmp(req->uri + webserver_base_uri_len, page.uri.c_str(), page.uri.length()) == 0)
@@ -114,4 +113,15 @@ int Base_Webserver::handleBase(WebRequest *req)
     }
 
     return -1;
+}
+
+void Base_Webserver::addStaticFile(std::string url, const char *type, const uint8_t *data, int size)
+{
+    WebserverFile f = {
+        .uri = url,
+        .type = type,
+        .data = data,
+        .size = size
+    };
+    _files.push_back(f);
 }

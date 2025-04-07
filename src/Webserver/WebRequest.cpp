@@ -1,13 +1,13 @@
 #include "WebRequest.h"
 
-void WebRequest::setResponse(char* type, const char* text)
+void WebRequest::setResponse(const char* type, const char* text)
 {
     response_type = type;
     response = (uint8_t*)text;
     response_length = strlen(text);
 }
 
-void WebRequest::setResponse(char* type, const uint8_t *data, int length)
+void WebRequest::setResponse(const char* type, const uint8_t *data, int length)
 {
     response_type = type;
     response = data;
