@@ -46,14 +46,9 @@ void ESP32_Webserver::begin()
 
         for(auto &page : _pages)
         {
-            logDebug("Webserver", "URI page for %s at %s", page.name.c_str(), page.uri);
+            logDebug("Webserver", "URI page for %s at %s", page.name, page.uri);
         }
         
-        for(auto &socket : _sockets)
-        {
-            logDebug("Webserver", "Socket for %s at %s", socket.name, socket.uri);
-        }
-
         for(auto &file : _files)
         {
             logDebug("Webserver", "File at %s", file.uri);
@@ -100,5 +95,6 @@ esp_err_t ESP32_Webserver::handleRequest(httpd_req_t *req)
     httpd_resp_set_type(req, request.getResponseType());
     httpd_resp_send(req, request.getResponseBody(), request.getResponseBodyLength());
 
+    free(request.getResponseBody());
     return response;
 }

@@ -25,7 +25,7 @@ if webserver_base_uri is None:
         content = f.read().splitlines()
         for line in content:
             if "#define WEBSERVER_BASE_URI" in line:
-                webserver_base_uri = line.split("WEBSERVER_BASE_URI")[1].strip()
+                webserver_base_uri = line.split("WEBSERVER_BASE_URI")[1].strip().replace("\"", "")
                 break
 
 if webserver_base_uri is None:
@@ -102,6 +102,10 @@ def process_files(input_dir):
 
             if file_path_temp != file_path:
                 os.remove(file_path_temp)
+
+            # Create the include directory if it doesn't exist
+            if not os.path.exists(os.path.join(input_dir, "include")):
+                os.makedirs(os.path.join(input_dir, "include"))
 
             # Headerdatei schreiben
             with open(output_file, 'w') as f_out:

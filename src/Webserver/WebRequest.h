@@ -6,12 +6,13 @@
 class WebRequest
 {
     private:
-        const uint8_t* response;
+        uint8_t* response = nullptr;
         const char* response_type;
         int response_length = 0;
         uint16_t status_code = 200;
 
     public:
+        ~WebRequest();
         std::vector<WebserverHeader> headers;
         const char *uri;
         uint8_t method;
