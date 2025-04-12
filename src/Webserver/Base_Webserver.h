@@ -25,6 +25,6 @@ class Base_Webserver
         void addPage(WebserverPage p);
         void addLink(WebserverLink l);
         void addLink(std::string name, std::string url);
-        void addStaticFile(std::string url, const char *type, const uint8_t *data, int size);
+        void addStaticFile(std::string url, const char *type, const uint8_t *data, int size, bool isGzipped = true);
         const char* getBaseUri();
 };

@@ -51,7 +51,7 @@ void ESP32_Webserver::begin()
         
         for(auto &file : _files)
         {
-            logDebug("Webserver", "File at %s", file.uri);
+            logDebug("Webserver", "File at %s", file.uri.c_str());
         }
         logIndentDown();
     } else {
@@ -83,9 +83,12 @@ esp_err_t ESP32_Webserver::handleRequest(httpd_req_t *req)
         return ESP_OK;
     }
 
-    for(auto &header : request.headers)
+    if(request.headers.size() > 0)
     {
-        httpd_resp_set_hdr(req, header.name, header.value);
+        for(auto &header : request.headers)
+        {
+            httpd_resp_set_hdr(req, header.name, header.value);
+        }
     }
 
     int statusCode = request.getStatusCode();
@@ -94,7 +97,5 @@ esp_err_t ESP32_Webserver::handleRequest(httpd_req_t *req)
     httpd_resp_set_status(req, statusMessage.c_str());
     httpd_resp_set_type(req, request.getResponseType());
     httpd_resp_send(req, request.getResponseBody(), request.getResponseBodyLength());
-
-    free(request.getResponseBody());
     return response;
 }

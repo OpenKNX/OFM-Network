@@ -96,8 +96,12 @@ int Base_Webserver::handleBase(WebRequest *req)
     {
         for(auto &file : _files)
         {
-            if(strncmp(req->uri + webserver_base_uri_len, file.uri.c_str(), file.uri.length()) == 0)
+            if(strcmp(req->uri + webserver_base_uri_len, file.uri.c_str()) == 0)
             {
+                if(file.isGzipped)
+                {
+                    req->addResponseHeader("Content-Encoding", "gzip");
+                }
                 req->setResponse(file.type, file.data, file.size);
                 return 0;
             }
@@ -115,13 +119,14 @@ int Base_Webserver::handleBase(WebRequest *req)
     return -1;
 }
 
-void Base_Webserver::addStaticFile(std::string url, const char *type, const uint8_t *data, int size)
+void Base_Webserver::addStaticFile(std::string url, const char *type, const uint8_t *data, int size, bool isGzipped)
 {
     WebserverFile f = {
-        .uri = url,
+        .uri = std::string(url),
         .type = type,
         .data = data,
-        .size = size
+        .size = size,
+        .isGzipped = isGzipped
     };
     _files.push_back(f);
 }

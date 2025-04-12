@@ -7,4 +7,5 @@ struct WebserverFile {
     const char *type;
     const uint8_t *data;
     int size;
+    bool isGzipped = true;
 };

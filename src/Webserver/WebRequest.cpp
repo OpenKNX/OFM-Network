@@ -21,7 +21,7 @@ void WebRequest::setResponse(const char* type, const uint8_t *data, int length)
     response_length = length;
 
     response = (uint8_t*)malloc(response_length);
-    if (response == NULL) {
+    if (response == nullptr) {
         // Handle memory allocation failure
         printf("Memory allocation failed\n");
         return;
@@ -49,7 +49,7 @@ uint16_t WebRequest::getStatusCode()
 
 WebRequest::~WebRequest()
 {
-    if (response != NULL) {
+    if (response != nullptr) {
         free(response);
     }
 }
