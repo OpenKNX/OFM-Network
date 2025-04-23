@@ -1,13 +1,14 @@
+#if defined(KNX_IP_WIFI) || defined(KNX_IP_LAN)
 #include "NtpTimeProvider.h"
 
 #ifdef ParamNET_NTP
-    #ifdef ARDUINO_ARCH_ESP32
-        #if defined(ESP_IDF_VERSION) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
-            #define SNTP_GETREACHABILITY esp_sntp_getreachability
-        #else
-            #define SNTP_GETREACHABILITY sntp_getreachability
-        #endif
-        #include "esp_sntp.h"
+#ifdef ARDUINO_ARCH_ESP32
+#if defined(ESP_IDF_VERSION) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+#define SNTP_GETREACHABILITY esp_sntp_getreachability
+#else
+#define SNTP_GETREACHABILITY sntp_getreachability
+#endif
+#include "esp_sntp.h"
 
 NtpTimeProvider* NtpTimeProvider::currentInstance = nullptr;
 
@@ -83,5 +84,6 @@ NtpTimeProvider::~NtpTimeProvider()
     currentInstance = nullptr;
 }
 
-    #endif
+#endif
+#endif
 #endif
