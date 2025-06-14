@@ -302,11 +302,7 @@ void NetworkModule::setup(bool configured)
 #ifdef ParamNET_NTP
         if (ParamNET_NTP)
         {
-#ifdef ARDUINO_ARCH_ESP32
             openknx.time.setTimeProvider(new NtpTimeProvider());
-#else
-            logErrorP("NTP is activated but unsupported!");
-#endif
         }
 #endif
     }
