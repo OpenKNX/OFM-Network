@@ -1,40 +1,41 @@
+#if defined(KNX_IP_WIFI) || defined(KNX_IP_LAN)
 #pragma once
 #include "OpenKNX.h"
 #include "strings.h"
 #include <functional>
 
 #if defined(ARDUINO_ARCH_ESP32)
-    #include <ESPmDNS.h>
-    #include <Preferences.h>
-    #include <vector>
-    #if defined(KNX_IP_LAN)
-        #include <ETH.h>
-        #define KNX_NETIF ETH
-    #elif defined(KNX_IP_WIFI)
-        #include <WiFi.h>
-    #endif
+#include <ESPmDNS.h>
+#include <Preferences.h>
+#include <vector>
+#if defined(KNX_IP_LAN)
+#include <ETH.h>
+#define KNX_NETIF ETH
+#elif defined(KNX_IP_WIFI)
+#include <WiFi.h>
+#endif
 #elif defined(ARDUINO_ARCH_RP2040)
-    #ifndef OPENKNX_USB_EXCHANGE_IGNORE
-        #define HAS_USB
-    #endif
+#ifndef OPENKNX_USB_EXCHANGE_IGNORE
+#define HAS_USB
+#endif
 
-    #ifndef OPENKNX_NET_SPI_SPEED
-        #define OPENKNX_NET_SPI_SPEED 28000000
-    #endif
+#ifndef OPENKNX_NET_SPI_SPEED
+#define OPENKNX_NET_SPI_SPEED 28000000
+#endif
 
-    #if defined(KNX_IP_LAN)
-        #include <W5500lwIP.h>
-        #include <lwip/dhcp.h>
-    #elif defined(KNX_IP_WIFI)
-        #include "LittleFS.h"
-        #include <WiFi.h>
-    #endif
+#if defined(KNX_IP_LAN)
+#include <W5500lwIP.h>
+#include <lwip/dhcp.h>
+#elif defined(KNX_IP_WIFI)
+#include "LittleFS.h"
+#include <WiFi.h>
+#endif
 #else
-    #pragma warn "Unsupported platform"
+#pragma warn "Unsupported platform"
 #endif
 
 #ifdef HAS_USB
-    #include "UsbExchangeModule.h"
+#include "UsbExchangeModule.h"
 #endif
 
 #if !defined(OPENKNX_LED_IP) && defined(INFO2_LED_PIN) && KNX_SERVICE_FAMILY != 0x02 // IP-Router uses own LED implementation
@@ -144,3 +145,4 @@ class NetworkModule : public OpenKNX::Module
 };
 
 extern NetworkModule openknxNetwork;
+#endif

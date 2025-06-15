@@ -7,6 +7,7 @@
   <op:config name="%NET_LanMode%" value="0" />
   <op:config name="%NET_ServiceNTP%" value="1" />
   <op:config name="%NET_ServiceOTA%" value="1" />
+  <op:config name="%NET_ShowMediumInfo%" value="0" />
 
   <!-- Prepare: Not ready to use -->
   <op:config name="%NET_ServiceHTTP%" value="0" />
@@ -153,6 +154,13 @@
                 <!-- Hidden -->
                 <ParameterRefRef RefId="%AID%_P-%TT%01000_R-%TT%0100000" />
 
+                <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000"><!-- Static 0 -->
+                  <when test="!=%NET_ShowMediumInfo%">
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="Diese Einstellungen sind lediglich für Geräte mit IP-Schnittstelle vorgesehen.
+Geräte, die ausschließlich per TP angebunden sind, benötigen hier keine Konfiguration" UIHint="Information" />
+                  </when>
+                </choose>
+
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="IP-Adresse" UIHint="Headline" />
                 <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000"><!-- Static 0 -->
                   <when test="%NET_IPConfigTool%"> <!-- default -->
@@ -238,10 +246,10 @@
               <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000"><!-- Static 0 -->
                 <when test="!=%NET_WifiTool%"> <!-- default -->
                   <ParameterBlock Id="%AID%_PB-nnn" Name="WiFi" Text="WiFi-Assistent" Icon="wifi" HelpContext="NET-WiFi-Assistent">
-                    <ParameterSeparator Id="%AID%_PS-nnn" Text="Wifi-Assistent" UIHint="Headline" />
-                    <ParameterSeparator Id="%AID%_PS-nnn" Text="Dieser WiFi-Assistent ermöglicht das Übertragen von WiFi-Zugangsdaten auf das Gerät. Voraussetzung ist, dass die verwendete Software bzw. Hardware WiFi-Support integriert hat." />
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="Dieser WiFi-Assistent ermöglicht das Übertragen von WiFi-Zugangsdaten auf das Gerät.
+Diese Einstellungen sind lediglich für Geräte mit WiFi-Schnittstelle vorgesehen." UIHint="Information" />
                     
-                    <ParameterSeparator Id="%AID%_PS-nnn" Text="Einstellungen" UIHint="Headline" />
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="WiFi-Zugangsdaten" UIHint="Headline" />
                     <ParameterRefRef RefId="%AID%_P-%TT%01001_R-%TT%0100100" IndentLevel="1" />
                     <ParameterRefRef RefId="%AID%_P-%TT%01002_R-%TT%0100200" IndentLevel="1" />
 
