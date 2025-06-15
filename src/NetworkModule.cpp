@@ -387,9 +387,70 @@ void NetworkModule::checkLinkStatus()
 {
     if (!delayCheckMillis(_lastLinkCheck, 500)) return;
 
-    // Get current link state
-    bool newLinkState = connected();
+    // Get current network state
+    bool establishedState = established();
+    bool newLinkState;
+    if (establishedState)
+        newLinkState = true;  
+    else
+        newLinkState = connected();
+#ifdef OPENKNX_LED_IP
+    // update LED's
+    if (newLinkState && established())
+    {
+        if(_ipLedState != 1)
+        {
+            #ifdef OPENKNX_SERIALLED_ENABLE
+            openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_GREEN);
+            #endif
+            openknx.OPENKNX_LED_IP.on();
+            _ipLedState = 1;
+        }
+    }
+    else if (newLinkState)
+    {
+        if(_ipLedState != 2)
+        {
+            #ifdef OPENKNX_SERIALLED_ENABLE
+            openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_YELLOW);
+            openknx.OPENKNX_LED_IP.on();
+            #else
+            openknx.OPENKNX_LED_IP.blinking(1000);
+            #endif
 
+            _ipLedState = 2;
+        }
+    }
+    else
+    {
+#ifdef KNX_IP_WIFI
+        if (_wifiSSID[0] == 0 || _wifiPassphrase[0])
+        {
+            if(_ipLedState != 4)
+            {
+                #ifdef OPENKNX_SERIALLED_ENABLE
+                openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_RED);
+                openknx.OPENKNX_LED_IP.blinking(500);
+                #else
+                openknx.OPENKNX_LED_IP.blinking(500);
+                #endif
+                _ipLedState = 4;
+            }
+        }
+        else
+#endif
+        if(_ipLedState != 3)
+        {
+            #ifdef OPENKNX_SERIALLED_ENABLE
+            openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_RED);
+            openknx.OPENKNX_LED_IP.on();
+            #else
+            openknx.OPENKNX_LED_IP.off();
+            #endif
+            _ipLedState = 3;
+        }
+    }
+#endif
     // got link
     if (newLinkState && !_currentLinkState)
     {

@@ -16,6 +16,23 @@ This module provides the network functionality for the OpenKNX stack.
 | RP2040 | WiFi | Integrated | KNX_IP_WIFI |                                                               |
 | RP2040 | LAN  | Integrated | KNX_IP_LAN  |                                                               |
 
+
+| Define         | Default  | Description           | Note                                    |
+|----------------|----------|-----------------------|-----------------------------------------|
+| OPENKNX_LED_IP |          | used LED for IP state | set to info2Led to use IP LED feature   |  
+
+## IP LED
+
+If OPENKNX_LED_IP is defined, the LED is representing the state of the network. 
+Possible values for OPENKNX_LED_IP: info1Led, info2Led, info3Led. Recommended value: info2Led
+
+| State                         | LED           | RGB-LED            | Note                                   |
+|-------------------------------|---------------|--------------------|----------------------------------------|
+| WLAN configuration missing    | Fast flashing | Red fast flashing  | Only for HW with WLA                   |
+| No connection to the network  | Off           | Red                |                                        |
+| No IP adress                  | Slow flashing | Yellow             |                                        |
+| IP adress assigned            | On            | Green              |                                        |
+
 ## OTA
 
 Mit dem Netzwerkmodul wird eine OTA (Over the air) Update Funktion der Firmware ermöglicht.

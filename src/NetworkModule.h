@@ -94,6 +94,9 @@ class NetworkModule : public OpenKNX::Module
     bool _useMDNS = false;
     bool _otaAllowed = false;
     bool _otaHandle = false;
+#ifdef OPENKNX_LED_IP
+    uint8_t _ipLedState = 0;
+#endif
 #ifdef ARDUINO_ARCH_ESP32
     const uint16_t _otaPort = 3232;
     const char *_otaPortString = "3232";
