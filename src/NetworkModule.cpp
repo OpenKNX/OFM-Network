@@ -394,7 +394,7 @@ void NetworkModule::checkLinkStatus()
         newLinkState = true;  
     else
         newLinkState = connected();
-#ifdef OPENKNX_LED_IP && OPENKNX_LED_IP != 0
+#ifdef OPENKNX_LED_IP
     // update LED's
     if (newLinkState && established())
     {

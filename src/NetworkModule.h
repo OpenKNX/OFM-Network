@@ -38,10 +38,6 @@
 #include "UsbExchangeModule.h"
 #endif
 
-#if !defined(OPENKNX_LED_IP) && defined(INFO2_LED_PIN) && KNX_SERVICE_FAMILY != 0x02 // IP-Router uses own LED implementation
-    #define OPENKNX_LED_IP info2Led
-#endif
-
 typedef std::function<void(bool)> NetworkChangeCallback;
 
 class NetworkModule : public OpenKNX::Module

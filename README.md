@@ -19,12 +19,12 @@ This module provides the network functionality for the OpenKNX stack.
 
 | Define         | Default  | Description           | Note                                    |
 |----------------|----------|-----------------------|-----------------------------------------|
-| OPENKNX_IP_LED | info2Led | used LED for IP state | set to 0 to disable the IP LED feature  |  
+| OPENKNX_LED_IP |          | used LED for IP state | set to info2Led to use IP LED feature   |  
 
 ## IP LED
 
-If OPENKNX_IP_LED is defined, the LED is representing the state of the network. 
-Possible values for OPENKNX_IP_LED: info1Led, info2Led, info3Led. Recommended value: info2Led
+If OPENKNX_LED_IP is defined, the LED is representing the state of the network. 
+Possible values for OPENKNX_LED_IP: info1Led, info2Led, info3Led. Recommended value: info2Led
 
 | State                         | LED           | RGB-LED            | Note                                   |
 |-------------------------------|---------------|--------------------|----------------------------------------|
