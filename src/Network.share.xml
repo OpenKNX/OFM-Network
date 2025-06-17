@@ -153,7 +153,9 @@
               <ParameterBlock Id="%AID%_PB-nnn" Name="Basic" Text="Allgemein" Icon="cog-outline" HelpContext="NET-Dokumentation">
                 <!-- Hidden -->
                 <ParameterRefRef RefId="%AID%_P-%TT%01000_R-%TT%0100000" />
-
+                <ParameterSeparator Id="%AID%_PS-nnn" Text="Netzwerk" UIHint="Headline" />
+                <ParameterSeparator Id="%AID%_PS-nnn" Text="Version: %ModuleVersion%" />
+                <ParameterSeparator Id="%AID%_PS-nnn" Text="" UIHint="HorizontalRuler" />
                 <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000"><!-- Static 0 -->
                   <when test="!=%NET_ShowMediumInfo%">
                     <ParameterSeparator Id="%AID%_PS-nnn" Text="Diese Einstellungen sind lediglich für Geräte mit IP-Schnittstelle vorgesehen.
