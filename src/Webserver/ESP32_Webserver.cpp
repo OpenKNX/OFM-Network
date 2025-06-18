@@ -14,7 +14,7 @@ void ESP32_Webserver::begin()
 
         #ifndef WEBUI_BASE_URI_USED
         logDebug("Webserver", "URI handler for /");
-        httpd_uri_t baseUri = {
+        httpd_uri_t baseUriRoot = {
             .uri = "/",
             .method = HTTP_GET,
             .handler = [](httpd_req_t *req) { 
@@ -23,7 +23,7 @@ void ESP32_Webserver::begin()
             },
             .user_ctx = this
         };
-        httpd_register_uri_handler(_server, &baseUri);
+        httpd_register_uri_handler(_server, &baseUriRoot);
         #endif
 
         logDebug("Webserver", "URI handler for %s", WEBSERVER_BASE_URI);
