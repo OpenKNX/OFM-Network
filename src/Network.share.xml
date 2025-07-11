@@ -8,6 +8,7 @@
   <op:config name="%NET_ServiceNTP%" value="1" />
   <op:config name="%NET_ServiceOTA%" value="1" />
   <op:config name="%NET_ShowMediumInfo%" value="0" />
+  <op:config name="%NET_ServiceMQTT%" value="0" />
 
   <!-- Prepare: Not ready to use -->
   <op:config name="%NET_ServiceHTTP%" value="0" />
@@ -62,13 +63,37 @@
               <ParameterType Id="%AID%_PT-NTPServer" Name="NTPServer">
                 <TypeText SizeInBit="400" /> <!-- 50 bytes -->
               </ParameterType>
+              <ParameterType Id="%AID%_PT-MQTTServer" Name="MQTServer">
+                <TypeText SizeInBit="160" /> <!-- 20 bytes -->
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-MQTTUsername" Name="MQTTUsername">
+                <TypeText SizeInBit="160" /> <!-- 20 bytes -->
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-MQTTPassword" Name="MQTTPassword">
+                <TypeText SizeInBit="160" /> <!-- 20 bytes -->
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-MQTTPrefix" Name="MQTTPrefix">
+                <TypeText SizeInBit="160" Pattern="^[A-Za-z0-9-]+$" /> <!-- 20 bytes -->
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-NETPort" Name="NETPort">
+                <TypeNumber SizeInBit="16" Type="unsignedInt" minInclusive="1" maxInclusive="65535" />
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-MQTTMode" Name="MQTTMode">
+                <TypeRestriction Base="Value" SizeInBit="1" UIHint="DropDown">
+                  <Enumeration Text="Client" Value="0" Id="%ENID%" />
+                  <Enumeration Text="Broker" Value="1" Id="%ENID%" />
+                </TypeRestriction>
+              </ParameterType>
+
             </ParameterTypes>
             <Parameters>
               <!-- helper to check against a certain value in the case of a choose -->
               <Parameter Id="%AID%_P-%TT%01000" Name="SelectHelper"          ParameterType="%AID%_PT-ValueDpt5"         Text=""        Value="0" Access="None" />
+
               <Parameter Id="%AID%_P-%TT%01001" Name="WifiSSID"              ParameterType="%AID%_PT-WifiSSID"          Text="SSID"    Value="" />
               <Parameter Id="%AID%_P-%TT%01002" Name="WifiPassword"          ParameterType="%AID%_PT-WifiPassword"      Text="PSK"     Value=""/>
-            
+              <Parameter Id="%AID%_P-%TT%01003" Name="MQTTCustomPrefix"      ParameterType="%AID%_PT-OnOffYesNo"        Text="Abweichender Gerätepräfix" Value="0"/>
+
               <!-- IP Config -->
               <Union SizeInBit="128"><!-- 16bytes-->
                 <Memory CodeSegment="%MID%" Offset="0" BitOffset="0" />
@@ -95,7 +120,8 @@
                 <Parameter Id="%AID%_UP-%TT%00032" Name="HTTP"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="1" Text="Weberver" Value="1" /> 
                 <Parameter Id="%AID%_UP-%TT%00033" Name="NTP"                ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="2" Text="NTP-Client" Value="0" /> 
                 <Parameter Id="%AID%_UP-%TT%00034" Name="OTAUpdate"          ParameterType="%AID%_PT-OTAUpdate"          Offset="0" BitOffset="3" Text="OTA-Update" Value="0" />
-                <!-- 5 bits free -->
+                <Parameter Id="%AID%_UP-%TT%00035" Name="MQTT"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="4" Text="MQTT" Value="0" />
+                <!-- 4 bits free -->
               </Union>
 
               <!-- Hostname -->
@@ -113,8 +139,26 @@
               <!-- NTP -->
               <Union SizeInBit="408">
                 <Memory CodeSegment="%MID%" Offset="60" BitOffset="0" />
-                <Parameter Id="%AID%_UP-%TT%00061" Name="NTPServer"        ParameterType="%AID%_PT-NTPServer"     Offset="0"  BitOffset="0" Text="Zeitserver" Value="pool.ntp.org" />
+                <Parameter Id="%AID%_UP-%TT%00061" Name="NTPServer"        ParameterType="%AID%_PT-NTPServer"       Offset="0"  BitOffset="0" Text="Zeitserver" Value="pool.ntp.org" />
                 <!-- 50 characters + 0 terminator = 51 bytes used -->
+              </Union>
+
+              <!-- MQTT -->
+              <Union SizeInBit="696">
+                <Memory CodeSegment="%MID%" Offset="111" BitOffset="0" />
+                <Parameter Id="%AID%_UP-%TT%00071" Name="MQTTServer"        ParameterType="%AID%_PT-MQTTServer"     Offset="0"  BitOffset="0" Text="Server" Value="" />
+                <!-- 20 characters + 0 terminator = 21 bytes used -->
+                <Parameter Id="%AID%_UP-%TT%00072" Name="MQTTUsername"      ParameterType="%AID%_PT-MQTTUsername"   Offset="21"  BitOffset="0" Text="Benutzer" Value="" />
+                <!-- 20 characters + 0 terminator = 21 bytes used -->
+                <Parameter Id="%AID%_UP-%TT%00073" Name="MQTTPassword"      ParameterType="%AID%_PT-MQTTPassword"   Offset="42"  BitOffset="0" Text="Passwort" Value="" />
+                <!-- 20 characters + 0 terminator = 21 bytes used -->
+                <Parameter Id="%AID%_UP-%TT%00074" Name="MQTTPrefix"        ParameterType="%AID%_PT-MQTTPrefix"     Offset="63"  BitOffset="0" Text="Prefix" Value="" />
+                <!-- 20 characters + 0 terminator = 21 bytes used -->
+                <Parameter Id="%AID%_UP-%TT%00075" Name="MQTTPort"          ParameterType="%AID%_PT-NETPort"        Offset="84"  BitOffset="0" Text="Port" Value="1883" />
+                <!-- 16bit - 2byte -->
+
+                <Parameter Id="%AID%_UP-%TT%00076" Name="MQTTTPRawData"     ParameterType="%AID%_PT-OnOffYesNo"     Offset="86"  BitOffset="0" Text="Sende KNX TP Rohdaten" Value="0" />
+                <Parameter Id="%AID%_UP-%TT%00070" Name="MQTTMode"          ParameterType="%AID%_PT-MQTTMode"       Offset="86"  BitOffset="1" Text="Modus" Value="0" />
               </Union>
 
             </Parameters>
@@ -122,9 +166,9 @@
               <ParameterRef Id="%AID%_P-%TT%01000_R-%TT%0100000" RefId="%AID%_P-%TT%01000" />
               <ParameterRef Id="%AID%_P-%TT%01001_R-%TT%0100100" RefId="%AID%_P-%TT%01001" />
               <ParameterRef Id="%AID%_P-%TT%01002_R-%TT%0100200" RefId="%AID%_P-%TT%01002" />
+              <ParameterRef Id="%AID%_P-%TT%01003_R-%TT%0100300" RefId="%AID%_P-%TT%01003" />
               <ParameterRef Id="%AID%_UP-%TT%00001_R-%TT%0000101" RefId="%AID%_UP-%TT%00001" />
               <ParameterRef Id="%AID%_UP-%TT%00002_R-%TT%0000201" RefId="%AID%_UP-%TT%00002" />
-              <ParameterRef Id="%AID%_UP-%TT%00034_R-%TT%0003401" RefId="%AID%_UP-%TT%00034" />
               <ParameterRef Id="%AID%_P-%TT%00010_R-%TT%0001001" RefId="%AID%_P-%TT%00010" />
               <ParameterRef Id="%AID%_UP-%TT%00011_R-%TT%0001101" RefId="%AID%_UP-%TT%00011" />
               <ParameterRef Id="%AID%_UP-%TT%00012_R-%TT%0001201" RefId="%AID%_UP-%TT%00012" />
@@ -133,9 +177,19 @@
               <ParameterRef Id="%AID%_UP-%TT%00031_R-%TT%0003101" RefId="%AID%_UP-%TT%00031" />
               <ParameterRef Id="%AID%_UP-%TT%00032_R-%TT%0003201" RefId="%AID%_UP-%TT%00032" />
               <ParameterRef Id="%AID%_UP-%TT%00033_R-%TT%0003301" RefId="%AID%_UP-%TT%00033" />
+              <ParameterRef Id="%AID%_UP-%TT%00034_R-%TT%0003401" RefId="%AID%_UP-%TT%00034" />
+              <ParameterRef Id="%AID%_UP-%TT%00035_R-%TT%0003501" RefId="%AID%_UP-%TT%00035" />
               <ParameterRef Id="%AID%_UP-%TT%00052_R-%TT%0005201" RefId="%AID%_UP-%TT%00052" />
-              <!-- NTPServer -->
+              <!-- NTP -->
               <ParameterRef Id="%AID%_UP-%TT%00061_R-%TT%0006101" RefId="%AID%_UP-%TT%00061" />
+              <!-- MQTT -->
+              <ParameterRef Id="%AID%_UP-%TT%00070_R-%TT%0007001" RefId="%AID%_UP-%TT%00070" />
+              <ParameterRef Id="%AID%_UP-%TT%00071_R-%TT%0007101" RefId="%AID%_UP-%TT%00071" />
+              <ParameterRef Id="%AID%_UP-%TT%00072_R-%TT%0007201" RefId="%AID%_UP-%TT%00072" />
+              <ParameterRef Id="%AID%_UP-%TT%00073_R-%TT%0007301" RefId="%AID%_UP-%TT%00073" />
+              <ParameterRef Id="%AID%_UP-%TT%00074_R-%TT%0007401" RefId="%AID%_UP-%TT%00074" />
+              <ParameterRef Id="%AID%_UP-%TT%00075_R-%TT%0007501" RefId="%AID%_UP-%TT%00075" />
+              <ParameterRef Id="%AID%_UP-%TT%00076_R-%TT%0007601" RefId="%AID%_UP-%TT%00076" />
             </ParameterRefs>
             <ComObjectTable>
             </ComObjectTable>
@@ -191,6 +245,13 @@ Geräte, die ausschließlich per TP angebunden sind, benötigen hier keine Konfi
                   </when>
                 </choose>
 
+                <!-- MQTT -->
+                <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000">
+                  <when test="!=%NET_ServiceMQTT%">
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00035_R-%TT%0003501" IndentLevel="1" HelpContext="NET-MQTT" />
+                  </when>
+                </choose>
+
                 <!-- NTP -->
                 <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000">
                   <when test="!=%NET_ServiceNTP%">
@@ -240,6 +301,48 @@ Geräte, die ausschließlich per TP angebunden sind, benötigen hier keine Konfi
                 <when test="1">
                   <ParameterBlock Id="%AID%_PB-nnn" Name="HTTP" Text="Webserver" Icon="web" HelpContext="NET-Webserver">
                     <ParameterSeparator Id="%AID%_PS-nnn" Text="Webserver" UIHint="Headline" />
+                  </ParameterBlock>
+                </when>
+              </choose>
+
+              <!-- MQTT -->
+              <choose ParamRefId="%AID%_UP-%TT%00035_R-%TT%0003501">
+                <when test="1">
+                  <ParameterBlock Id="%AID%_PB-nnn" Name="MQTT" Text="MQTT" Icon="swap-horizontal" HelpContext="NET-MQTT">
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="Die MQTT Funktion ist auf Geräte mit ESP32 beschränkt." UIHint="Information" />
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="Verbindungsdaten" UIHint="Headline" />
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00070_R-%TT%0007001" IndentLevel="1" HelpContext="NET-MQTT" />
+                    <choose ParamRefId="%AID%_UP-%TT%00070_R-%TT%0007001">
+                      <when test="0">
+                        <ParameterRefRef RefId="%AID%_UP-%TT%00071_R-%TT%0007101" IndentLevel="1" HelpContext="NET-MQTT" />
+                      </when>
+                    </choose>
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00075_R-%TT%0007501" IndentLevel="1" HelpContext="NET-MQTT" />
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00072_R-%TT%0007201" IndentLevel="1" HelpContext="NET-MQTT" />
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00073_R-%TT%0007301" IndentLevel="1" HelpContext="NET-MQTT" />
+
+                    
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="Erweitere Funktionen" UIHint="Headline" />
+                    <ParameterRefRef RefId="%AID%_P-%TT%01003_R-%TT%0100300" IndentLevel="1" HelpContext="NET-MQTT" />
+                    <choose ParamRefId="%AID%_P-%TT%01003_R-%TT%0100300">
+                      <when test="1">
+                        <ParameterBlock Id="%AID%_PB-nnn" Name="Prefix" Inline="true" Layout="Grid">
+                          <Rows>
+                            <Row Id="%AID%_PB-nnn_R-1" Name="Row1" />
+                          </Rows>
+                          <Columns>
+                            <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="46%" />
+                            <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="11%" />
+                            <Column Id="%AID%_PB-nnn_C-3" Name="Col3" Width="43%" />
+                          </Columns>
+                          <ParameterSeparator Id="%AID%_PS-nnn" Text="    Gerätepräfix" Cell="1,1" />
+                          <ParameterSeparator Id="%AID%_PS-nnn" Text="openknx/" Cell="1,2" />
+                          <ParameterRefRef RefId="%AID%_UP-%TT%00074_R-%TT%0007401" IndentLevel="1" HelpContext="NET-MQTT" Cell="1,3" />
+                        </ParameterBlock>
+                      </when>
+                    </choose>
+
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00076_R-%TT%0007601" IndentLevel="1" HelpContext="NET-MQTT" />
                   </ParameterBlock>
                 </when>
               </choose>

@@ -385,6 +385,10 @@ void NetworkModule::setup(bool configured)
             logError("OTA", "End error");
         logIndentDown();
     });
+
+#ifdef OPENKNX_MQTT
+    mqtt.setup(configured);
+#endif
 }
 
 #ifdef HAS_USB
@@ -541,6 +545,9 @@ void NetworkModule::loop(bool configured)
 
     checkLinkStatus();
     handleOTA();
+#ifdef OPENKNX_MQTT
+    mqtt.loop(configured);
+#endif
 }
 
 void NetworkModule::handleOTA()
@@ -750,7 +757,15 @@ void NetworkModule::showNetworkInformations(bool console)
     if (console)
     {
         logIndentDown();
+
+#ifdef OPENKNX_MQTT
+        if (mqtt.active() && established())
+        {
+            logInfoP("MQTT: %s:%u (%s)", mqtt.getServer(), mqtt.getPort(), mqtt.connected() ? "Connected" : "Disconnected");
+        }
+#endif
     }
+
     logEnd();
 }
 
@@ -972,6 +987,11 @@ bool NetworkModule::processFunctionProperty(uint8_t objectIndex, uint8_t propert
     resultData[0] = 1;
     resultLength = 1;
     return false;
+}
+
+const char *NetworkModule::getHostname()
+{
+    return _hostName;
 }
 
 void NetworkModule::controlKnxIp(bool enable)

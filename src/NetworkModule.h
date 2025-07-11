@@ -38,11 +38,19 @@
 #include "UsbExchangeModule.h"
 #endif
 
+#ifdef OPENKNX_MQTT
+#include "MqttModule.h"
+#endif
+
 typedef std::function<void(bool)> NetworkChangeCallback;
 
 class NetworkModule : public OpenKNX::Module
 {
   public:
+#ifdef OPENKNX_MQTT
+    MqttModule mqtt;
+#endif
+
     const std::string name() override;
     const std::string version() override;
     void init() override;
@@ -77,6 +85,7 @@ class NetworkModule : public OpenKNX::Module
     IPAddress gatewayIP();
     IPAddress nameServerIP();
     std::string phyMode();
+    const char *getHostname();
     void macAddress(uint8_t *addr);
 
 #ifdef ARDUINO_ARCH_ESP32
