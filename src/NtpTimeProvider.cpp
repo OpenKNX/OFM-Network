@@ -77,6 +77,8 @@ void NtpTimeProvider::setup()
         esp_sntp_set_sync_mode(sntp_sync_mode_t::SNTP_SYNC_MODE_SMOOTH);
         esp_sntp_setoperatingmode(esp_sntp_operatingmode_t::ESP_SNTP_OPMODE_POLL);
         esp_sntp_init();
+
+        _initialized = true;
 #endif
     }
     else
@@ -89,7 +91,7 @@ void NtpTimeProvider::loop()
 {
 #ifdef ARDUINO_ARCH_RP2040
     if (_syncInProgress) return;
-    if (strlen((const char*)ParamNET_NTPServer) == 0) return;
+    if (!_initialized) return;
 
     if (openknxNetwork.established() && (!_lastSync || delayCheck(_lastSync, 3600000))) // check every 1 hour
     {
@@ -113,6 +115,8 @@ void NtpTimeProvider::loop()
 
 NtpTimeProvider::~NtpTimeProvider()
 {
+    if (!_initialized) return;
+
 #ifdef ARDUINO_ARCH_ESP32
     esp_sntp_stop();
     currentInstance = nullptr;

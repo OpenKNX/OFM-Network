@@ -9,6 +9,7 @@ class NtpTimeProvider : public OpenKNX::Time::TimeProvider
     static NtpTimeProvider* currentInstance;
 
   protected:
+    bool _initialized = false;
 #ifdef ARDUINO_ARCH_RP2040
     int32_t _lastSync = 0;
     bool _syncInProgress = false;
