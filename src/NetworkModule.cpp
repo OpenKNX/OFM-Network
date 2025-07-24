@@ -613,10 +613,10 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
     }
 
 #ifdef KNX_IP_WIFI
-    else if (cmd == "wifi erase")
+    else if (cmd == "erase wifi")
     {
-        saveWifiSettings("", "");
         KNX_NETIF.disconnect(true, true);
+        saveWifiSettings("", ""); // triggers the restart timer
         logInfoP("Wifi settings erased");
         return true;
     }    
@@ -716,7 +716,7 @@ void NetworkModule::showHelp()
 #ifdef KNX_IP_WIFI
 
     openknx.console.printHelpLine("wifi SSID PSK", "Set SSID and PSK");
-    openknx.console.printHelpLine("wifi erase", "Erase WiFi settings");
+    openknx.console.printHelpLine("erase wifi", "Erase WiFi settings");
 
 // if (strlen(_wifiSSID) > 0) openknx.console.printHelpLine("net recon", "Reconnect to network");
 #else
