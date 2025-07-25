@@ -48,6 +48,7 @@ class NetworkModule : public OpenKNX::Module
     void init() override;
     void loop(bool configured) override;
     void setup(bool configured) override;
+    void resetNetwork();
 
     void savePower() override;
     bool restorePower() override;
@@ -131,6 +132,7 @@ class NetworkModule : public OpenKNX::Module
     void loadCallbacks(bool state);
     void handleMDNS();
     void handleOTA();
+    void controlKnxIp(bool state);
 
 #ifdef KNX_IP_WIFI
     char _wifiSSID[33] = {};

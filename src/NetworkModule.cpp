@@ -60,6 +60,21 @@ const std::string NetworkModule::version()
     return MODULE_Network_Version;
 }
 
+void NetworkModule::resetNetwork()
+{
+    logInfoP("Reset network adapter");
+    logIndentUp();
+    controlKnxIp(false);
+    KNX_NETIF.end();
+    delay(500);
+    initPhy();
+    initIp();
+    controlKnxIp(true);
+
+    logInfoP("Complete");
+    logIndentDown();
+}
+
 void NetworkModule::initPhy()
 {
     logDebugP("Initialize network adapter");
@@ -148,6 +163,25 @@ void NetworkModule::loadSettings()
         SetByteProperty(PID_IP_CAPABILITIES, 6);              // AutoIP + DHCP
         SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 2); // ToDo
     }
+
+#ifdef KNX_IP_WIFI
+    if (strlen(_wifiSSID) == 0)
+        logErrorP("No WiFI Settings found!");
+#endif
+
+    logInfoP(_useStaticIP ? "Using static IP" : "Using DHCP");
+
+    // Hostname
+    logInfoP("Hostname: %s", _hostName);
+#if defined(ARDUINO_ARCH_ESP32)
+    KNX_NETIF.setHostname(_hostName);
+#else
+    KNX_NETIF.hostname(_hostName);
+#endif
+
+#ifdef ARDUINO_ARCH_ESP32
+    CALLBACK_CLASS.onEvent([](CALLBACK_EVENT event) -> void { openknxNetwork.esp32NetworkEvent(event); });
+#endif
 }
 
 void NetworkModule::init()
@@ -175,6 +209,8 @@ void NetworkModule::esp32NetworkEvent(CALLBACK_EVENT event)
             // The hostname must be set after the interface is started, but needs
             // to be set before DHCP, so set it from the event handler thread.
             KNX_NETIF.setHostname(_hostName);
+            controlKnxIp(false);
+
             break;
         case ARDUINO_EVENT_ETH_CONNECTED:
         case ARDUINO_EVENT_WIFI_STA_CONNECTED:
@@ -184,17 +220,18 @@ void NetworkModule::esp32NetworkEvent(CALLBACK_EVENT event)
         case ARDUINO_EVENT_ETH_GOT_IP:
         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
             logDebugP("Event: Got IP");
-            // ETH.printInfo(Serial);
-            // eth_connected = true;
+            controlKnxIp(true);
             break;
         case ARDUINO_EVENT_ETH_DISCONNECTED:
         case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
             logDebugP("Event: Disconnected");
+            controlKnxIp(false);
             espConnected = false;
             break;
         case ARDUINO_EVENT_ETH_STOP:
         case ARDUINO_EVENT_WIFI_STA_STOP:
             logDebugP("Event: Stop");
+            controlKnxIp(false);
             espConnected = false;
             break;
         default:
@@ -206,25 +243,7 @@ void NetworkModule::esp32NetworkEvent(CALLBACK_EVENT event)
 
 void NetworkModule::initIp()
 {
-
-    // Hostname
-    logInfoP("Hostname: %s", _hostName);
-#if defined(ARDUINO_ARCH_ESP32)
-    KNX_NETIF.setHostname(_hostName);
-#else
-    KNX_NETIF.hostname(_hostName);
-#endif
-
-#ifdef KNX_IP_WIFI
-    if (strlen(_wifiSSID) == 0)
-        logErrorP("No WiFI Settings found!");
-#endif
-
-    logInfoP(_useStaticIP ? "Using static IP" : "Using DHCP");
-
 #ifdef ARDUINO_ARCH_ESP32
-    CALLBACK_CLASS.onEvent([](CALLBACK_EVENT event) -> void { openknxNetwork.esp32NetworkEvent(event); });
-
 #ifdef KNX_IP_WIFI
     KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP);
     KNX_NETIF.mode(WIFI_AP_STA);
@@ -612,6 +631,12 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         return true;
     }
 
+    else if (cmd == "net reset")
+    {
+        resetNetwork();
+        return true;
+    }
+
 #ifdef KNX_IP_WIFI
     else if (cmd == "erase wifi")
     {
@@ -926,6 +951,15 @@ bool NetworkModule::processFunctionProperty(uint8_t objectIndex, uint8_t propert
     resultData[0] = 1;
     resultLength = 1;
     return false;
+}
+
+void NetworkModule::controlKnxIp(bool enable)
+{
+#if MASK_VERSION == 0x091A
+    knx.bau().getPrimaryDataLinkLayer()->enabled(enable);
+#elif MASK_VERSION == 0x57B0
+    knx.bau().getDataLinkLayer()->enabled(enable);
+#endif
 }
 
 NetworkModule openknxNetwork;
