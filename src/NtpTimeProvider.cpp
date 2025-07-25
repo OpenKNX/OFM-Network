@@ -16,7 +16,7 @@ NtpTimeProvider* NtpTimeProvider::currentInstance = nullptr;
 
 void NtpTimeProvider::logInformation()
 {
-    if (strlen((const char*)ParamNET_NTPServer) == 0)
+    if (!_initialized || strlen((const char*)ParamNET_NTPServer) == 0)
     {
         logInfoP("Timeprovider: NTP (%s)", "unconfigured");
         return;
@@ -77,9 +77,8 @@ void NtpTimeProvider::setup()
         esp_sntp_set_sync_mode(sntp_sync_mode_t::SNTP_SYNC_MODE_SMOOTH);
         esp_sntp_setoperatingmode(esp_sntp_operatingmode_t::ESP_SNTP_OPMODE_POLL);
         esp_sntp_init();
-
-        _initialized = true;
 #endif
+        _initialized = true;
     }
     else
     {
