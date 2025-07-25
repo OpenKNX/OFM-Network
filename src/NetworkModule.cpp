@@ -391,32 +391,32 @@ void NetworkModule::checkLinkStatus()
     bool establishedState = established();
     bool newLinkState;
     if (establishedState)
-        newLinkState = true;  
+        newLinkState = true;
     else
         newLinkState = connected();
 #ifdef OPENKNX_LED_IP
     // update LED's
     if (newLinkState && established())
     {
-        if(_ipLedState != 1)
+        if (_ipLedState != 1)
         {
-            #ifdef OPENKNX_SERIALLED_ENABLE
+#ifdef OPENKNX_SERIALLED_ENABLE
             openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_GREEN);
-            #endif
+#endif
             openknx.OPENKNX_LED_IP.on();
             _ipLedState = 1;
         }
     }
     else if (newLinkState)
     {
-        if(_ipLedState != 2)
+        if (_ipLedState != 2)
         {
-            #ifdef OPENKNX_SERIALLED_ENABLE
+#ifdef OPENKNX_SERIALLED_ENABLE
             openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_YELLOW);
             openknx.OPENKNX_LED_IP.on();
-            #else
+#else
             openknx.OPENKNX_LED_IP.blinking(1000);
-            #endif
+#endif
 
             _ipLedState = 2;
         }
@@ -426,27 +426,27 @@ void NetworkModule::checkLinkStatus()
 #ifdef KNX_IP_WIFI
         if (_wifiSSID[0] == 0 || _wifiPassphrase[0])
         {
-            if(_ipLedState != 4)
+            if (_ipLedState != 4)
             {
-                #ifdef OPENKNX_SERIALLED_ENABLE
+#ifdef OPENKNX_SERIALLED_ENABLE
                 openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_RED);
                 openknx.OPENKNX_LED_IP.blinking(500);
-                #else
+#else
                 openknx.OPENKNX_LED_IP.blinking(500);
-                #endif
+#endif
                 _ipLedState = 4;
             }
         }
         else
 #endif
-        if(_ipLedState != 3)
+            if (_ipLedState != 3)
         {
-            #ifdef OPENKNX_SERIALLED_ENABLE
+#ifdef OPENKNX_SERIALLED_ENABLE
             openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_RED);
             openknx.OPENKNX_LED_IP.on();
-            #else
+#else
             openknx.OPENKNX_LED_IP.off();
-            #endif
+#endif
             _ipLedState = 3;
         }
     }
@@ -619,7 +619,7 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         saveWifiSettings("", ""); // triggers the restart timer
         logInfoP("Wifi settings erased");
         return true;
-    }    
+    }
     else if (cmd.compare(0, 4, "wifi") == 0 && cmd.length() > 6)
     {
         // Command: "wifi<SEP><ssid><SEP><psk>" with <SEP>=" " compatible to previous command
@@ -644,7 +644,6 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
             return false;
         }
     }
-  
 
 // else if (cmd == "net recon" && strlen(_wifiSSID) > 0)
 // {
