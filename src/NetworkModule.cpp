@@ -60,6 +60,21 @@ const std::string NetworkModule::version()
     return MODULE_Network_Version;
 }
 
+void NetworkModule::resetNetwork()
+{
+    logInfoP("Reset network adapter");
+    logIndentUp();
+    controlKnxIp(false);
+    KNX_NETIF.end();
+    delay(500);
+    initPhy();
+    initIp();
+    controlKnxIp(true);
+
+    logInfoP("Complete");
+    logIndentDown();
+}
+
 void NetworkModule::initPhy()
 {
     logDebugP("Initialize network adapter");
@@ -132,11 +147,18 @@ void NetworkModule::loadSettings()
     {
         // PID_FRIENDLY_NAME is used to identify the device over Search Request from ETS. If not configured, PID_FRIENDLY_NAME is empty and so is the Name in the SearchReqest.
         // set PID_FRIENDLY_NAME to the _hostname in this case, so "OpenKNX-XXXXXX" is display in the ETS
+        // since the friendlyName can be set while being unconfigured (is set while assigning PA), check if 0
         uint8_t NoOfElem = 30;
         uint32_t length = 0;
         uint8_t *friendlyName = new uint8_t[30];
-        memcpy(friendlyName, _hostName, 25);
-        knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, friendlyName, length);
+        knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, &friendlyName, length);
+        if(NoOfElem == 0)
+        {
+            memcpy(friendlyName, _hostName, 25);
+            NoOfElem = 30;
+            length = 0;
+            knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, friendlyName, length);
+        }
     }
 
     if (_useStaticIP)
@@ -148,6 +170,25 @@ void NetworkModule::loadSettings()
         SetByteProperty(PID_IP_CAPABILITIES, 6);              // AutoIP + DHCP
         SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 2); // ToDo
     }
+
+#ifdef KNX_IP_WIFI
+    if (strlen(_wifiSSID) == 0)
+        logErrorP("No WiFI Settings found!");
+#endif
+
+    logInfoP(_useStaticIP ? "Using static IP" : "Using DHCP");
+
+    // Hostname
+    logInfoP("Hostname: %s", _hostName);
+#if defined(ARDUINO_ARCH_ESP32)
+    KNX_NETIF.setHostname(_hostName);
+#else
+    KNX_NETIF.hostname(_hostName);
+#endif
+
+#ifdef ARDUINO_ARCH_ESP32
+    CALLBACK_CLASS.onEvent([](CALLBACK_EVENT event) -> void { openknxNetwork.esp32NetworkEvent(event); });
+#endif
 }
 
 void NetworkModule::init()
@@ -175,6 +216,8 @@ void NetworkModule::esp32NetworkEvent(CALLBACK_EVENT event)
             // The hostname must be set after the interface is started, but needs
             // to be set before DHCP, so set it from the event handler thread.
             KNX_NETIF.setHostname(_hostName);
+            controlKnxIp(false);
+
             break;
         case ARDUINO_EVENT_ETH_CONNECTED:
         case ARDUINO_EVENT_WIFI_STA_CONNECTED:
@@ -184,17 +227,18 @@ void NetworkModule::esp32NetworkEvent(CALLBACK_EVENT event)
         case ARDUINO_EVENT_ETH_GOT_IP:
         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
             logDebugP("Event: Got IP");
-            // ETH.printInfo(Serial);
-            // eth_connected = true;
+            controlKnxIp(true);
             break;
         case ARDUINO_EVENT_ETH_DISCONNECTED:
         case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
             logDebugP("Event: Disconnected");
+            controlKnxIp(false);
             espConnected = false;
             break;
         case ARDUINO_EVENT_ETH_STOP:
         case ARDUINO_EVENT_WIFI_STA_STOP:
             logDebugP("Event: Stop");
+            controlKnxIp(false);
             espConnected = false;
             break;
         default:
@@ -206,25 +250,7 @@ void NetworkModule::esp32NetworkEvent(CALLBACK_EVENT event)
 
 void NetworkModule::initIp()
 {
-
-    // Hostname
-    logInfoP("Hostname: %s", _hostName);
-#if defined(ARDUINO_ARCH_ESP32)
-    KNX_NETIF.setHostname(_hostName);
-#else
-    KNX_NETIF.hostname(_hostName);
-#endif
-
-#ifdef KNX_IP_WIFI
-    if (strlen(_wifiSSID) == 0)
-        logErrorP("No WiFI Settings found!");
-#endif
-
-    logInfoP(_useStaticIP ? "Using static IP" : "Using DHCP");
-
 #ifdef ARDUINO_ARCH_ESP32
-    CALLBACK_CLASS.onEvent([](CALLBACK_EVENT event) -> void { openknxNetwork.esp32NetworkEvent(event); });
-
 #ifdef KNX_IP_WIFI
     KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP);
     KNX_NETIF.mode(WIFI_AP_STA);
@@ -391,32 +417,32 @@ void NetworkModule::checkLinkStatus()
     bool establishedState = established();
     bool newLinkState;
     if (establishedState)
-        newLinkState = true;  
+        newLinkState = true;
     else
         newLinkState = connected();
 #ifdef OPENKNX_LED_IP
     // update LED's
     if (newLinkState && established())
     {
-        if(_ipLedState != 1)
+        if (_ipLedState != 1)
         {
-            #ifdef OPENKNX_SERIALLED_ENABLE
+#ifdef OPENKNX_SERIALLED_ENABLE
             openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_GREEN);
-            #endif
+#endif
             openknx.OPENKNX_LED_IP.on();
             _ipLedState = 1;
         }
     }
     else if (newLinkState)
     {
-        if(_ipLedState != 2)
+        if (_ipLedState != 2)
         {
-            #ifdef OPENKNX_SERIALLED_ENABLE
+#ifdef OPENKNX_SERIALLED_ENABLE
             openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_YELLOW);
             openknx.OPENKNX_LED_IP.on();
-            #else
+#else
             openknx.OPENKNX_LED_IP.blinking(1000);
-            #endif
+#endif
 
             _ipLedState = 2;
         }
@@ -426,27 +452,27 @@ void NetworkModule::checkLinkStatus()
 #ifdef KNX_IP_WIFI
         if (_wifiSSID[0] == 0 || _wifiPassphrase[0])
         {
-            if(_ipLedState != 4)
+            if (_ipLedState != 4)
             {
-                #ifdef OPENKNX_SERIALLED_ENABLE
+#ifdef OPENKNX_SERIALLED_ENABLE
                 openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_RED);
                 openknx.OPENKNX_LED_IP.blinking(500);
-                #else
+#else
                 openknx.OPENKNX_LED_IP.blinking(500);
-                #endif
+#endif
                 _ipLedState = 4;
             }
         }
         else
 #endif
-        if(_ipLedState != 3)
+            if (_ipLedState != 3)
         {
-            #ifdef OPENKNX_SERIALLED_ENABLE
+#ifdef OPENKNX_SERIALLED_ENABLE
             openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_RED);
             openknx.OPENKNX_LED_IP.on();
-            #else
+#else
             openknx.OPENKNX_LED_IP.off();
-            #endif
+#endif
             _ipLedState = 3;
         }
     }
@@ -612,7 +638,20 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         return true;
     }
 
+    else if (cmd == "net reset")
+    {
+        resetNetwork();
+        return true;
+    }
+
 #ifdef KNX_IP_WIFI
+    else if (cmd == "erase wifi")
+    {
+        KNX_NETIF.disconnect(true, true);
+        saveWifiSettings("", ""); // triggers the restart timer
+        logInfoP("Wifi settings erased");
+        return true;
+    }
     else if (cmd.compare(0, 4, "wifi") == 0 && cmd.length() > 6)
     {
         // Command: "wifi<SEP><ssid><SEP><psk>" with <SEP>=" " compatible to previous command
@@ -708,6 +747,7 @@ void NetworkModule::showHelp()
 #ifdef KNX_IP_WIFI
 
     openknx.console.printHelpLine("wifi SSID PSK", "Set SSID and PSK");
+    openknx.console.printHelpLine("erase wifi", "Erase WiFi settings");
 
 // if (strlen(_wifiSSID) > 0) openknx.console.printHelpLine("net recon", "Reconnect to network");
 #else
@@ -918,6 +958,15 @@ bool NetworkModule::processFunctionProperty(uint8_t objectIndex, uint8_t propert
     resultData[0] = 1;
     resultLength = 1;
     return false;
+}
+
+void NetworkModule::controlKnxIp(bool enable)
+{
+#if MASK_VERSION == 0x091A
+    knx.bau().getPrimaryDataLinkLayer()->enabled(enable);
+#elif MASK_VERSION == 0x57B0
+    knx.bau().getDataLinkLayer()->enabled(enable);
+#endif
 }
 
 NetworkModule openknxNetwork;
