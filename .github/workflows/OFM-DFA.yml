@@ -30,7 +30,7 @@ jobs:
 
     uses: ./.github/workflows/openknx-ofm-check.yml
     with:
-      KNXPROD_PREFIX: StateEngine
+      KNXPROD_PREFIX: ${{ matrix.prefix }}
       oam: ${{ matrix.oam }}
       target: ${{ matrix.target }}
       # restore_branch: ${{ matrix.restore_branch }}
