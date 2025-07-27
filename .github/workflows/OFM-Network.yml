@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2024-2025 Cornelius Koepp
 
-name: DFA-check
-run-name: Check OFM-DFA Build
+name: OFM-check
+run-name: Check OFM-Network Build
 
 on: [push]
 
@@ -14,9 +14,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - oam: OAM-StateEngine
-            # knxprod_xml: StateEngine-DFA16-Release
-            target: DFA16-Release
+          - oam: OAM-Homematic
+            prefix: HomematicGW
+            # knxprod_xml: ...
+            target: Release
+          - oam: OAM-SmartHomeBridge
+            prefix: SmartHomeBridge
+            # knxprod_xml: ...
+            target: Release
 
         # # [BUILD]: all build targets
         # target:
