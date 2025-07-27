@@ -157,16 +157,16 @@ void NetworkModule::loadSettings()
         // PID_FRIENDLY_NAME is used to identify the device over Search Request from ETS. If not configured, PID_FRIENDLY_NAME is empty and so is the Name in the SearchReqest.
         // set PID_FRIENDLY_NAME to the _hostname in this case, so "OpenKNX-XXXXXX" is display in the ETS
         // since the friendlyName can be set while being unconfigured (is set while assigning PA), check if 0
-        uint8_t NoOfElem = 30;
+        uint8_t elements = 0;
         uint32_t length = 0;
-        uint8_t *friendlyName = new uint8_t[30];
-        knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, &friendlyName, length);
-        if (NoOfElem == 0)
+        uint8_t *friendlyName = nullptr;
+        knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, elements, 1, &friendlyName, length);
+        if (elements == 0)
         {
-            memcpy(friendlyName, _hostName, 25);
-            NoOfElem = 30;
+            friendlyName = (uint8_t *)_hostName;
+            elements = strlen(_hostName);
             length = 0;
-            knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, friendlyName, length);
+            knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, elements, 1, friendlyName, length);
         }
     }
 
