@@ -60,12 +60,21 @@ const std::string NetworkModule::version()
     return MODULE_Network_Version;
 }
 
+/*
+ * Internal use: Developer only
+ */
 void NetworkModule::resetNetwork()
 {
     logInfoP("Reset network adapter");
     logIndentUp();
     controlKnxIp(false);
+
+#if defined(KNX_IP_WIFI) && defined(ARDUINO_ARCH_ESP32)
+    KNX_NETIF.disconnect(true, true);
+    KNX_NETIF.mode(WIFI_OFF);
+#else
     KNX_NETIF.end();
+#endif
     delay(500);
     initPhy();
     initIp();
@@ -152,7 +161,7 @@ void NetworkModule::loadSettings()
         uint32_t length = 0;
         uint8_t *friendlyName = new uint8_t[30];
         knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, &friendlyName, length);
-        if(NoOfElem == 0)
+        if (NoOfElem == 0)
         {
             memcpy(friendlyName, _hostName, 25);
             NoOfElem = 30;
@@ -647,7 +656,11 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 #ifdef KNX_IP_WIFI
     else if (cmd == "erase wifi")
     {
+#ifdef ARDUINO_ARCH_ESP32
         KNX_NETIF.disconnect(true, true);
+#else
+        KNX_NETIF.disconnect();
+#endif
         saveWifiSettings("", ""); // triggers the restart timer
         logInfoP("Wifi settings erased");
         return true;
