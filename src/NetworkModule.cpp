@@ -60,12 +60,21 @@ const std::string NetworkModule::version()
     return MODULE_Network_Version;
 }
 
+/*
+ * Internal use: Developer only
+ */
 void NetworkModule::resetNetwork()
 {
     logInfoP("Reset network adapter");
     logIndentUp();
     controlKnxIp(false);
+
+#if defined(KNX_IP_WIFI) && defined(ARDUINO_ARCH_ESP32)
+    KNX_NETIF.disconnect(true, true);
+    KNX_NETIF.mode(WIFI_OFF);
+#else
     KNX_NETIF.end();
+#endif
     delay(500);
     initPhy();
     initIp();
@@ -148,16 +157,17 @@ void NetworkModule::loadSettings()
         // PID_FRIENDLY_NAME is used to identify the device over Search Request from ETS. If not configured, PID_FRIENDLY_NAME is empty and so is the Name in the SearchReqest.
         // set PID_FRIENDLY_NAME to the _hostname in this case, so "OpenKNX-XXXXXX" is display in the ETS
         // since the friendlyName can be set while being unconfigured (is set while assigning PA), check if 0
-        uint8_t NoOfElem = 30;
-        uint32_t length = 0;
-        uint8_t *friendlyName = new uint8_t[30];
-        knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, &friendlyName, length);
-        if(NoOfElem == 0)
+        uint8_t elements = 30; // request 30 items - update by read
+        uint32_t length = 0; // update by read
+        uint8_t *friendlyNameRead = nullptr; // new init by read
+        knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, elements, 1, &friendlyNameRead, length);
+        if (elements == 0)
         {
-            memcpy(friendlyName, _hostName, 25);
-            NoOfElem = 30;
-            length = 0;
-            knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, NoOfElem, 1, friendlyName, length);
+            uint8_t friendlyNameWrite[30] = {};
+            memcpy(friendlyNameWrite, _hostName, strlen(_hostName));
+            elements = 30;
+            length = 0; // will update by write
+            knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, elements, 1, friendlyNameWrite, 0);
         }
     }
 
@@ -647,7 +657,11 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 #ifdef KNX_IP_WIFI
     else if (cmd == "erase wifi")
     {
+#ifdef ARDUINO_ARCH_ESP32
         KNX_NETIF.disconnect(true, true);
+#else
+        KNX_NETIF.disconnect();
+#endif
         saveWifiSettings("", ""); // triggers the restart timer
         logInfoP("Wifi settings erased");
         return true;
