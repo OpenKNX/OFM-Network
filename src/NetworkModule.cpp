@@ -65,7 +65,12 @@ void NetworkModule::resetNetwork()
     logInfoP("Reset network adapter");
     logIndentUp();
     controlKnxIp(false);
+#ifdef KNX_IP_WIFI
+    WiFi.disconnect(); 
+    WiFi.mode(WIFI_OFF);
+#else
     KNX_NETIF.end();
+#endif
     delay(500);
     initPhy();
     initIp();
