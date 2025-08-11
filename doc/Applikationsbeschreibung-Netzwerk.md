@@ -96,3 +96,5 @@ IP-Geräte ohne WiFi-Zugangsdaten müssen initial auf anderem Wege eingerichtet 
 
 Bei Geräten auf Arduino-Pico-Basis können die WiFi-Zugangsdaten in der Regel zusätzlich per USB übertragen werden. Dazu muss das Gerät am Rechner angeschlossen und der Transfermodus durch einen Doppelklick auf die Prog-Taste gestartet werden. Kopiere dann eine Datei namens "WIFI.TXT" auf das Wechsellaufwerk. Die erste Zeile muss die SSID und die zweite den PSK enthalten. Danach den Modus wieder mit einem Doppelklick beenden und das Gerät neu starten.
 
+Der WiFi-Assistent kann auch WiFi-Daten, die zuvor auf dem Gerät hinterlegt wurden, löschen. 
+Dazu müssen einfach SSID und PSK leer gelassen werden und 'Übertragen' betätigt werden.
