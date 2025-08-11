@@ -113,7 +113,7 @@
               <!-- NTP -->
               <Union SizeInBit="408">
                 <Memory CodeSegment="%MID%" Offset="60" BitOffset="0" />
-                <Parameter Id="%AID%_UP-%TT%00061" Name="NTPServer"        ParameterType="%AID%_PT-NTPServer"     Offset="0"  BitOffset="0" Text="Zeitserver" Value="pool.ntp.org" />
+                <Parameter Id="%AID%_UP-%TT%00061" Name="NTPServer"        ParameterType="%AID%_PT-NTPServer"     Offset="0"  BitOffset="0" Text="Zeitserver" Value="openknx.pool.ntp.org" />
                 <!-- 50 characters + 0 terminator = 51 bytes used -->
               </Union>
 
