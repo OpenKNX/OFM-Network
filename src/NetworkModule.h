@@ -3,6 +3,7 @@
 #include "OpenKNX.h"
 #include "strings.h"
 #include <functional>
+#include "OpenKNX//Led/FunctionManager.h"
 
 #if defined(ARDUINO_ARCH_ESP32)
 #include <ESPmDNS.h>
@@ -37,6 +38,10 @@
 #ifdef HAS_USB
 #include "UsbExchangeModule.h"
 #endif
+
+namespace OpenKNX::Led {
+    extern uint32_t g_ipLedActivity;
+}
 
 typedef std::function<void(bool)> NetworkChangeCallback;
 
@@ -95,9 +100,9 @@ class NetworkModule : public OpenKNX::Module
     bool _useMDNS = false;
     bool _otaAllowed = false;
     bool _otaHandle = false;
-#ifdef OPENKNX_LED_IP
     uint8_t _ipLedState = 0;
-#endif
+    OpenKNX::Led::FunctionGroup* _ipLedFunc = nullptr;
+
 #ifdef ARDUINO_ARCH_ESP32
     const uint16_t _otaPort = 3232;
     const char *_otaPortString = "3232";

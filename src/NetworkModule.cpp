@@ -309,6 +309,8 @@ void NetworkModule::setup(bool configured)
 #endif
 #endif
 
+    _ipLedFunc = openknx.ledFunctions.getActive(OPENKNX_LEDFUNC_NET_STATE);
+
     registerCallback([this](bool state) { if (state) this->showNetworkInformations(false); });
 
     if (!configured || ParamNET_mDNS)
@@ -430,63 +432,54 @@ void NetworkModule::checkLinkStatus()
         newLinkState = true;
     else
         newLinkState = connected();
-#ifdef OPENKNX_LED_IP
-    // update LED's
-    if (newLinkState && established())
+    if(_ipLedFunc)
     {
-        if (_ipLedState != 1)
+        if (newLinkState && established())
         {
-#ifdef OPENKNX_SERIALLED_ENABLE
-            openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_GREEN);
-#endif
-            openknx.OPENKNX_LED_IP.on();
-            _ipLedState = 1;
-        }
-    }
-    else if (newLinkState)
-    {
-        if (_ipLedState != 2)
-        {
-#ifdef OPENKNX_SERIALLED_ENABLE
-            openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_YELLOW);
-            openknx.OPENKNX_LED_IP.on();
-#else
-            openknx.OPENKNX_LED_IP.blinking(1000);
-#endif
-
-            _ipLedState = 2;
-        }
-    }
-    else
-    {
-#ifdef KNX_IP_WIFI
-        if (_wifiSSID[0] == 0 || _wifiPassphrase[0])
-        {
-            if (_ipLedState != 4)
+            if (_ipLedState != 1)
             {
-#ifdef OPENKNX_SERIALLED_ENABLE
-                openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_RED);
-                openknx.OPENKNX_LED_IP.blinking(500);
-#else
-                openknx.OPENKNX_LED_IP.blinking(500);
-#endif
-                _ipLedState = 4;
+                _ipLedFunc->setColor(OpenKNX::Led::Color::Green);
+                _ipLedFunc->activity(OpenKNX::Led::g_ipLedActivity, true);
+
+                _ipLedState = 1;
+            }
+        }
+        else if (newLinkState)
+        {
+            if (_ipLedState != 2)
+            {
+                _ipLedFunc->setColor(OpenKNX::Led::Color::Yellow);
+                _ipLedFunc->on(OpenKNX::Led::Capability::COLOR);
+                _ipLedFunc->blinking(1000, OpenKNX::Led::Capability::MONOCHROME);
+
+                _ipLedState = 2;
             }
         }
         else
-#endif
-            if (_ipLedState != 3)
         {
-#ifdef OPENKNX_SERIALLED_ENABLE
-            openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_RED);
-            openknx.OPENKNX_LED_IP.on();
-#else
-            openknx.OPENKNX_LED_IP.off();
-#endif
-            _ipLedState = 3;
+    #ifdef KNX_IP_WIFI
+            if (_wifiSSID[0] == 0 || _wifiPassphrase[0])
+            {
+                if (_ipLedState != 4)
+                {
+                    _ipLedFunc->setColor(OpenKNX::Led::Color::Red);
+                    _ipLedFunc->blinking(500);
+                    _ipLedState = 4;
+                }
+            }
+            else
+    #endif
+            if (_ipLedState != 3)
+            {
+
+                _ipLedFunc->setColor(OpenKNX::Led::Color::Red);
+                _ipLedFunc->on(OpenKNX::Led::Capability::COLOR);
+                _ipLedFunc->off(OpenKNX::Led::Capability::MONOCHROME);
+                _ipLedState = 3;
+            }
         }
     }
-#endif
+
     // got link
     if (newLinkState && !_currentLinkState)
     {
