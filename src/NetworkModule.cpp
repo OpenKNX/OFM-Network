@@ -309,8 +309,6 @@ void NetworkModule::setup(bool configured)
 #endif
 #endif
 
-    _ipLedFunc = openknx.ledFunctions.getActive(OPENKNX_LEDFUNC_NET_STATE);
-
     registerCallback([this](bool state) { if (state) this->showNetworkInformations(false); });
 
     if (!configured || ParamNET_mDNS)
@@ -432,6 +430,8 @@ void NetworkModule::checkLinkStatus()
         newLinkState = true;
     else
         newLinkState = connected();
+    
+    _ipLedFunc = openknx.ledFunctions.getActive(OPENKNX_LEDFUNC_NET_STATE); // must be called in loop, because in setup time not all leds may be assigned (other OFMs)
     if(_ipLedFunc)
     {
         if (newLinkState && established())
