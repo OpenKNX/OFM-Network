@@ -62,6 +62,12 @@
               <ParameterType Id="%AID%_PT-NTPServer" Name="NTPServer">
                 <TypeText SizeInBit="400" /> <!-- 50 bytes -->
               </ParameterType>
+              <!-- Status LEDs-->
+              <ParameterType Id="%AID%_PT-SLEDFunc" Name="SLEDFunc">
+                <TypeRestriction Base="Value" SizeInBit="16" UIHint="DropDown">
+                  <Enumeration Text="Netzwerkstatus" Value="10" Id="%ENID%" DisplayOrder="0"/>
+                </TypeRestriction>
+              </ParameterType>
             </ParameterTypes>
             <Parameters>
               <!-- helper to check against a certain value in the case of a choose -->
