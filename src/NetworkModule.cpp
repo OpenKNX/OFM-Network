@@ -664,11 +664,6 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 #ifdef KNX_IP_WIFI
     else if (cmd == "erase wifi")
     {
-#ifdef ARDUINO_ARCH_ESP32
-        KNX_NETIF.disconnect(true, true);
-#else
-        KNX_NETIF.disconnect();
-#endif
         saveWifiSettings("", ""); // triggers the restart timer
         logInfoP("Wifi settings erased");
         return true;
@@ -685,8 +680,10 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
             std::string ssid = ssid_psk.substr(0, pos);
             std::string psk = ssid_psk.substr(pos + 1);
 
-            logInfoP("WLAN SSID: %s", ssid.c_str());
-
+            if (ssid.empty())
+                logInfoP("Wifi settings erased");
+            else
+                logInfoP("WLAN SSID: %s", ssid.c_str());
             saveWifiSettings(ssid.c_str(), psk.c_str());
 
             return true;
@@ -864,15 +861,16 @@ bool NetworkModule::restorePower()
 void NetworkModule::saveWifiSettings(const char *ssid, const char *passphrase)
 {
     logDebugP("Write WiFi settings");
-#ifdef ARDUINO_ARCH_RP2040
 
+#ifdef ARDUINO_ARCH_RP2040
+    KNX_NETIF.disconnect();
     File file = LittleFS.open("/WIFI.TXT", "w");
     file.println(ssid);
     file.println(passphrase);
     file.close();
 
 #elif ARDUINO_ARCH_ESP32
-
+    KNX_NETIF.disconnect(true, true);
     Preferences preferences;
     preferences.begin("WIFI", false);
     preferences.putString("SSID", ssid);
