@@ -8,6 +8,7 @@
   <op:config name="%NET_ServiceNTP%" value="1" />
   <op:config name="%NET_ServiceOTA%" value="1" />
   <op:config name="%NET_ShowMediumInfo%" value="0" />
+  <op:config name="%NET_WifiMode%" value="0" />
 
   <!-- Prepare: Not ready to use -->
   <op:config name="%NET_ServiceHTTP%" value="0" />
@@ -62,6 +63,12 @@
               <ParameterType Id="%AID%_PT-NTPServer" Name="NTPServer">
                 <TypeText SizeInBit="400" /> <!-- 50 bytes -->
               </ParameterType>
+              <ParameterType Id="%AID%_PT-NETWiFiMode" Name="NETWiFiMode">
+                <TypeRestriction Base="Value" SizeInBit="1" UIHint="DropDown">
+                  <Enumeration Text="Wifi Client" Value="0" Id="%ENID%" />
+                  <Enumeration Text="Access Point" Value="1" Id="%ENID%" />
+                </TypeRestriction>
+              </ParameterType>
               <!-- Status LEDs-->
               <ParameterType Id="%AID%_PT-SLEDFunc" Name="SLEDFunc">
                 <TypeRestriction Base="Value" SizeInBit="16" UIHint="DropDown">
@@ -101,7 +108,8 @@
                 <Parameter Id="%AID%_UP-%TT%00032" Name="HTTP"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="1" Text="Weberver" Value="1" /> 
                 <Parameter Id="%AID%_UP-%TT%00033" Name="NTP"                ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="2" Text="NTP-Client" Value="0" /> 
                 <Parameter Id="%AID%_UP-%TT%00034" Name="OTAUpdate"          ParameterType="%AID%_PT-OTAUpdate"          Offset="0" BitOffset="3" Text="OTA-Update" Value="0" />
-                <!-- 5 bits free -->
+                <Parameter Id="%AID%_UP-%TT%00035" Name="WiFiMode"           ParameterType="%AID%_PT-NETWiFiMode"        Offset="0" BitOffset="4" Text="Modus" Value="0" />
+                <!-- 4 bits free -->
               </Union>
 
               <!-- Hostname -->
@@ -139,6 +147,7 @@
               <ParameterRef Id="%AID%_UP-%TT%00031_R-%TT%0003101" RefId="%AID%_UP-%TT%00031" />
               <ParameterRef Id="%AID%_UP-%TT%00032_R-%TT%0003201" RefId="%AID%_UP-%TT%00032" />
               <ParameterRef Id="%AID%_UP-%TT%00033_R-%TT%0003301" RefId="%AID%_UP-%TT%00033" />
+              <ParameterRef Id="%AID%_UP-%TT%00035_R-%TT%0003501" RefId="%AID%_UP-%TT%00035" />
               <ParameterRef Id="%AID%_UP-%TT%00052_R-%TT%0005201" RefId="%AID%_UP-%TT%00052" />
               <!-- NTPServer -->
               <ParameterRef Id="%AID%_UP-%TT%00061_R-%TT%0006101" RefId="%AID%_UP-%TT%00061" />
@@ -169,23 +178,40 @@ Geräte, die ausschließlich per TP angebunden sind, benötigen hier keine Konfi
                   </when>
                 </choose>
 
-                <ParameterSeparator Id="%AID%_PS-nnn" Text="IP-Adresse" UIHint="Headline" />
+                <!-- Wifi Mode -->
                 <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000"><!-- Static 0 -->
-                  <when test="%NET_IPConfigTool%"> <!-- default -->
-                    <ParameterRefRef RefId="%AID%_UP-%TT%00002_R-%TT%0000201" IndentLevel="1" HelpContext="NET-IP-Adresse" />
-                    <choose ParamRefId="%AID%_UP-%TT%00002_R-%TT%0000201">
-                      <when test="1">
-                        <ParameterRefRef RefId="%AID%_UP-%TT%00011_R-%TT%0001101" IndentLevel="1" HelpContext="NET-IP-Adresse" />
-                        <ParameterRefRef RefId="%AID%_UP-%TT%00012_R-%TT%0001201" IndentLevel="1" HelpContext="NET-IP-Adresse" />
-                        <ParameterRefRef RefId="%AID%_UP-%TT%00013_R-%TT%0001301" IndentLevel="1" HelpContext="NET-IP-Adresse" />
-                        <ParameterRefRef RefId="%AID%_UP-%TT%00021_R-%TT%0002101" IndentLevel="1" HelpContext="NET-IP-Adresse" />
+                  <when test="!=%NET_WifiMode%">
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="WiFi" UIHint="Headline" />
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00035_R-%TT%0003501" IndentLevel="1" HelpContext="NET-WiFiModus" />
+                  </when>
+                  <when test="%NET_WifiMode%">
+                    <Assign TargetParamRefRef="%AID%_UP-%TT%00035_R-%TT%0003501" Value="0" />
+                  </when>
+                </choose>
+
+                <!-- IP Address Block-->
+                <choose ParamRefId="%AID%_UP-%TT%00035_R-%TT%0003501"><!-- Wifi Mode-->
+                  <when test="0"> <!-- Wifi Client -->
+                 
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="IP-Adresse" UIHint="Headline" />
+                    <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000"><!-- Static 0 -->
+                      <when test="%NET_IPConfigTool%"> <!-- default -->
+                        <ParameterRefRef RefId="%AID%_UP-%TT%00002_R-%TT%0000201" IndentLevel="1" HelpContext="NET-IP-Adresse" />
+                        <choose ParamRefId="%AID%_UP-%TT%00002_R-%TT%0000201">
+                          <when test="1">
+                            <ParameterRefRef RefId="%AID%_UP-%TT%00011_R-%TT%0001101" IndentLevel="1" HelpContext="NET-IP-Adresse" />
+                            <ParameterRefRef RefId="%AID%_UP-%TT%00012_R-%TT%0001201" IndentLevel="1" HelpContext="NET-IP-Adresse" />
+                            <ParameterRefRef RefId="%AID%_UP-%TT%00013_R-%TT%0001301" IndentLevel="1" HelpContext="NET-IP-Adresse" />
+                            <ParameterRefRef RefId="%AID%_UP-%TT%00021_R-%TT%0002101" IndentLevel="1" HelpContext="NET-IP-Adresse" />
+                          </when>
+                        </choose>
+                      </when>
+                      <when test="!=%NET_IPConfigTool%"> <!-- router -->
+                        <ParameterSeparator Id="%AID%_PS-nnn" Text="IP-Einstellungen können im Eigenschaften Feld der ETS, Tab IP gesetzt werden." UIHint="Information" />
                       </when>
                     </choose>
                   </when>
-                  <when test="!=%NET_IPConfigTool%"> <!-- router -->
-                    <ParameterSeparator Id="%AID%_PS-nnn" Text="IP-Einstellungen können im Eigenschaften Feld der ETS, Tab IP gesetzt werden." UIHint="Information" />
-                  </when>
-                </choose>
+                </choose> 
 
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="Services" UIHint="Headline" />
                 <ParameterRefRef RefId="%AID%_UP-%TT%00031_R-%TT%0003101" IndentLevel="1" HelpContext="NET-MDNS" />

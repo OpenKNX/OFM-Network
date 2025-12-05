@@ -221,13 +221,21 @@ void NetworkModule::esp32NetworkEvent(CALLBACK_EVENT event)
             // do nothing
             break;
         case ARDUINO_EVENT_ETH_START:
-        case ARDUINO_EVENT_WIFI_AP_START:
             logDebugP("Event: Start");
             // The hostname must be set after the interface is started, but needs
             // to be set before DHCP, so set it from the event handler thread.
             KNX_NETIF.setHostname(_hostName);
             controlKnxIp(false);
 
+            break;
+        case ARDUINO_EVENT_WIFI_AP_START:
+            logDebugP("Event: AP Start");
+            // The hostname must be set after the interface is started, but needs
+            // to be set before DHCP, so set it from the event handler thread.
+            KNX_NETIF.setHostname(_hostName);
+            espConnected = true;
+            controlKnxIp(true);
+       
             break;
         case ARDUINO_EVENT_ETH_CONNECTED:
         case ARDUINO_EVENT_WIFI_STA_CONNECTED:
@@ -247,6 +255,7 @@ void NetworkModule::esp32NetworkEvent(CALLBACK_EVENT event)
             break;
         case ARDUINO_EVENT_ETH_STOP:
         case ARDUINO_EVENT_WIFI_STA_STOP:
+        case ARDUINO_EVENT_WIFI_AP_STOP:
             logDebugP("Event: Stop");
             controlKnxIp(false);
             espConnected = false;
@@ -263,12 +272,31 @@ void NetworkModule::initIp()
 #ifdef ARDUINO_ARCH_ESP32
 #ifdef KNX_IP_WIFI
     KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP);
-    KNX_NETIF.mode(WIFI_AP_STA);
+    // <Enumeration Text="Wifi Client" Value="0" Id="%ENID%" />
+    // <Enumeration Text="Access Point" Value="1" Id="%ENID%" />
+    if (ParamNET_WiFiMode)
+    {
+        KNX_NETIF.mode(WIFI_AP);
+    }
+    else
+    {
+        KNX_NETIF.mode(WIFI_STA);
+    }
     KNX_NETIF.setAutoReconnect(true);
     if (strlen(_wifiSSID) > 0)
-        KNX_NETIF.begin(_wifiSSID, _wifiPassphrase);
+    {
+        if (KNX_NETIF.getMode() == WIFI_AP)
+            KNX_NETIF.softAP(_wifiSSID, _wifiPassphrase);
+        else
+            KNX_NETIF.begin(_wifiSSID, _wifiPassphrase);
+    }
     else
-        KNX_NETIF.begin();
+    {
+        if (KNX_NETIF.getMode() == WIFI_AP)
+            KNX_NETIF.softAP("OpenKNX", "");
+        else
+            KNX_NETIF.begin();
+    }
 #else
     KNX_NETIF.begin();
     KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP); // Stupid: Nedd to be after begin an also DHCP!
@@ -723,6 +751,10 @@ void NetworkModule::showNetworkInformations(bool console)
     if (established())
     {
         logInfoP(_useStaticIP ? "Using static IP" : "Using DHCP");
+#ifdef KNX_IP_WIFI
+        if (WiFi.getMode() == WIFI_AP)
+            logInfoP("Mode: Access Point");
+#endif
         logInfoP("IP-Address: %s", localIP().toString().c_str());
         logInfoP("Netmask: %s", subnetMask().toString().c_str());
         logInfoP("Gateway: %s", gatewayIP().toString().c_str());
@@ -769,7 +801,7 @@ bool NetworkModule::connected()
     return KNX_NETIF.isConnected();
 #endif
 #elif defined(ARDUINO_ARCH_ESP32)
-    return espConnected;
+    return true; //espConnected;
 #endif
 }
 
@@ -783,6 +815,10 @@ bool NetworkModule::established()
 
 IPAddress NetworkModule::localIP()
 {
+#ifdef KNX_IP_WIFI
+    if (KNX_NETIF.getMode() == WIFI_AP)
+        return KNX_NETIF.softAPIP();
+#endif
     return KNX_NETIF.localIP();
 }
 

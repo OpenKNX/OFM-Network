@@ -26,6 +26,21 @@ DOCCONTENT -->
 
 In diesem Abschnitt werden die Basiseinstellungen und verfügbaren Dienste festgelegt.
 
+<!-- DOC HelpContext="WiFiModus"-->
+### **WiFi**
+
+<!-- DOC Skip="2" -->
+Dieser Abschnitt ist nicht bei allen Geräten verfügbar.
+
+Modus:
+
+- WiFi Client
+  Das Gerät verbindet sich mit einem WLAN Netzwerk.
+- Access Point
+  Das Geräte stellt ein eigenes WLAN Netzwerk bereit.
+  Initial heißt das Netzwerk "OpenKNX". 
+  Mit dem WiFi Assistenten können die Einstellungen geändert werden.
+
 <!-- DOC -->
 ### **IP-Adresse**
 
