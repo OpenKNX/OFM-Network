@@ -639,6 +639,17 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         return true;
     }
 
+    else if (cmd.compare(0, 6, "net mc") == 0)
+    {
+        std::string new_address = cmd.substr(7);
+        if (new_address.length() == 0) new_address = "224.0.23.12";
+        openknx.logger.logWithPrefixAndValues("Network", "Write new multicast address to %s", new_address.c_str());
+        SetIpProperty(PID_ROUTING_MULTICAST_ADDRESS, new_address.c_str());
+        knx.bau().writeMemory();
+        openknx.restart();
+        return true;
+    }
+
     else if (cmd == "net reset")
     {
         resetNetwork();
