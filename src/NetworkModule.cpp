@@ -157,8 +157,8 @@ void NetworkModule::loadSettings()
         // PID_FRIENDLY_NAME is used to identify the device over Search Request from ETS. If not configured, PID_FRIENDLY_NAME is empty and so is the Name in the SearchReqest.
         // set PID_FRIENDLY_NAME to the _hostname in this case, so "OpenKNX-XXXXXX" is display in the ETS
         // since the friendlyName can be set while being unconfigured (is set while assigning PA), check if 0
-        uint8_t elements = 30; // request 30 items - update by read
-        uint32_t length = 0; // update by read
+        uint8_t elements = 30;               // request 30 items - update by read
+        uint32_t length = 0;                 // update by read
         uint8_t *friendlyNameRead = nullptr; // new init by read
         knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, elements, 1, &friendlyNameRead, length);
         if (elements == 0)
@@ -460,7 +460,7 @@ void NetworkModule::checkLinkStatus()
         newLinkState = true;
     else
         newLinkState = connected();
-    
+
     if (newLinkState && established())
     {
         if (_ipLedState != 1)
@@ -664,6 +664,17 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
     if (!debugKo && (cmd == "n" || cmd == "net"))
     {
         showNetworkInformations(true);
+        return true;
+    }
+
+    else if (cmd.compare(0, 6, "net mc") == 0)
+    {
+        std::string new_address = cmd.length() >= 7 ? cmd.substr(7) : "";
+        if (new_address.length() == 0) new_address = "224.0.23.12";
+        openknx.logger.logWithPrefixAndValues("Network", "Write new multicast address to %s", new_address.c_str());
+        SetIpProperty(PID_ROUTING_MULTICAST_ADDRESS, new_address.c_str());
+        knx.bau().writeMemory();
+        openknx.restart();
         return true;
     }
 
