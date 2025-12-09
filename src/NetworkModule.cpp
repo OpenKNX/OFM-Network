@@ -437,7 +437,7 @@ void NetworkModule::checkLinkStatus()
     {
         if (_ipLedState != 1)
         {
-            _ipLedFunc->setColor(OpenKNX::Led::Color::Green);
+            _ipLedFunc->color(OpenKNX::Led::Color::Green);
             _ipLedFunc->activity(OpenKNX::Led::g_ipLedActivity, true);
 
             _ipLedState = 1;
@@ -447,7 +447,7 @@ void NetworkModule::checkLinkStatus()
     {
         if (_ipLedState != 2)
         {
-            _ipLedFunc->setColor(OpenKNX::Led::Color::Yellow);
+            _ipLedFunc->color(OpenKNX::Led::Color::Yellow);
             _ipLedFunc->on(OpenKNX::Led::Capability::COLOR);
             _ipLedFunc->blinking(1000, OpenKNX::Led::Capability::MONOCHROME);
 
@@ -461,7 +461,7 @@ void NetworkModule::checkLinkStatus()
         {
             if (_ipLedState != 4)
             {
-                _ipLedFunc->setColor(OpenKNX::Led::Color::Red);
+                _ipLedFunc->color(OpenKNX::Led::Color::Red);
                 _ipLedFunc->blinking(500);
                 _ipLedState = 4;
             }
@@ -471,7 +471,7 @@ void NetworkModule::checkLinkStatus()
         if (_ipLedState != 3)
         {
 
-            _ipLedFunc->setColor(OpenKNX::Led::Color::Red);
+            _ipLedFunc->color(OpenKNX::Led::Color::Red);
             _ipLedFunc->on(OpenKNX::Led::Capability::COLOR);
             _ipLedFunc->off(OpenKNX::Led::Capability::MONOCHROME);
             _ipLedState = 3;
