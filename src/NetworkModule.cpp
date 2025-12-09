@@ -468,7 +468,7 @@ void NetworkModule::checkLinkStatus()
         }
         else
 #endif
-        if (_ipLedState != 3)
+            if (_ipLedState != 3)
         {
 
             _ipLedFunc->color(OpenKNX::Led::Color::Red);
@@ -639,11 +639,18 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         return true;
     }
 
-    else if (cmd.compare(0, 6, "net mc") == 0)
+    else if (cmd == "net mc")
     {
-        std::string new_address = cmd.length() >= 7 ? cmd.substr(7) : "";
-        if (new_address.length() == 0) new_address = "224.0.23.12";
-        openknx.logger.logWithPrefixAndValues("Network", "Write new multicast address to %s", new_address.c_str());
+        IPAddress address = GetIpProperty(PID_ROUTING_MULTICAST_ADDRESS);
+        openknx.logger.logWithPrefixAndValues("Network", "Multicast address is set to %s", address.toString().c_str());
+        return true;
+    }
+
+    else if (cmd.compare(0, 7, "net mc ") == 0)
+    {
+        std::string new_address = cmd.length() >= 7 ? cmd.substr(7) : "reset";
+        if (new_address == "reset") new_address = "224.0.23.12";
+        openknx.logger.logWithPrefixAndValues("Network", "Set multicast address to %s", new_address.c_str());
         SetIpProperty(PID_ROUTING_MULTICAST_ADDRESS, new_address.c_str());
         knx.bau().writeMemory();
         openknx.restart();
