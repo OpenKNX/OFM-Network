@@ -239,16 +239,19 @@ void NetworkModule::esp32NetworkEvent(CALLBACK_EVENT event)
             break;
         case ARDUINO_EVENT_ETH_CONNECTED:
         case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+        case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
             logDebugP("Event: Connected");
             espConnected = true;
             break;
         case ARDUINO_EVENT_ETH_GOT_IP:
         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+        case ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED:
             logDebugP("Event: Got IP");
             controlKnxIp(true);
             break;
         case ARDUINO_EVENT_ETH_DISCONNECTED:
         case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+        case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED:
             logDebugP("Event: Disconnected");
             controlKnxIp(false);
             espConnected = false;
@@ -274,7 +277,14 @@ void NetworkModule::initIp()
     KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP);
     // <Enumeration Text="Wifi Client" Value="0" Id="%ENID%" />
     // <Enumeration Text="Access Point" Value="1" Id="%ENID%" />
-    if (ParamNET_WiFiMode)
+    bool noAddressAssigned = knx.individualAddress() == 65535;
+    logErrorP("Initialize WiFi %lu %s", (unsigned long) knx.individualAddress(), noAddressAssigned ? "no address" : "has address");
+    auto wifiSet = strlen(_wifiSSID) > 0;
+    if ((noAddressAssigned || !knx.configured()) && !wifiSet)
+    {
+        KNX_NETIF.mode(WIFI_AP_STA);
+    }
+    else if (!knx.configured() && ParamNET_WiFiMode)
     {
         KNX_NETIF.mode(WIFI_AP);
     }
@@ -283,19 +293,23 @@ void NetworkModule::initIp()
         KNX_NETIF.mode(WIFI_STA);
     }
     KNX_NETIF.setAutoReconnect(true);
-    if (strlen(_wifiSSID) > 0)
+    if (wifiSet)
     {
         if (KNX_NETIF.getMode() == WIFI_AP)
+        {
+            logInfoP("Starting Access Point \"%s\"", _wifiSSID);
             KNX_NETIF.softAP(_wifiSSID, _wifiPassphrase);
-        else
+        }
+        if (KNX_NETIF.getMode() == WIFI_STA)
+        {
+            logDebugP("Try to connect to WiFi \"%s\"", _wifiSSID);
             KNX_NETIF.begin(_wifiSSID, _wifiPassphrase);
+        }
     }
-    else
+    if (KNX_NETIF.getMode() == WIFI_AP_STA)
     {
-        if (KNX_NETIF.getMode() == WIFI_AP)
-            KNX_NETIF.softAP("OpenKNX", "");
-        else
-            KNX_NETIF.begin();
+        logInfoP("Starting configuration Access Point \"%s\"", _hostName);
+        KNX_NETIF.softAP(_hostName, "");
     }
 #else
     KNX_NETIF.begin();
@@ -833,11 +847,14 @@ bool NetworkModule::established()
 
 IPAddress NetworkModule::localIP()
 {
+    auto localIP = KNX_NETIF.localIP();
 #ifdef KNX_IP_WIFI
-    if (KNX_NETIF.getMode() == WIFI_AP)
+    if (localIP == IPAddress() && KNX_NETIF.getMode() == WIFI_AP || KNX_NETIF.getMode() == WIFI_AP_STA)
+    {
         return KNX_NETIF.softAPIP();
+    }
 #endif
-    return KNX_NETIF.localIP();
+    return localIP;
 }
 
 IPAddress NetworkModule::subnetMask()
