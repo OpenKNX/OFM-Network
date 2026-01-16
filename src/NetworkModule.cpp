@@ -652,11 +652,11 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         std::string new_address_str = cmd.length() >= 7 ? cmd.substr(7) : "reset";
 
         if (new_address_str == "reset") new_address_str = "0.0.0.0";
-        
+
         new_address.fromString(new_address_str.c_str());
-        
+
         if ((uint32_t)new_address == 0) new_address = (uint32_t)0x0C1700E0; // 224.0.23.12
-        
+
         openknx.logger.logWithPrefixAndValues("Network", "Set multicast address to %s", new_address.toString().c_str());
         SetIpProperty(PID_ROUTING_MULTICAST_ADDRESS, new_address);
         knx.bau().writeMemory();
@@ -674,7 +674,7 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 #ifdef KNX_IP_WIFI
     else if (cmd == "erase wifi")
     {
-        saveWifiSettings("", ""); // triggers the restart timer
+        saveWifiSettings("", "", true); // triggers the restart timer
         logInfoP("Wifi settings erased");
         return true;
     }
@@ -694,7 +694,7 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
                 logInfoP("Wifi settings erased");
             else
                 logInfoP("WLAN SSID: %s", ssid.c_str());
-            saveWifiSettings(ssid.c_str(), psk.c_str());
+            saveWifiSettings(ssid.c_str(), psk.c_str(), true); // triggers the restart timer
 
             return true;
         }
@@ -734,6 +734,24 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 
     return false;
 }
+
+#if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
+
+void setMulticastAddress(IPAddress address, bool scheduleRebootToTakeEffect)
+{
+    IPAddress new_address = address;
+
+    if ((uint32_t)new_address == 0) new_address = (uint32_t)0x0C1700E0; //
+{
+    if ((uint32_t)new_address == 0) new_address = (uint32_t)0x0C1700E0; // 224.0.23.12
+
+    openknx.logger.logWithPrefixAndValues("Network", "Set multicast address to %s", new_address.toString().c_str());
+    SetIpProperty(PID_ROUTING_MULTICAST_ADDRESS, new_address);
+    knx.bau().writeMemory();
+    if (scheduleRebootToTakeEffect)
+        openknx.restart();
+}
+#endif
 
 void NetworkModule::showNetworkInformations(bool console)
 {
@@ -781,6 +799,11 @@ void NetworkModule::showHelp()
 #else
 // if (!_useStaticIP) openknx.console.printHelpLine("net renew", "Renew DHCP Address");
 #endif
+#if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
+    openknx.console.printHelpLine("net mc [address|reset]", "Get/Set multicast address");
+#endif
+    openknx.console.printHelpLine("net reset", "Reset network adapter");
+
 }
 
 // Link status
@@ -860,7 +883,7 @@ bool NetworkModule::restorePower()
 }
 
 #ifdef KNX_IP_WIFI
-void NetworkModule::saveWifiSettings(const char *ssid, const char *passphrase)
+void NetworkModule::saveWifiSettings(const char *ssid, const char *passphrase, bool scheduleRebootToTakeEffect)
 {
     logDebugP("Write WiFi settings");
 
@@ -880,7 +903,8 @@ void NetworkModule::saveWifiSettings(const char *ssid, const char *passphrase)
     preferences.end();
 
 #endif
-    _restartTimer = millis();
+    if (scheduleRebootToTakeEffect)
+        _restartTimer = millis();
 }
 
 void NetworkModule::readWifiSettings()
