@@ -802,7 +802,7 @@ void NetworkModule::showHelp()
 // if (!_useStaticIP) openknx.console.printHelpLine("net renew", "Renew DHCP Address");
 #endif
 #if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
-    openknx.console.printHelpLine("net mc [address|reset]", "Get/Set multicast address");
+   // openknx.console.printHelpLine("net mc [address|reset]", "Get/Set multicast address");
 #endif
     openknx.console.printHelpLine("net reset", "Reset network adapter");
 
