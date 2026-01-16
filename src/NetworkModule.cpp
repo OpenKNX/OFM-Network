@@ -638,6 +638,7 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         showNetworkInformations(true);
         return true;
     }
+
 #if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
     else if (cmd == "net mc")
     {
@@ -652,11 +653,11 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         std::string new_address_str = cmd.length() >= 7 ? cmd.substr(7) : "reset";
 
         if (new_address_str == "reset") new_address_str = "0.0.0.0";
-        
+
         new_address.fromString(new_address_str.c_str());
-        
+
         if ((uint32_t)new_address == 0) new_address = (uint32_t)0x0C1700E0; // 224.0.23.12
-        
+
         openknx.logger.logWithPrefixAndValues("Network", "Set multicast address to %s", new_address.toString().c_str());
         SetIpProperty(PID_ROUTING_MULTICAST_ADDRESS, new_address);
         knx.bau().writeMemory();
