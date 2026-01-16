@@ -735,18 +735,15 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 
 void NetworkModule::setMulticastAddress(IPAddress address, bool rebootToTakeEffect)
 {
-    IPAddress new_address = address;
+    // set default if address is 0.0.0.0
+    if ((uint32_t)address == 0) address = (uint32_t)0x0C1700E0; // 224.0.23.12
 
-    if ((uint32_t)new_address == 0) new_address = (uint32_t)0x0C1700E0; //
-    {
-        if ((uint32_t)new_address == 0) new_address = (uint32_t)0x0C1700E0; // 224.0.23.12
+    openknx.logger.logWithPrefixAndValues("Network", "Set multicast address to %s", address.toString().c_str());
+    SetIpProperty(PID_ROUTING_MULTICAST_ADDRESS, address);
+    knx.bau().writeMemory();
 
-        openknx.logger.logWithPrefixAndValues("Network", "Set multicast address to %s", new_address.toString().c_str());
-        SetIpProperty(PID_ROUTING_MULTICAST_ADDRESS, new_address);
-        knx.bau().writeMemory();
-        if (rebootToTakeEffect)
-            openknx.restart();
-    }
+    if (rebootToTakeEffect)
+        openknx.restart();
 }
 #endif
 
@@ -797,10 +794,9 @@ void NetworkModule::showHelp()
 // if (!_useStaticIP) openknx.console.printHelpLine("net renew", "Renew DHCP Address");
 #endif
 #if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
-   // openknx.console.printHelpLine("net mc [address|reset]", "Get/Set multicast address");
+    // openknx.console.printHelpLine("net mc [address|reset]", "Get/Set multicast address");
 #endif
     openknx.console.printHelpLine("net reset", "Reset network adapter");
-
 }
 
 // Link status
