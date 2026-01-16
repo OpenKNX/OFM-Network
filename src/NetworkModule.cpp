@@ -663,13 +663,13 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         openknx.restart();
         return true;
     }
+#endif
 
     else if (cmd == "net reset")
     {
         resetNetwork();
         return true;
     }
-#endif
 
 #ifdef KNX_IP_WIFI
     else if (cmd == "erase wifi")
