@@ -638,6 +638,7 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         showNetworkInformations(true);
         return true;
     }
+
 #if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
     else if (cmd == "net mc")
     {
@@ -663,13 +664,13 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         openknx.restart();
         return true;
     }
+#endif
 
     else if (cmd == "net reset")
     {
         resetNetwork();
         return true;
     }
-#endif
 
 #ifdef KNX_IP_WIFI
     else if (cmd == "erase wifi")
