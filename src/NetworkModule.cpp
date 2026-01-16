@@ -738,19 +738,20 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 
 #if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
 
-void setMulticastAddress(IPAddress address, bool scheduleRebootToTakeEffect)
+void NetworkModule::setMulticastAddress(IPAddress address, bool scheduleRebootToTakeEffect)
 {
     IPAddress new_address = address;
 
     if ((uint32_t)new_address == 0) new_address = (uint32_t)0x0C1700E0; //
-{
-    if ((uint32_t)new_address == 0) new_address = (uint32_t)0x0C1700E0; // 224.0.23.12
+    {
+        if ((uint32_t)new_address == 0) new_address = (uint32_t)0x0C1700E0; // 224.0.23.12
 
-    openknx.logger.logWithPrefixAndValues("Network", "Set multicast address to %s", new_address.toString().c_str());
-    SetIpProperty(PID_ROUTING_MULTICAST_ADDRESS, new_address);
-    knx.bau().writeMemory();
-    if (scheduleRebootToTakeEffect)
-        openknx.restart();
+        openknx.logger.logWithPrefixAndValues("Network", "Set multicast address to %s", new_address.toString().c_str());
+        SetIpProperty(PID_ROUTING_MULTICAST_ADDRESS, new_address);
+        knx.bau().writeMemory();
+        if (scheduleRebootToTakeEffect)
+            openknx.restart();
+    }
 }
 #endif
 
@@ -998,7 +999,7 @@ bool NetworkModule::processFunctionProperty(uint8_t objectIndex, uint8_t propert
             const uint8_t ssidLen = data[1];
             // const uint8_t pskLen = data[2];
             logInfoP("Received wifi settings for %s", data + 3);
-            saveWifiSettings((char *)data + 3, (char *)data + 3 + ssidLen + 1);
+            saveWifiSettings((char *)data + 3, (char *)data + 3 + ssidLen + 1, true);
             resultData[0] = 0;
 #else
             logErrorP("Unsupported: Received wifi settings");
