@@ -567,7 +567,7 @@ IPAddress NetworkModule::GetIpProperty(uint8_t PropertyId)
     uint8_t *data;
     uint32_t length;
     knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PropertyId, NoOfElem, 1, &data, length);
-    IPAddress ret = (data[3] << 24) + (data[2] << 16) + (data[1] << 8) + data[0];
+    IPAddress ret = (length == 4) ? (data[3] << 24) + (data[2] << 16) + (data[1] << 8) + data[0] : 0;
     delete[] data;
     return ret;
 }
@@ -638,7 +638,7 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         showNetworkInformations(true);
         return true;
     }
-
+#if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
     else if (cmd == "net mc")
     {
         IPAddress address = GetIpProperty(PID_ROUTING_MULTICAST_ADDRESS);
@@ -648,10 +648,17 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 
     else if (cmd.compare(0, 7, "net mc ") == 0)
     {
-        std::string new_address = cmd.length() >= 7 ? cmd.substr(7) : "reset";
-        if (new_address == "reset") new_address = "224.0.23.12";
-        openknx.logger.logWithPrefixAndValues("Network", "Set multicast address to %s", new_address.c_str());
-        SetIpProperty(PID_ROUTING_MULTICAST_ADDRESS, new_address.c_str());
+        IPAddress new_address;
+        std::string new_address_str = cmd.length() >= 7 ? cmd.substr(7) : "reset";
+
+        if (new_address_str == "reset") new_address_str = "0.0.0.0";
+        
+        new_address.fromString(new_address_str.c_str());
+        
+        if ((uint32_t)new_address == 0) new_address = (uint32_t)0x0C1700E0; // 224.0.23.12
+        
+        openknx.logger.logWithPrefixAndValues("Network", "Set multicast address to %s", new_address.toString().c_str());
+        SetIpProperty(PID_ROUTING_MULTICAST_ADDRESS, new_address);
         knx.bau().writeMemory();
         openknx.restart();
         return true;
@@ -662,6 +669,7 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         resetNetwork();
         return true;
     }
+#endif
 
 #ifdef KNX_IP_WIFI
     else if (cmd == "erase wifi")
