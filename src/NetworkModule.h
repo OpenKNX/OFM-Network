@@ -84,7 +84,7 @@ class NetworkModule : public OpenKNX::Module
     std::string phyMode();
     void macAddress(uint8_t *addr);
 #if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
-    void setMulticastAddress(IPAddress address, bool scheduleRebootToTakeEffect);
+    void setMulticastAddress(IPAddress address, bool rebootToTakeEffect);
 #endif
 
 

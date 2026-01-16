@@ -738,7 +738,7 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 
 #if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
 
-void NetworkModule::setMulticastAddress(IPAddress address, bool scheduleRebootToTakeEffect)
+void NetworkModule::setMulticastAddress(IPAddress address, bool rebootToTakeEffect)
 {
     IPAddress new_address = address;
 
