@@ -656,12 +656,7 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 
         new_address.fromString(new_address_str.c_str());
 
-        if ((uint32_t)new_address == 0) new_address = (uint32_t)0x0C1700E0; // 224.0.23.12
-
-        openknx.logger.logWithPrefixAndValues("Network", "Set multicast address to %s", new_address.toString().c_str());
-        SetIpProperty(PID_ROUTING_MULTICAST_ADDRESS, new_address);
-        knx.bau().writeMemory();
-        openknx.restart();
+        setMulticastAddress(new_address, true);
         return true;
     }
 #endif
@@ -749,7 +744,7 @@ void NetworkModule::setMulticastAddress(IPAddress address, bool rebootToTakeEffe
         openknx.logger.logWithPrefixAndValues("Network", "Set multicast address to %s", new_address.toString().c_str());
         SetIpProperty(PID_ROUTING_MULTICAST_ADDRESS, new_address);
         knx.bau().writeMemory();
-        if (scheduleRebootToTakeEffect)
+        if (rebootToTakeEffect)
             openknx.restart();
     }
 }
