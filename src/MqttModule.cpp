@@ -41,9 +41,9 @@ std::string MqttModule::devicePrefix()
     {
         memcpy(_devicePrefix, "openknx/", 8);
         if (knx.configured() && getPrefix()[0] == '\0')
-            memcpy(_devicePrefix + 8, getPrefix(), strlen(getPrefix()));
-        else
             memcpy(_devicePrefix + 8, openknx.info.humanSerialNumber().c_str() + 5, 8);
+        else
+            memcpy(_devicePrefix + 8, getPrefix(), strlen(getPrefix()));
 
         memcpy(_devicePrefix + strlen(_devicePrefix), "/", 1);
     }
