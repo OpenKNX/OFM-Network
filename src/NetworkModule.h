@@ -3,6 +3,7 @@
 #include "OpenKNX.h"
 #include "strings.h"
 #include <functional>
+#include "OpenKNX//Led/FunctionManager.h"
 
 #if defined(ARDUINO_ARCH_ESP32)
 #include <ESPmDNS.h>
@@ -42,6 +43,10 @@
 #include "MqttModule.h"
 #endif
 
+namespace OpenKNX::Led {
+    extern uint32_t g_ipLedActivity;
+}
+
 typedef std::function<void(bool)> NetworkChangeCallback;
 
 class NetworkModule : public OpenKNX::Module
@@ -68,7 +73,7 @@ class NetworkModule : public OpenKNX::Module
     bool processFunctionProperty(uint8_t objectIndex, uint8_t propertyId, uint8_t length, uint8_t *data, uint8_t *resultData, uint8_t &resultLength) override;
 
 #ifdef KNX_IP_WIFI
-    void saveWifiSettings(const char *ssid, const char *passphrase);
+    void saveWifiSettings(const char *ssid, const char *passphrase, bool scheduleRebootToTakeEffect);
     void readWifiSettings();
 #endif
 
@@ -87,6 +92,10 @@ class NetworkModule : public OpenKNX::Module
     std::string phyMode();
     const char *getHostname();
     void macAddress(uint8_t *addr);
+#if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
+    void setMulticastAddress(IPAddress address, bool rebootToTakeEffect);
+#endif
+
 
 #ifdef ARDUINO_ARCH_ESP32
     void esp32NetworkEvent(arduino_event_id_t event);
@@ -104,9 +113,9 @@ class NetworkModule : public OpenKNX::Module
     bool _useMDNS = false;
     bool _otaAllowed = false;
     bool _otaHandle = false;
-#ifdef OPENKNX_LED_IP
     uint8_t _ipLedState = 0;
-#endif
+    OpenKNX::Led::FunctionGroup* _ipLedFunc = nullptr;
+
 #ifdef ARDUINO_ARCH_ESP32
     const uint16_t _otaPort = 3232;
     const char *_otaPortString = "3232";
@@ -142,6 +151,7 @@ class NetworkModule : public OpenKNX::Module
     void handleMDNS();
     void handleOTA();
     void controlKnxIp(bool state);
+
 
 #ifdef KNX_IP_WIFI
     char _wifiSSID[33] = {};

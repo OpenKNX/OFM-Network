@@ -157,8 +157,8 @@ void NetworkModule::loadSettings()
         // PID_FRIENDLY_NAME is used to identify the device over Search Request from ETS. If not configured, PID_FRIENDLY_NAME is empty and so is the Name in the SearchReqest.
         // set PID_FRIENDLY_NAME to the _hostname in this case, so "OpenKNX-XXXXXX" is display in the ETS
         // since the friendlyName can be set while being unconfigured (is set while assigning PA), check if 0
-        uint8_t elements = 30; // request 30 items - update by read
-        uint32_t length = 0; // update by read
+        uint8_t elements = 30;               // request 30 items - update by read
+        uint32_t length = 0;                 // update by read
         uint8_t *friendlyNameRead = nullptr; // new init by read
         knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, elements, 1, &friendlyNameRead, length);
         if (elements == 0)
@@ -311,6 +311,8 @@ void NetworkModule::setup(bool configured)
 
     registerCallback([this](bool state) { if (state) this->showNetworkInformations(false); });
 
+    _ipLedFunc = openknx.ledFunctions.get(OPENKNX_LEDFUNC_NET_STATE);
+
     if (!configured || ParamNET_mDNS)
     {
         logDebugP("Start mDNS");
@@ -434,16 +436,14 @@ void NetworkModule::checkLinkStatus()
         newLinkState = true;
     else
         newLinkState = connected();
-#ifdef OPENKNX_LED_IP
-    // update LED's
+
     if (newLinkState && established())
     {
         if (_ipLedState != 1)
         {
-#ifdef OPENKNX_SERIALLED_ENABLE
-            openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_GREEN);
-#endif
-            openknx.OPENKNX_LED_IP.on();
+            _ipLedFunc->color(OpenKNX::Led::Color::Green);
+            _ipLedFunc->activity(OpenKNX::Led::g_ipLedActivity, true);
+
             _ipLedState = 1;
         }
     }
@@ -451,12 +451,9 @@ void NetworkModule::checkLinkStatus()
     {
         if (_ipLedState != 2)
         {
-#ifdef OPENKNX_SERIALLED_ENABLE
-            openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_YELLOW);
-            openknx.OPENKNX_LED_IP.on();
-#else
-            openknx.OPENKNX_LED_IP.blinking(1000);
-#endif
+            _ipLedFunc->color(OpenKNX::Led::Color::Yellow);
+            _ipLedFunc->on(OpenKNX::Led::Capability::COLOR);
+            _ipLedFunc->blinking(1000, OpenKNX::Led::Capability::MONOCHROME);
 
             _ipLedState = 2;
         }
@@ -468,12 +465,8 @@ void NetworkModule::checkLinkStatus()
         {
             if (_ipLedState != 4)
             {
-#ifdef OPENKNX_SERIALLED_ENABLE
-                openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_RED);
-                openknx.OPENKNX_LED_IP.blinking(500);
-#else
-                openknx.OPENKNX_LED_IP.blinking(500);
-#endif
+                _ipLedFunc->color(OpenKNX::Led::Color::Red);
+                _ipLedFunc->blinking(500);
                 _ipLedState = 4;
             }
         }
@@ -481,16 +474,14 @@ void NetworkModule::checkLinkStatus()
 #endif
             if (_ipLedState != 3)
         {
-#ifdef OPENKNX_SERIALLED_ENABLE
-            openknx.OPENKNX_LED_IP.setColor(OPENKNX_SERIALLED_COLOR_RED);
-            openknx.OPENKNX_LED_IP.on();
-#else
-            openknx.OPENKNX_LED_IP.off();
-#endif
+
+            _ipLedFunc->color(OpenKNX::Led::Color::Red);
+            _ipLedFunc->on(OpenKNX::Led::Capability::COLOR);
+            _ipLedFunc->off(OpenKNX::Led::Capability::MONOCHROME);
             _ipLedState = 3;
         }
     }
-#endif
+
     // got link
     if (newLinkState && !_currentLinkState)
     {
@@ -583,7 +574,7 @@ IPAddress NetworkModule::GetIpProperty(uint8_t PropertyId)
     uint8_t *data;
     uint32_t length;
     knx.bau().propertyValueRead(OT_IP_PARAMETER, 0, PropertyId, NoOfElem, 1, &data, length);
-    IPAddress ret = (data[3] << 24) + (data[2] << 16) + (data[1] << 8) + data[0];
+    IPAddress ret = (length == 4) ? (data[3] << 24) + (data[2] << 16) + (data[1] << 8) + data[0] : 0;
     delete[] data;
     return ret;
 }
@@ -655,6 +646,28 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
         return true;
     }
 
+#if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
+    else if (cmd == "net mc")
+    {
+        IPAddress address = GetIpProperty(PID_ROUTING_MULTICAST_ADDRESS);
+        openknx.logger.logWithPrefixAndValues("Network", "Multicast address is set to %s", address.toString().c_str());
+        return true;
+    }
+
+    else if (cmd.compare(0, 7, "net mc ") == 0)
+    {
+        IPAddress new_address;
+        std::string new_address_str = cmd.length() >= 7 ? cmd.substr(7) : "reset";
+
+        if (new_address_str == "reset") new_address_str = "0.0.0.0";
+
+        new_address.fromString(new_address_str.c_str());
+
+        setMulticastAddress(new_address, true);
+        return true;
+    }
+#endif
+
     else if (cmd == "net reset")
     {
         resetNetwork();
@@ -664,7 +677,7 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 #ifdef KNX_IP_WIFI
     else if (cmd == "erase wifi")
     {
-        saveWifiSettings("", ""); // triggers the restart timer
+        saveWifiSettings("", "", true); // triggers the restart timer
         logInfoP("Wifi settings erased");
         return true;
     }
@@ -684,7 +697,7 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
                 logInfoP("Wifi settings erased");
             else
                 logInfoP("WLAN SSID: %s", ssid.c_str());
-            saveWifiSettings(ssid.c_str(), psk.c_str());
+            saveWifiSettings(ssid.c_str(), psk.c_str(), true); // triggers the restart timer
 
             return true;
         }
@@ -724,6 +737,22 @@ bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 
     return false;
 }
+
+#if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
+
+void NetworkModule::setMulticastAddress(IPAddress address, bool rebootToTakeEffect)
+{
+    // set default if address is 0.0.0.0
+    if ((uint32_t)address == 0) address = (uint32_t)0x0C1700E0; // 224.0.23.12
+
+    openknx.logger.logWithPrefixAndValues("Network", "Set multicast address to %s", address.toString().c_str());
+    SetIpProperty(PID_ROUTING_MULTICAST_ADDRESS, address);
+    knx.bau().writeMemory();
+
+    if (rebootToTakeEffect)
+        openknx.restart();
+}
+#endif
 
 void NetworkModule::showNetworkInformations(bool console)
 {
@@ -779,6 +808,10 @@ void NetworkModule::showHelp()
 #else
 // if (!_useStaticIP) openknx.console.printHelpLine("net renew", "Renew DHCP Address");
 #endif
+#if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
+    // openknx.console.printHelpLine("net mc [address|reset]", "Get/Set multicast address");
+#endif
+    openknx.console.printHelpLine("net reset", "Reset network adapter");
 }
 
 // Link status
@@ -858,7 +891,7 @@ bool NetworkModule::restorePower()
 }
 
 #ifdef KNX_IP_WIFI
-void NetworkModule::saveWifiSettings(const char *ssid, const char *passphrase)
+void NetworkModule::saveWifiSettings(const char *ssid, const char *passphrase, bool scheduleRebootToTakeEffect)
 {
     logDebugP("Write WiFi settings");
 
@@ -878,7 +911,8 @@ void NetworkModule::saveWifiSettings(const char *ssid, const char *passphrase)
     preferences.end();
 
 #endif
-    _restartTimer = millis();
+    if (scheduleRebootToTakeEffect)
+        _restartTimer = millis();
 }
 
 void NetworkModule::readWifiSettings()
@@ -971,7 +1005,7 @@ bool NetworkModule::processFunctionProperty(uint8_t objectIndex, uint8_t propert
             const uint8_t ssidLen = data[1];
             // const uint8_t pskLen = data[2];
             logInfoP("Received wifi settings for %s", data + 3);
-            saveWifiSettings((char *)data + 3, (char *)data + 3 + ssidLen + 1);
+            saveWifiSettings((char *)data + 3, (char *)data + 3 + ssidLen + 1, true);
             resultData[0] = 0;
 #else
             logErrorP("Unsupported: Received wifi settings");
