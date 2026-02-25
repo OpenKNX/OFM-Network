@@ -7,6 +7,10 @@
 #include "NetworkModule.h"
 #include "NtpTimeProvider.h"
 
+#include "lwip/igmp.h"
+#include "lwip/ip4_addr.h"
+#include "lwip/tcpip.h"
+
 #ifndef ParamNET_mDNS
 #define ParamNET_mDNS true
 #endif
@@ -47,6 +51,33 @@ WiFiUDP Udp;
 #else
 #pragma warn "Unsupported platform"
 #endif
+
+
+
+
+
+// KNX multicast address
+constexpr uint8_t KNX_MCAST[4] = {224,0,23,12};
+
+// TCPIP callback: safely join/refresh IGMP membership
+static void igmp_refresh_callback(void* arg)
+{
+    ip4_addr_t group;
+    IP4_ADDR(&group, KNX_MCAST[0], KNX_MCAST[1], KNX_MCAST[2], KNX_MCAST[3]);
+
+    ip4_addr_t ifaddr;
+    IP4_ADDR(&ifaddr, 0,0,0,0);  // ETH interface ANY
+
+    // leave & re-join forces new IGMP report
+    igmp_leavegroup(&ifaddr, &group);
+    igmp_joingroup(&ifaddr, &group);
+}
+
+// Public function to queue callback from Arduino task
+static void refreshIGMP()
+{
+    tcpip_callback(igmp_refresh_callback, nullptr);
+}
 
 const std::string NetworkModule::name()
 {
@@ -532,6 +563,13 @@ void NetworkModule::loop(bool configured)
 
     checkLinkStatus();
     handleOTA();
+
+if (delayCheckMillis(_lastigmp, 30000)) // refresh every 30s
+{
+    refreshIGMP();
+    logDebugP("Queued IGMP JoinGroup refresh");
+    _lastigmp = millis();
+}
 }
 
 void NetworkModule::handleOTA()

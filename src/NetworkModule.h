@@ -132,6 +132,7 @@ class NetworkModule : public OpenKNX::Module
     bool _currentLinkState = false;
     uint32_t _lastLinkCheck = false;
     uint32_t _restartTimer = 0;
+    uint32_t _lastigmp = 0;
 
     void initPhy();
     void initIp();
