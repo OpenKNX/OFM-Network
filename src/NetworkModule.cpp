@@ -76,7 +76,9 @@ static void igmp_refresh_callback(void* arg)
 // Public function to queue callback from Arduino task
 static void refreshIGMP()
 {
+    #if defined(ARDUINO_ARCH_ESP32)
     tcpip_callback(igmp_refresh_callback, nullptr);
+    #endif
 }
 
 const std::string NetworkModule::name()
