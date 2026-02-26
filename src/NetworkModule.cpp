@@ -11,6 +11,8 @@
 #include "lwip/ip4_addr.h"
 #include "lwip/tcpip.h"
 
+#include "esp_eth.h"
+
 #ifndef ParamNET_mDNS
 #define ParamNET_mDNS true
 #endif
@@ -291,6 +293,23 @@ void NetworkModule::esp32NetworkEvent(CALLBACK_EVENT event)
 }
 #endif
 
+void addMulticastMacFilter(const uint8_t* mac_addr) {
+    esp_eth_handle_t eth_handle = (esp_eth_handle_t)ETH.handle();
+    if (eth_handle) {
+        // Wir nutzen den Befehl ADD_MAC_FILTER aus deiner Liste
+        esp_err_t err = esp_eth_ioctl(eth_handle, ETH_CMD_ADD_MAC_FILTER, (void*)mac_addr);
+        
+        if (err == ESP_OK) {
+            Serial.printf("Filter: MAC %02X:%02X:%02X:%02X:%02X:%02X hinzugefügt.\n", 
+                          mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+        } else {
+            Serial.printf("Filter: Fehler beim Hinzufügen (0x%x). Unterstützt der Treiber dies?\n", err);
+            // Falls ADD_MAC_FILTER nicht unterstützt wird (Rückgabewert 0x102 / ESP_ERR_NOT_SUPPORTED),
+            // bleibt leider nur ETH_CMD_S_ALL_MULTICAST als Fallback.
+        }
+    }
+}
+
 void NetworkModule::initIp()
 {
 #ifdef ARDUINO_ARCH_ESP32
@@ -305,6 +324,23 @@ void NetworkModule::initIp()
 #else
     KNX_NETIF.begin();
     KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP); // Stupid: Nedd to be after begin an also DHCP!
+
+    uint8_t igmp_query_mac[] = {0x01, 0x00, 0x5E, 0x00, 0x00, 0x01};
+    //addMulticastMacFilter(igmp_query_mac);
+
+    // #include "esp_eth.h"
+
+    // // Hole das Ethernet-Handle vom Arduino-ETH-Objekt
+    // esp_eth_handle_t eth_handle = (esp_eth_handle_t)ETH.handle();
+    // if (eth_handle) {
+    //     bool enable = true;
+    //     // Setzt den MAC-Filter auf "Alles durchlassen" für Multicast
+    //     esp_eth_ioctl(eth_handle, ETH_CMD_S_ALL_MULTICAST, &enable);
+    //     logErrorP("ETH: Multicast Promiscuous Mode aktiv");
+    // }
+
+
+
 #endif
 
 #elif ARDUINO_ARCH_RP2040
@@ -566,12 +602,12 @@ void NetworkModule::loop(bool configured)
     checkLinkStatus();
     handleOTA();
 
-if (delayCheckMillis(_lastigmp, 30000)) // refresh every 30s
-{
-    refreshIGMP();
-    logDebugP("Queued IGMP JoinGroup refresh");
-    _lastigmp = millis();
-}
+// if (delayCheckMillis(_lastigmp, 30000)) // refresh every 30s
+// {
+//     refreshIGMP();
+//     logDebugP("Queued IGMP JoinGroup refresh");
+//     _lastigmp = millis();
+// }
 }
 
 void NetworkModule::handleOTA()
