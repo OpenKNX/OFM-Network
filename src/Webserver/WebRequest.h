@@ -2,6 +2,7 @@
 
 #include "Arduino.h"
 #include "WebserverHeader.h"
+#include <vector>
 
 class WebRequest
 {
@@ -18,7 +19,7 @@ class WebRequest
         uint8_t method;
         void setResponse(const char* type, const char* text);
         void setResponse(const char* type, const uint8_t *data, int length);
-        void addResponseHeader(char *name, char *value);
+        void addResponseHeader(const char *name, const char *value);
         void setStatusCode(uint16_t code);
         uint16_t getStatusCode();
 

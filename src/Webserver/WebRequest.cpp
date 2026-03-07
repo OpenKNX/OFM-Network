@@ -29,7 +29,7 @@ void WebRequest::setResponse(const char* type, const uint8_t *data, int length)
     memcpy(response, data, response_length);
 }
 
-void WebRequest::addResponseHeader(char *name, char *value)
+void WebRequest::addResponseHeader(const char *name, const char *value)
 {
     WebserverHeader h;
     h.name = name;
