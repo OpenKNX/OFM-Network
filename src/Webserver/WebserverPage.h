@@ -2,6 +2,7 @@
 
 #include "WebRequest.h"
 #include <string>
+#include <functional>
 
 struct WebserverPage {
     const char *uri;

@@ -1,4 +1,7 @@
 #pragma once
+
+#ifndef OPENKNX_NET_IGNORE
+
 #include "OpenKNX.h"
 #include "strings.h"
 #include <functional>
@@ -148,3 +151,5 @@ class NetworkModule : public OpenKNX::Module
 };
 
 extern NetworkModule openknxNetwork;
+
+#endif

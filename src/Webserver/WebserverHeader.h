@@ -1,6 +1,6 @@
 #pragma once
 
 struct WebserverHeader {
-    char *name;
-    char *value;
+    const char *name;
+    const char *value;
 };
