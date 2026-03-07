@@ -1,3 +1,5 @@
+#ifdef ARDUINO_ARCH_ESP32
+
 #include "ESP32_Webserver.h"
 #include "OpenKNX.h"
 
@@ -99,3 +101,5 @@ esp_err_t ESP32_Webserver::handleRequest(httpd_req_t *req)
     httpd_resp_send(req, request.getResponseBody(), request.getResponseBodyLength());
     return response;
 }
+
+#endif

@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef ARDUINO_ARCH_ESP32
+
 #include "Base_Webserver.h"
 #include <esp_http_server.h>
 
@@ -29,3 +31,5 @@ class ESP32_Webserver : public Base_Webserver
         std::vector<httpd_uri_t> _handler;
         httpd_handle_t _server;
 };
+
+#endif
