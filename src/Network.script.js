@@ -21,7 +21,7 @@ function sendWifiSettings(device, online, progress, context) {
     }
     data = data.concat(0); // null-terminated string
 
-    var resp = online.invokeFunctionProperty(0xA0, 5, data);
+    var resp = BASE_invokeFunctionPropertyWrapper(0xA0, 5, data, device, online, progress);
     if (resp[0] != 0) {
         throw new Error("Fehler: Das verwendete Gerät unterstützt kein WiFi!");
     }

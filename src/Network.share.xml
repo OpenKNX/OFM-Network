@@ -71,9 +71,10 @@
             </ParameterTypes>
             <Parameters>
               <!-- helper to check against a certain value in the case of a choose -->
-              <Parameter Id="%AID%_P-%TT%01000" Name="SelectHelper"          ParameterType="%AID%_PT-ValueDpt5"         Text=""        Value="0" Access="None" />
-              <Parameter Id="%AID%_P-%TT%01001" Name="WifiSSID"              ParameterType="%AID%_PT-WifiSSID"          Text="SSID"    Value="" />
-              <Parameter Id="%AID%_P-%TT%01002" Name="WifiPassword"          ParameterType="%AID%_PT-WifiPassword"      Text="PSK"     Value=""/>
+              <Parameter Id="%AID%_P-%TT%01000" Name="SelectHelper"          ParameterType="%AID%_PT-ValueDpt5"         Text=""               Value="0" Access="None" />
+              <Parameter Id="%AID%_P-%TT%01001" Name="WifiSSID"              ParameterType="%AID%_PT-WifiSSID"          Text="SSID"           Value="" />
+              <Parameter Id="%AID%_P-%TT%01002" Name="WifiPassword"          ParameterType="%AID%_PT-WifiPassword"      Text="PSK"            Value="" />
+              <Parameter Id="%AID%_P-%TT%01003" Name="WifiAssistant"         ParameterType="%AID%_PT-CheckBox"          Text="WiFi-Assistent" Value="0" SuffixText="Mit WiFi-Adapter" />
             
               <!-- IP Config -->
               <Union SizeInBit="128"><!-- 16bytes-->
@@ -128,6 +129,7 @@
               <ParameterRef Id="%AID%_P-%TT%01000_R-%TT%0100000" RefId="%AID%_P-%TT%01000" />
               <ParameterRef Id="%AID%_P-%TT%01001_R-%TT%0100100" RefId="%AID%_P-%TT%01001" />
               <ParameterRef Id="%AID%_P-%TT%01002_R-%TT%0100200" RefId="%AID%_P-%TT%01002" />
+              <ParameterRef Id="%AID%_P-%TT%01003_R-%TT%0100300" RefId="%AID%_P-%TT%01003" />
               <ParameterRef Id="%AID%_UP-%TT%00001_R-%TT%0000101" RefId="%AID%_UP-%TT%00001" />
               <ParameterRef Id="%AID%_UP-%TT%00002_R-%TT%0000201" RefId="%AID%_UP-%TT%00002" />
               <ParameterRef Id="%AID%_UP-%TT%00034_R-%TT%0003401" RefId="%AID%_UP-%TT%00034" />
@@ -224,6 +226,14 @@ Geräte, die ausschließlich per TP angebunden sind, benötigen hier keine Konfi
                 </choose>
 
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="Erweiterte Einstellung" UIHint="Headline" />
+
+                <!-- WiFi-Assistent -->
+                <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000"><!-- Static 0 -->
+                  <when test="!=%NET_WifiTool%"> <!-- default -->
+                    <ParameterRefRef RefId="%AID%_P-%TT%01003_R-%TT%0100300" IndentLevel="1" HelpContext="NET-WiFi-Assistent" />
+                  </when>
+                </choose>
+
                 <!-- Hostname -->
                 <ParameterRefRef RefId="%AID%_UP-%TT%00001_R-%TT%0000101" IndentLevel="1" HelpContext="NET-Hostname" />
                 <choose ParamRefId="%AID%_UP-%TT%00001_R-%TT%0000101">
@@ -253,26 +263,30 @@ Geräte, die ausschließlich per TP angebunden sind, benötigen hier keine Konfi
               <!-- WiFi -->
               <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000"><!-- Static 0 -->
                 <when test="!=%NET_WifiTool%"> <!-- default -->
-                  <ParameterBlock Id="%AID%_PB-nnn" Name="WiFi" Text="WiFi-Assistent" Icon="wifi" HelpContext="NET-WiFi-Assistent">
-                    <ParameterSeparator Id="%AID%_PS-nnn" Text="Dieser WiFi-Assistent ermöglicht das Übertragen von WiFi-Zugangsdaten auf das Gerät.
-Diese Einstellungen sind lediglich für Geräte mit WiFi-Schnittstelle vorgesehen." UIHint="Information" />
-                    
-                    <ParameterSeparator Id="%AID%_PS-nnn" Text="WiFi-Zugangsdaten" UIHint="Headline" />
-                    <ParameterRefRef RefId="%AID%_P-%TT%01001_R-%TT%0100100" IndentLevel="1" />
-                    <ParameterRefRef RefId="%AID%_P-%TT%01002_R-%TT%0100200" IndentLevel="1" />
+                  <choose ParamRefId="%AID%_P-%TT%01003_R-%TT%0100300">
+                    <when test="1">
+                      <ParameterBlock Id="%AID%_PB-nnn" Name="WiFi" Text="WiFi-Assistent" Icon="wifi" HelpContext="NET-WiFi-Assistent">
+                        <ParameterSeparator Id="%AID%_PS-nnn" Text="Dieser WiFi-Assistent ermöglicht das Übertragen von WiFi-Zugangsdaten auf das Gerät.
+    Diese Einstellungen sind lediglich für Geräte mit WiFi-Schnittstelle vorgesehen." UIHint="Information" />
+                        
+                        <ParameterSeparator Id="%AID%_PS-nnn" Text="WiFi-Zugangsdaten" UIHint="Headline" />
+                        <ParameterRefRef RefId="%AID%_P-%TT%01001_R-%TT%0100100" IndentLevel="1" />
+                        <ParameterRefRef RefId="%AID%_P-%TT%01002_R-%TT%0100200" IndentLevel="1" />
 
-                    <ParameterBlock Id="%AID%_PB-nnn" Name="A" Inline="true" Layout="Grid">
-                      <Rows>
-                        <Row Id="%AID%_PB-nnn_R-1" Name="Row1" />
-                      </Rows>
-                      <Columns>
-                        <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="46%" />
-                        <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="53%" />
-                      </Columns>
-                      <Button Id="%AID%_MD-%TT%000100_B-%TT%00000" Text="Übertragen" EventHandlerOnline="ConnectionOriented" EventHandler="sendWifiSettings" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
-                    </ParameterBlock>
+                        <ParameterBlock Id="%AID%_PB-nnn" Name="A" Inline="true" Layout="Grid">
+                          <Rows>
+                            <Row Id="%AID%_PB-nnn_R-1" Name="Row1" />
+                          </Rows>
+                          <Columns>
+                            <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="46%" />
+                            <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="53%" />
+                          </Columns>
+                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00000" Text="Übertragen" EventHandlerOnline="ConnectionOriented" EventHandler="sendWifiSettings" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
+                        </ParameterBlock>
 
-                  </ParameterBlock>
+                      </ParameterBlock>
+                    </when>
+                  </choose>
                 </when>
               </choose>
 

@@ -881,14 +881,18 @@ void NetworkModule::saveWifiSettings(const char *ssid, const char *passphrase, b
     logDebugP("Write WiFi settings");
 
 #ifdef ARDUINO_ARCH_RP2040
-    KNX_NETIF.disconnect();
+    if (!scheduleRebootToTakeEffect)
+        KNX_NETIF.disconnect();
+
     File file = LittleFS.open("/WIFI.TXT", "w");
     file.println(ssid);
     file.println(passphrase);
     file.close();
 
 #elif ARDUINO_ARCH_ESP32
-    KNX_NETIF.disconnect(true, true);
+    if (!scheduleRebootToTakeEffect)
+        KNX_NETIF.disconnect(true, true);
+
     Preferences preferences;
     preferences.begin("WIFI", false);
     preferences.putString("SSID", ssid);
@@ -897,7 +901,7 @@ void NetworkModule::saveWifiSettings(const char *ssid, const char *passphrase, b
 
 #endif
     if (scheduleRebootToTakeEffect)
-        _restartTimer = millis();
+        _restartTimer = delayTimerInit();
 }
 
 void NetworkModule::readWifiSettings()
