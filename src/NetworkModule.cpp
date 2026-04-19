@@ -537,9 +537,10 @@ void NetworkModule::loop(bool configured)
 void NetworkModule::handleOTA()
 {
     bool allowed = true;
+#ifdef ParamNET_OTAUpdate
     if (ParamNET_OTAUpdate == 2) allowed = false;
     if (ParamNET_OTAUpdate == 0) allowed = knx.progMode();
-
+#endif
     if (_otaAllowed != allowed) // allowed changed
     {
         _otaAllowed = allowed;
