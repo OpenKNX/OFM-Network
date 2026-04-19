@@ -65,7 +65,7 @@ void NtpTimeProvider::setup()
     {
 #ifdef ARDUINO_ARCH_ESP32
         // Configure the NTP server 3 times because the DNS should be queried multible times to return differnt IP addresses
-        esp_sntp_stop();
+        if (esp_sntp_enabled()) esp_sntp_stop();
         esp_sntp_setservername(0, (const char*)ParamNET_NTPServer);
         esp_sntp_setservername(1, (const char*)ParamNET_NTPServer);
         esp_sntp_setservername(2, (const char*)ParamNET_NTPServer);
@@ -73,8 +73,9 @@ void NtpTimeProvider::setup()
         currentInstance = this;
         esp_sntp_set_time_sync_notification_cb([](struct timeval* tv) {
             currentInstance->timeSet();
+            esp_sntp_set_sync_mode(sntp_sync_mode_t::SNTP_SYNC_MODE_SMOOTH);
         });
-        esp_sntp_set_sync_mode(sntp_sync_mode_t::SNTP_SYNC_MODE_SMOOTH);
+        esp_sntp_set_sync_mode(sntp_sync_mode_t::SNTP_SYNC_MODE_IMMED);
         esp_sntp_setoperatingmode(esp_sntp_operatingmode_t::ESP_SNTP_OPMODE_POLL);
         esp_sntp_init();
 #endif
