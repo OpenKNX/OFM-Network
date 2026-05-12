@@ -336,6 +336,7 @@ void NetworkModule::setup(bool configured)
         MDNS.addServiceTxt(service, "configured", (uint8_t)knx.configured());
 #endif
         MDNS.enableArduino(_otaPort /* default port for ota */, false /* AUTH true / false */);
+    }
 
 #ifdef ParamNET_NTP
         if (ParamNET_NTP)
@@ -343,7 +344,6 @@ void NetworkModule::setup(bool configured)
             openknx.time.setTimeProvider(new NtpTimeProvider());
         }
 #endif
-    }
 
 #ifdef ARDUINO_ARCH_ESP32
     ArduinoOTA.setMdnsEnabled(false); // handle global
