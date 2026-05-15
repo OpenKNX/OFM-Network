@@ -1,6 +1,6 @@
 # Changes
 
-## (upcoming release 0.6.0)
+## 0.6.0: 2026-05-15
 
 * Initial Changelog started
 * fix: ensure NTP server is stopped only if enabled and adjust sync mode
