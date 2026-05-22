@@ -6,11 +6,7 @@
 
 #if defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32)
 #include "OpenKNX.h"
-#include <lwip/dns.h>
-#include <lwip/ip_addr.h>
-#endif
-#ifdef ARDUINO_ARCH_ESP32
-#include <lwip/tcpip.h>
+#include "OpenKNX/Network/DNS.h"
 #endif
 
 namespace OpenKNX
@@ -19,69 +15,6 @@ namespace OpenKNX
     {
         namespace Ping
         {
-
-#if defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32)
-            struct DnsCallbackArg
-            {
-                Handler* queue;
-                uint32_t timeoutMs;
-                std::function<void(IPAddress, bool, uint32_t)> callback;
-            };
-
-            struct DnsCallbackArgRetry
-            {
-                Handler* queue;
-                uint32_t timeoutMs;
-                uint8_t retries;
-                std::function<void(IPAddress, bool)> callback;
-            };
-
-            static void dnsFoundCallback(const char* name, const ip_addr_t* ipaddr, void* arg)
-            {
-                DnsCallbackArg* darg = static_cast<DnsCallbackArg*>(arg);
-                if (ipaddr != nullptr)
-                {
-                    const ip4_addr_t* ip4 = ip_2_ip4(ipaddr);
-                    IPAddress ip(ip4_addr1(ip4), ip4_addr2(ip4), ip4_addr3(ip4), ip4_addr4(ip4));
-#ifdef ARDUINO_ARCH_ESP32
-                    // Callback runs inside TCPIP task which holds the core lock.
-                    // Calling sendto() here would deadlock — enqueue for loop() instead.
-                    darg->queue->enqueueDnsResult(ip, darg->timeoutMs, darg->callback);
-#else
-                    // RP2040: NO_SYS=1, single-threaded — direct call is safe.
-                    darg->queue->ping(ip, darg->callback, darg->timeoutMs);
-#endif
-                }
-                else if (darg->callback)
-                {
-                    darg->callback(IPAddress(0, 0, 0, 0), false, 0);
-                }
-                delete darg;
-            }
-
-            static void dnsFoundCallbackRetry(const char* name, const ip_addr_t* ipaddr, void* arg)
-            {
-                DnsCallbackArgRetry* darg = static_cast<DnsCallbackArgRetry*>(arg);
-                if (ipaddr != nullptr)
-                {
-                    const ip4_addr_t* ip4 = ip_2_ip4(ipaddr);
-                    IPAddress ip(ip4_addr1(ip4), ip4_addr2(ip4), ip4_addr3(ip4), ip4_addr4(ip4));
-#ifdef ARDUINO_ARCH_ESP32
-                    // Callback runs inside TCPIP task which holds the core lock.
-                    // Calling sendto() here would deadlock — enqueue for loop() instead.
-                    darg->queue->enqueueDnsResultRetry(ip, darg->retries, darg->timeoutMs, darg->callback);
-#else
-                    // RP2040: NO_SYS=1, single-threaded — direct call is safe.
-                    darg->queue->ping(ip, darg->callback, darg->retries, darg->timeoutMs);
-#endif
-                }
-                else if (darg->callback)
-                {
-                    darg->callback(IPAddress(0, 0, 0, 0), false);
-                }
-                delete darg;
-            }
-#endif
 
             Handler::Handler()
                 : _activePingCount(0), _lastLoopTime(0), _nextEchoSeq(0)
@@ -190,33 +123,10 @@ namespace OpenKNX
                 ping(target, ctx->innerCallback, timeoutMs);
             }
 
-            void Handler::enqueueDnsResult(IPAddress target, uint32_t timeoutMs,
-                                           std::function<void(IPAddress, bool, uint32_t)> callback)
-            {
-#ifdef ARDUINO_ARCH_ESP32
-                taskENTER_CRITICAL(&_dnsMux);
-#endif
-                _resolvedDns.push_back({target, timeoutMs, callback});
-#ifdef ARDUINO_ARCH_ESP32
-                taskEXIT_CRITICAL(&_dnsMux);
-#endif
-            }
-
-            void Handler::enqueueDnsResultRetry(IPAddress target, uint8_t retries, uint32_t timeoutMs,
-                                                std::function<void(IPAddress, bool)> callback)
-            {
-#ifdef ARDUINO_ARCH_ESP32
-                taskENTER_CRITICAL(&_dnsMux);
-#endif
-                _resolvedDnsRetry.push_back({target, retries, timeoutMs, callback});
-#ifdef ARDUINO_ARCH_ESP32
-                taskEXIT_CRITICAL(&_dnsMux);
-#endif
-            }
 
             void Handler::loop()
             {
-                if (_activePingCount == 0 && _pendingQueue.empty() && _resolvedDns.empty() && _resolvedDnsRetry.empty())
+                if (_activePingCount == 0 && _pendingQueue.empty())
                     return;
 
                 checkReplies();
@@ -225,8 +135,6 @@ namespace OpenKNX
                     return;
                 _lastLoopTime = millis();
 
-                processDnsResults();
-                processDnsResultsRetry();
                 processTimeouts();
                 startNextPending();
             }
@@ -244,38 +152,6 @@ namespace OpenKNX
                             dispatchCallback(i, true, rttMs);
                         }
                     }
-                }
-            }
-
-            void Handler::processDnsResults()
-            {
-                while (!_resolvedDns.empty())
-                {
-#ifdef ARDUINO_ARCH_ESP32
-                    taskENTER_CRITICAL(&_dnsMux);
-#endif
-                    DnsResult r = _resolvedDns.front();
-                    _resolvedDns.pop_front();
-#ifdef ARDUINO_ARCH_ESP32
-                    taskEXIT_CRITICAL(&_dnsMux);
-#endif
-                    ping(r.target, r.callback, r.timeoutMs);
-                }
-            }
-
-            void Handler::processDnsResultsRetry()
-            {
-                while (!_resolvedDnsRetry.empty())
-                {
-#ifdef ARDUINO_ARCH_ESP32
-                    taskENTER_CRITICAL(&_dnsMux);
-#endif
-                    DnsResultRetry r = _resolvedDnsRetry.front();
-                    _resolvedDnsRetry.pop_front();
-#ifdef ARDUINO_ARCH_ESP32
-                    taskEXIT_CRITICAL(&_dnsMux);
-#endif
-                    ping(r.target, r.callback, r.retries, r.timeoutMs);
                 }
             }
 
@@ -362,27 +238,9 @@ namespace OpenKNX
                 }
 
 #if defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32)
-                DnsCallbackArg* arg = new DnsCallbackArg{this, timeoutMs, callback};
-                ip_addr_t resolved;
-#ifdef ARDUINO_ARCH_ESP32
-                LOCK_TCPIP_CORE();
-#endif
-                err_t err = dns_gethostbyname(host.c_str(), &resolved, dnsFoundCallback, arg);
-#ifdef ARDUINO_ARCH_ESP32
-                UNLOCK_TCPIP_CORE();
-#endif
-                if (err == ERR_OK)
-                {
-                    // Already cached — enqueue so ping() runs from loop(), not from here
-                    dnsFoundCallback(host.c_str(), &resolved, arg);
-                }
-                else if (err != ERR_INPROGRESS)
-                {
-                    if (callback)
-                        callback(IPAddress(0, 0, 0, 0), false, 0);
-                    delete arg;
-                }
-                // ERR_INPROGRESS: dnsFoundCallback will fire when resolved
+                OpenKNX::Network::DNS::query(host, [this, timeoutMs, callback](IPAddress ip) {
+                    ping(ip, callback, timeoutMs);
+                });
 #else
                 if (callback)
                     callback(IPAddress(0, 0, 0, 0), false, 0);
@@ -400,27 +258,9 @@ namespace OpenKNX
                 }
 
 #if defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32)
-                DnsCallbackArgRetry* arg = new DnsCallbackArgRetry{this, timeoutMs, retries, callback};
-                ip_addr_t resolved;
-#ifdef ARDUINO_ARCH_ESP32
-                LOCK_TCPIP_CORE();
-#endif
-                err_t err = dns_gethostbyname(host.c_str(), &resolved, dnsFoundCallbackRetry, arg);
-#ifdef ARDUINO_ARCH_ESP32
-                UNLOCK_TCPIP_CORE();
-#endif
-                if (err == ERR_OK)
-                {
-                    // Already cached — call callback directly
-                    dnsFoundCallbackRetry(host.c_str(), &resolved, arg);
-                }
-                else if (err != ERR_INPROGRESS)
-                {
-                    if (callback)
-                        callback(IPAddress(0, 0, 0, 0), false);
-                    delete arg;
-                }
-                // ERR_INPROGRESS: dnsFoundCallbackRetry will fire when resolved
+                OpenKNX::Network::DNS::query(host, [this, timeoutMs, retries, callback](IPAddress ip) {
+                    ping(ip, callback, retries, timeoutMs);
+                });
 #else
                 if (callback)
                     callback(IPAddress(0, 0, 0, 0), false);

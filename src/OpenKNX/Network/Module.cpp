@@ -4,6 +4,7 @@
 #include <sstream>
 
 #include "Module.h"
+#include "DNS.h"
 #include "ModuleVersionCheck.h"
 #include "NtpTimeProvider.h"
 
@@ -541,6 +542,9 @@ namespace OpenKNX
 
 #ifdef OPENKNX_PING
             _pingHandler.loop();
+#endif
+#if defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32)
+            OpenKNX::Network::DNS::loop();
 #endif
 
             checkLinkStatus();
