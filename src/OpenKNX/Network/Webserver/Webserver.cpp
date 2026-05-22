@@ -19,14 +19,28 @@ namespace OpenKNX
             "*{box-sizing:border-box;margin:0;padding:0}"
             "body{display:flex;min-height:100vh;font-family:sans-serif;background:#fff;color:#111}"
             "nav{width:220px;min-width:220px;background:#000;display:flex;flex-direction:column;"
-            "align-items:center;padding:24px 0;height:100vh;position:sticky;top:0;overflow-y:auto;"
+            "align-items:center;padding:6px 0;height:100vh;position:sticky;top:0;overflow-y:auto;"
             "box-shadow:4px 0 18px rgba(0,0,0,.45);z-index:1}"
-            ".logo{width:90%;padding:0 12px 28px 12px}"
+            ".logo{width:180px;padding:0 24px;margin-top:12px;margin-bottom:12px}"
             ".logo img{width:100%;height:auto}"
-            "nav a{display:block;width:100%;padding:11px 24px;color:#aaa;text-decoration:none;"
+            "nav a.menu{display:block;width:100%;padding:11px 24px;color:#aaa;text-decoration:none;"
             "font-size:.9em;border-left:3px solid transparent;transition:all .15s}"
-            "nav a:hover{background:#1a1a1a;color:#fff;border-left-color:#449841}"
-            ".logo a,.logo a:hover{background:none;border-left-color:transparent;color:inherit}"
+            "nav a.menu:hover{background:#1a1a1a;color:#fff;border-left-color:#449841}"
+            "a.menu.active{color:#fff;border-left-color:#449841;background:#111}"
+            ".logo a{display:block;padding:0}"
+            ".nav-wiki{margin-top:auto;width:100%;padding:8px 0 8px;text-align:center}"
+            ".nav-wiki a,.nav-wiki a:hover{color:#555;font-size:.8em;padding:0;border:none;"
+            "background:none;display:inline;width:auto;text-decoration:none}"
+            ".nav-wiki a:hover{color:#888}"
+            ".menu-container{width:100%;margin:12px 0;display:flex;flex-direction:column}"
+            ".nav-footer{width:100%;padding:12px 24px 12px 27px;border-top:1px solid #222;"
+            "display:flex;flex-direction:column;gap:10px}"
+            ".nav-footer a{color:#666;text-decoration:none}"
+            ".prog-status{display:flex;align-items:center;color:#666;font-size:.8em;gap:8px}"
+            ".prog-dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0}"
+            ".dot-green{background:#449841}.dot-red{background:#ff5555}.dot-off{background:#555}"
+            ".nav-firm{font-weight:bold;font-size:.8em;color:#aaa}"
+            ".nav-info{display:flex;align-items:center;color:#666;font-size:.8em;gap:8px}"
             "main{flex:1;padding:2em;min-width:0}"
             ".meta{color:#666;font-size:.8em;margin-bottom:1.5em}"
             ".red{color:#ff5555}.green{color:#449841}.yellow{color:#ffff55}.gray{color:#888}"
@@ -55,18 +69,19 @@ namespace OpenKNX
 
         std::string Webserver::buildHeader(const std::string& activeUri)
         {
-            std::string nav;
+            std::string nav = "<div class='menu-container'>";
             for (auto& item : _menu)
             {
                 bool active = (item.uri == activeUri);
-                nav += "<a href='";
+                nav += "<a class='menu";
+                if (active) nav += " active";
+                nav += "' href='";
                 nav += item.uri;
-                nav += "'";
-                if (active) nav += " style='color:#fff;border-left-color:#449841;background:#111'";
-                nav += ">";
+                nav += "'>";
                 nav += item.label;
                 nav += "</a>";
             }
+            nav += "</div>";
 
             std::string html =
                 "<!DOCTYPE html><html><head>"
@@ -88,6 +103,31 @@ namespace OpenKNX
                                     "</div>";
 
             html += nav;
+            html += "<div class='nav-wiki'>"
+                    "<a href='https://wiki.openknx.de' target='_blank' rel='noopener noreferrer'>"
+                    "wiki</a> | "
+                    "<a href='https://forum.openknx.de' target='_blank' rel='noopener noreferrer'>"
+                    "forum</a>"
+                    "</div>"
+                    "<div class='nav-footer'>"
+                    "<div class='nav-firm'>";
+            html += openknx.info.firmwareName();
+            html += "</div>"
+                    "<div class='nav-info'>"
+                    "<span class='prog-dot ";
+            html += knx.configured() ? "dot-green" : "dot-off";
+            html += "'></span>Adresse: ";
+            html += openknx.info.humanIndividualAddress();
+            html += "</div>"
+                    "<a class='prog-status' href='/prog?mode=";
+            html += knx.progMode() ? "0" : "1";
+            html += "'>"
+                    "<span class='prog-dot ";
+            html += knx.progMode() ? "dot-red" : "dot-off";
+            html += "'></span>";
+            html += knx.progMode() ? "Prog-Modus aktiv" : "Prog-Modus inaktiv";
+            html += "</a>"
+                    "</div>";
             html += "</nav><main>";
             return html;
         }
@@ -291,6 +331,20 @@ namespace OpenKNX
 
             addRoute(WEB_GET, "/", [this](WebRequest&, WebResponse& res) {
                 buildOverviewPage(res);
+            });
+
+            addRoute(WEB_GET, "/prog", [](WebRequest& req, WebResponse& res) {
+                // Parse mode parameter from query string
+                size_t pos = req.uri.find("mode=");
+                if (pos != std::string::npos)
+                {
+                    int mode = std::stoi(req.uri.substr(pos + 5));
+                    knx.progMode(mode != 0);
+                }
+                // Redirect to home
+                res.setStatus(301);
+                res.addHeader("Location", "/");
+                res.send("");
             });
 
 #ifdef ARDUINO_ARCH_ESP32
