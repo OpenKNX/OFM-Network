@@ -14,7 +14,7 @@ namespace OpenKNX
 
         void Webconsole::setup()
         {
-            openknxNetwork.webserver.addMenuItem("Console", "/console");
+            openknxNetwork.webserver.addMenuItem("Konsole", "/console", 100);
 
             openknxNetwork.webserver.addRoute(WEB_GET, "/console",
                                               [](WebRequest&, WebResponse& res) {

@@ -50,6 +50,7 @@ namespace OpenKNX
         {
             std::string label;
             std::string uri;
+            int8_t priority = 0;
         };
 
         class Webserver
@@ -60,7 +61,7 @@ namespace OpenKNX
             void addRoute(uint8_t method, const std::string& uri, WebRouteHandler handler);
             void addSocket(const std::string& uri, WebSocketHandler onMessage,
                            WebSocketConnectHandler onConnect = nullptr);
-            void addMenuItem(const std::string& label, const std::string& uri);
+            void addMenuItem(const std::string& label, const std::string& uri, int8_t priority = 0);
 
             void setup();
             void loop();

@@ -4,6 +4,7 @@
 
 #include "OpenKNX.h"
 #include "OpenKNX/Network/Module.h"
+#include <algorithm>
 #include <cstring>
 #include <string>
 
@@ -265,7 +266,7 @@ namespace OpenKNX
             // Create cache buster from build time (changes on every rebuild)
             _assetCacheBuster = std::string(__DATE__) + " " + std::string(__TIME__);
 
-            addMenuItem("Übersicht", "/");
+            addMenuItem("Übersicht", "/", -127);
 
             static const char logoSvg[] =
                 "<svg viewBox='0 0 402 242' fill='none' xmlns='http://www.w3.org/2000/svg'>"
@@ -311,9 +312,11 @@ namespace OpenKNX
             _sockets.push_back({uri, onMessage, onConnect});
         }
 
-        void Webserver::addMenuItem(const std::string& label, const std::string& uri)
+        void Webserver::addMenuItem(const std::string& label, const std::string& uri, int8_t priority)
         {
-            _menu.push_back({label, uri});
+            _menu.push_back({label, uri, priority});
+            std::stable_sort(_menu.begin(), _menu.end(),
+                [](const WebMenuItem& a, const WebMenuItem& b) { return a.priority < b.priority; });
         }
 
         std::vector<int> Webserver::connectedClientFds(const std::string& uri) const
