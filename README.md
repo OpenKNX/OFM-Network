@@ -17,9 +17,12 @@ This module provides the network functionality for the OpenKNX stack.
 | RP2040 | LAN  | Integrated | KNX_IP_LAN  |                                                               |
 
 
-| Define         | Default  | Description           | Note                                    |
-|----------------|----------|-----------------------|-----------------------------------------|
-| OPENKNX_LED_IP |          | used LED for IP state | set to info2Led to use IP LED feature   |  
+| Define                   | Default | Description                          | Note                                         |
+|--------------------------|---------|--------------------------------------|----------------------------------------------|
+| OPENKNX_LED_IP           |         | LED used for IP state                | Set to info2Led to use IP LED feature        |
+| OPENKNX_PING             |         | Enable ping functionality            | Requires inclusion of Header in setup        |
+| OPENKNX_PING_TIMEOUT     | 1000    | Default ping timeout in milliseconds | Can be overridden per call                   |
+| OPENKNX_PING_PARALLEL    | 5       | Max concurrent pings                 | Additional requests are queued automatically |
 
 ## IP LED
 
@@ -33,13 +36,17 @@ Possible values for OPENKNX_LED_IP: info1Led, info2Led, info3Led. Recommended va
 | No IP adress                  | Slow flashing | Yellow             |                                        |
 | IP adress assigned            | On            | Green              |                                        |
 
+## Ping
+
+The module provides a non-blocking ping API with an internal queue, parallel slot management, and optional retry logic.
+
+Full documentation: [`README.Ping.md`](README.Ping.md)
+
 ## OTA
 
 Mit dem Netzwerkmodul wird eine OTA (Over the air) Update Funktion der Firmware ermöglicht.
 Das OTA muss jedoch zuerst am Gerät erlaubt werden.
 Dies kann durch drücken des PROG Tasters oder über die Konsole durch den Befehl `ota` erfolgen.
-
-### ESP32 OTA
 
 In platformio.custom.ini muss eine Section als OTA Target angelegt werden.
 In dieser muss das upload_protocol OTA und die IP-Adresse oder der Hostname des Gerätes festgelegt werden.
@@ -51,6 +58,6 @@ upload_port = XXX.XXX.XXX.XXX # IP Address or Hostname
 
 Hinweis: Der Hostname des Gerätes kann in der ETS im Abschnitt Netzwerk unter mDNS festgelegt werden.
 
-### RP2040 OTA
+## Webserver
 
-Aktuelle ist der OTA Upload beim RP2040 noch nicht getestet.
+Der integrierte HTTP/WebSocket-Server wird in [`README.Webserver.md`](README.Webserver.md) beschrieben.
