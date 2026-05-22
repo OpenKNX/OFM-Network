@@ -1,6 +1,6 @@
 #include "OpenKNX/Network/Webserver/Webserver.h"
 
-#ifdef OPENKNX_WEBSERVER
+#if defined(OPENKNX_WEBSERVER) && (defined(KNX_IP_WIFI) || defined(KNX_IP_LAN))
 
 #include "OpenKNX.h"
 #include "OpenKNX/Network/Module.h"
@@ -443,4 +443,4 @@ namespace OpenKNX
     } // namespace Network
 } // namespace OpenKNX
 
-#endif // OPENKNX_WEBSERVER
+#endif // defined(OPENKNX_WEBSERVER) && (defined(KNX_IP_WIFI) || defined(KNX_IP_LAN))

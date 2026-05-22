@@ -1,4 +1,4 @@
-#ifdef OPENKNX_WEBCONSOLE
+#if defined(OPENKNX_WEBCONSOLE) && (defined(KNX_IP_WIFI) || defined(KNX_IP_LAN))
 
 #include "OpenKNX/Network/Webserver/Webconsole.h"
 #include "OpenKNX.h"
@@ -234,4 +234,4 @@ namespace OpenKNX
     } // namespace Network
 } // namespace OpenKNX
 
-#endif // OPENKNX_WEBCONSOLE
+#endif // defined(OPENKNX_WEBCONSOLE) && (defined(KNX_IP_WIFI) || defined(KNX_IP_LAN))
