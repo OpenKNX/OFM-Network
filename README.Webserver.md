@@ -26,6 +26,12 @@ Der Webserver startet sobald das Netzwerk verfügbar ist und eine der folgenden 
 
 Das erlaubt Erstzugriff auf ein frisch geflashtes oder unkonfiguriertes Gerät ohne ETS-Programmierung.
 
+> **Wichtig für OAM-Entwickler:** Damit der ETS-Parameter `ParamNET_HTTP` dem Benutzer sichtbar ist, muss im XML des OAMs der zugehörige Channel explizit eingeblendet werden:
+> ```xml
+> <op:config name="%NET_ServiceHTTP%" value="1" />
+> ```
+> Ohne diesen Eintrag bleibt der Parameter in ETS ausgeblendet und der Webserver läuft nur im unconfigurierten Zustand — was in Produktionsgeräten unerwünscht ist.
+
 ---
 
 ## API
