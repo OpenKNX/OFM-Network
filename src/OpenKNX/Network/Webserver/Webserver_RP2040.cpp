@@ -256,6 +256,30 @@ namespace OpenKNX
 
         static void doHttpDispatch(ConnSlot* s)
         {
+            if (s->isWs && !s->ws->hasSocket(s->uri))
+            {
+                const char resp[] = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                tcp_write(s->pcb, resp, sizeof(resp) - 1, TCP_WRITE_FLAG_COPY);
+                tcp_output(s->pcb);
+
+                WebRequest wsReq;
+                wsReq.uri = s->uri;
+                wsReq.method = WEB_GET;
+                if (s->pcb)
+                {
+                    const ip4_addr_t* ip4 = ip_2_ip4(&s->pcb->remote_ip);
+                    uint32_t remoteIpAddr = ((uint32_t)ip4_addr1(ip4) << 0) | ((uint32_t)ip4_addr2(ip4) << 8) |
+                                           ((uint32_t)ip4_addr3(ip4) << 16) | ((uint32_t)ip4_addr4(ip4) << 24);
+                    wsReq.setRemoteAddr(remoteIpAddr);
+                    wsReq.setRemotePort(s->pcb->remote_port);
+                }
+                s->ws->logWebsocket(wsReq, 404);
+
+                tcp_close(s->pcb);
+                releaseSlot(s);
+                return;
+            }
+
             if (s->isWs && s->ws->hasSocket(s->uri))
             {
                 // WebSocket upgrade

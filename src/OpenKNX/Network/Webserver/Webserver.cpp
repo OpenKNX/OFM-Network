@@ -34,8 +34,10 @@ namespace OpenKNX
             "text-transform:uppercase;letter-spacing:.08em}"
             "table{width:100%;border-collapse:collapse;margin-bottom:.5em;font-size:.88em}"
             "td,th{text-align:left;padding:7px 14px}"
+            "th{background:#eee;color:#000;border-bottom:1px solid #bbb}"
             "td{border-top:1px solid #eee}"
-            "td:first-child{color:#888;white-space:nowrap;width:200px}";
+            "tr:last-child td{border-bottom:1px solid #eee}"
+            ".attribute-table td:first-child{color:#888;white-space:nowrap;width:200px}";
 
         static const char baseJs[] = "/* OpenKNX */";
 
@@ -105,7 +107,7 @@ namespace OpenKNX
             std::string page = "<h1>Übersicht</h1>";
 
             // ── Gerät ──────────────────────────────────────────────────────────
-            page += "<h2>Gerät</h2><table><tbody>";
+            page += "<h2>Gerät</h2><table class='attribute-table'><tbody>";
 #ifdef DEVICE_ID
             page += row("ID", DEVICE_ID);
 #endif
@@ -118,7 +120,7 @@ namespace OpenKNX
             page += "</tbody></table>";
 
             // ── Firmware ───────────────────────────────────────────────────────
-            page += "<h2>Firmware</h2><table><tbody>";
+            page += "<h2>Firmware</h2><table class='attribute-table'><tbody>";
             page += row("Name", openknx.info.firmwareName());
             page += row("Version", openknx.info.humanFirmwareVersion(true));
             page += row("Nummer", openknx.info.humanFirmwareNumber());
@@ -150,7 +152,7 @@ namespace OpenKNX
             page += "</tbody></table>";
 
             // ── Applikation ────────────────────────────────────────────────────
-            page += "<h2>Applikation</h2><table><tbody>";
+            page += "<h2>Applikation</h2><table class='attribute-table'><tbody>";
             {
                 std::string addr = openknx.info.humanIndividualAddress();
                 addr += knx.configured()
@@ -166,7 +168,7 @@ namespace OpenKNX
             page += "</tbody></table>";
 
             // ── Laufzeit ───────────────────────────────────────────────────────
-            page += "<h2>Laufzeit</h2><table><tbody>";
+            page += "<h2>Laufzeit</h2><table class='attribute-table'><tbody>";
             {
                 uint32_t s = millis() / 1000;
                 uint32_t d = s / 86400;
@@ -206,7 +208,7 @@ namespace OpenKNX
                          mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
                 bool net = openknxNetwork.established();
 
-                page += "<h2>Netzwerk</h2><table><tbody>";
+                page += "<h2>Netzwerk</h2><table class='attribute-table'><tbody>";
                 page += row("Hostname", openknxNetwork.hostName());
                 page += row("MAC", macStr);
                 page += row("IP-Adresse", net ? openknxNetwork.localIP().toString().c_str()
@@ -221,7 +223,7 @@ namespace OpenKNX
             }
 
             // ── Versionen ──────────────────────────────────────────────────────
-            page += "<h2>Versionen</h2><table><tbody>";
+            page += "<h2>Versionen</h2><table class='attribute-table'><tbody>";
             page += row("This Firmware", openknx.info.humanFirmwareVersion(true));
 #ifdef KNX_Version
             page += row("KNX", KNX_Version);
@@ -422,7 +424,7 @@ namespace OpenKNX
             logInfo("Webserver", "%s %s - %s:%u - %d", method, req.getUri().c_str(), clientIp, remotePort, statusCode);
         }
 
-        void Webserver::logWebsocket(const WebRequest& req)
+        void Webserver::logWebsocket(const WebRequest& req, int statusCode)
         {
             // Get remote address as string
             uint32_t remoteIp = req.getRemoteAddr();
@@ -435,7 +437,7 @@ namespace OpenKNX
             char clientIp[16];
             snprintf(clientIp, sizeof(clientIp), "%u.%u.%u.%u", a, b, c, d);
 
-            logInfo("Webserver", "WS %s - %s:%u", req.getUri().c_str(), clientIp, remotePort);
+            logInfo("Webserver", "WS %s - %s:%u - %d", req.getUri().c_str(), clientIp, remotePort, statusCode);
         }
 
     } // namespace Network

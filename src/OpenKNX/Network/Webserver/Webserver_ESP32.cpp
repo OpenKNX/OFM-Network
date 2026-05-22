@@ -299,12 +299,25 @@ namespace OpenKNX
                 }
             }
 
-            if (req->method == HTTP_GET && ws->hasSocket(uri))
+            if (req->method == HTTP_GET)
             {
                 char upgrade[32] = {};
                 httpd_req_get_hdr_value_str(req, "Upgrade", upgrade, sizeof(upgrade));
                 if (strcasecmp(upgrade, "websocket") == 0)
                 {
+                    if (!ws->hasSocket(uri))
+                    {
+                        WebRequest wsReq;
+                        wsReq.uri = uri;
+                        wsReq.method = WEB_GET;
+                        wsReq.setRemoteAddr(remoteIpAddr);
+                        wsReq.setRemotePort(remotePort);
+                        ws->logWebsocket(wsReq, 404);
+                        httpd_resp_set_status(req, "404 Not Found");
+                        httpd_resp_set_type(req, "text/plain");
+                        httpd_resp_sendstr(req, "No WebSocket handler registered for this URI");
+                        return ESP_OK;
+                    }
                     WebRequest wsReq;
                     wsReq.uri = uri;
                     wsReq.setRemoteAddr(remoteIpAddr);

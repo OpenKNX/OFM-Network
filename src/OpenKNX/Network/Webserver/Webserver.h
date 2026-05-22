@@ -82,7 +82,7 @@ namespace OpenKNX
 
             // Logging
             void logRequest(const WebRequest& req, const WebResponse& res);
-            void logWebsocket(const WebRequest& req);
+            void logWebsocket(const WebRequest& req, int statusCode = 101);
 
             // Öffentliche Dispatch-Methoden für plattformspezifische Handler
             bool handleRequest(WebRequest& req, WebResponse& res);
