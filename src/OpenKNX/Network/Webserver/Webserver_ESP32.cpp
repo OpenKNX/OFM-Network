@@ -11,6 +11,10 @@
 #include <mbedtls/sha1.h>
 #include <sys/socket.h>
 
+#ifndef ESP32_WEB_CTRL_PORT
+#define ESP32_WEB_CTRL_PORT 9080
+#endif
+
 namespace OpenKNX
 {
     namespace Network
@@ -425,6 +429,7 @@ namespace OpenKNX
             // httpd runs in its own FreeRTOS task; wsFrameRecv loops per WS session
             httpd_config_t config = HTTPD_DEFAULT_CONFIG();
             config.uri_match_fn = httpd_uri_match_wildcard;
+            config.ctrl_port = ESP32_WEB_CTRL_PORT;
             config.max_uri_handlers = 8; // 4 Methoden × Wildcard + Headroom
             config.max_open_sockets = 7; // page + assets (css/js/svg) + WS + headroom
             config.recv_wait_timeout = 5;
