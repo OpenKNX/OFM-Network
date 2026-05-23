@@ -1,11 +1,15 @@
-# OFM-Network – Claude Instructions
+@../OGM-Common/CLAUDE.md
+
+---
+
+# OFM-Network – Additional Instructions
 
 ## Project
 
 **OFM-Network** is an **OpenKNX Function Module (OFM)** — a library, not a standalone application. It provides IP connectivity (WiFi & Ethernet), OTA updates, mDNS, NTP time sync, and ICMP ping for OpenKNX devices. It has no own `platformio.ini`; it is included as a library in parent OpenKNX device projects.
 
-- **Language**: C++17, Arduino framework
-- **Developer level**: Advanced — no basics on Arduino, RP2040, ESP32, or networking needed. Get straight to the point.
+> **Not self-contained:** OFM-Network cannot be compiled or run on its own. The majority of the base infrastructure (module system, KNX stack integration, logging, flash storage, time API) lives in **OGM-Common**, located at `../OGM-Common` (one directory up). When tracing types like `OpenKNX::Module`, `OpenKNX::Log::Logger`, or `OpenKNX::Time::TimeProvider`, look there first.
+
 - **Branch convention**: `v1` = stable release, `v1dev` = active development, feature branches merge into `v1dev`
 
 ---
@@ -19,7 +23,7 @@
 | **RP2040** (PicoW) | WiFi | arduino-pico (Earle Philhower) | `KNX_IP_WIFI` |
 | **RP2040** | Ethernet | W5500lwIP (`W5500lwIP.h`) via SPI | `KNX_IP_LAN` |
 
-- RP2040: **arduino-pico** by Earle Philhower, lwIP single-thread (`NO_SYS=1`), no FreeRTOS
+- RP2040: lwIP single-thread (`NO_SYS=1`), no FreeRTOS
 - ESP32: FreeRTOS; DNS must be called via TCPIP task callback
 - W5500 SPI speed: `OPENKNX_NET_SPI_SPEED` (default 28 MHz), WiFi credentials in LittleFS `/WIFI.TXT`
 - ESP32 WiFi credentials via `Preferences` API
@@ -28,22 +32,29 @@
 
 ## Architecture & Key Classes
 
-### `NetworkModule` (`src/NetworkModule.h/.cpp`)
-Main module, inherits `OpenKNX::Module`. Manages PHY init → IP init → mDNS → OTA → NTP, DHCP vs. static IP, WiFi credential management, network LED (`OPENKNX_LED_IP`), console commands (`net`, `ping`, `wifi SSID PSK`, `erase wifi`, `net mc`), and callback registration for network changes.
+### `NetworkModule` (`src/OpenKNX/Network/Module.h/.cpp`)
+Main module, inherits `OpenKNX::Module`. Manages PHY init → IP init → mDNS → OTA → NTP, DHCP vs. static IP, WiFi credential management, network LED (`OPENKNX_LED_IP`), console commands, and callback registration for network changes.
 
-### `PingHandler` (`src/OpenKNX/Network/PingHandler.*`)
-Non-blocking ICMP ping with queue + parallel slots. Pending queue: unlimited FIFO. Active slots: `OPENKNX_PING_PARALLEL` (default 5). DNS resolved transparently before ping. Callback: `void(IPAddress target, bool reachable, uint32_t rttMs)`. `loop()` must be called from the Arduino loop.
+### `PingHandler` (`src/OpenKNX/Network/Ping/Handler.*`)
+Non-blocking ICMP ping with queue + parallel slots. Pending queue: unlimited FIFO. Active slots: `OPENKNX_PING_PARALLEL` (default 5). DNS resolved transparently before ping. `loop()` must be called from the Arduino loop.
 - **ESP32**: BSD socket API (`SOCK_RAW`, `IPPROTO_ICMP`), non-blocking via `fcntl(O_NONBLOCK)`, FreeRTOS queue for thread-safe DNS
 - **RP2040**: lwIP raw API (`raw_pcb`, `raw_sendto_if_src`), interrupt callback `icmpRecvCallback`
 
-### `NtpTimeProvider` (`src/NtpTimeProvider.h/.cpp`)
+**Ping API (two variants):**
+```cpp
+// Standard — with RTT in callback
+void ping(IPAddress|string target, void(IPAddress, bool, uint32_t rttMs) callback, uint32_t timeoutMs);
+
+// Retry — bool-only callback, automatic retries
+void ping(IPAddress|string target, void(IPAddress, bool) callback, uint8_t retries = 2, uint32_t timeoutMs);
+```
+
+### `NtpTimeProvider` (`src/OpenKNX/Network/NtpTimeProvider.h/.cpp`)
 Inherits `OpenKNX::Time::TimeProvider`. ESP32: `esp_sntp_*` (non-blocking, smooth mode). RP2040: Arduino NTP library, sync every 3600 s. Server via `ParamNET_NTPServer` (default: `pool.ntp.org`).
 
 ---
 
 ## KNX Concepts & Integration
-
-OpenKNX modules implement: `init()`, `setup()`, `loop()`, `processCommand()`, `readFlash()`, `writeFlash()`.
 
 KNX parameters from `knxprod.h` via macros `ParamNET_*`. Definitions in `src/Network.share.xml`.
 
@@ -51,64 +62,90 @@ KNX IP properties: `PID_IP_ADDRESS`, `PID_SUBNET_MASK`, `PID_DEFAULT_GATEWAY`, `
 
 Function property (object 160, property 5): transfers WiFi credentials from ETS via `Network.script.js`.
 
+**KNX Parameters (`ParamNET_*`):**
+```
+ParamNET_StaticIP            – force static IP (inverted: 0 = DHCP)
+ParamNET_HostAddress         – static IP address
+ParamNET_SubnetMask          – subnet mask
+ParamNET_GatewayAddress      – default gateway
+ParamNET_NameserverAddress   – DNS server
+ParamNET_CustomHostname      – enable custom hostname
+ParamNET_HostName            – custom hostname (max 24 chars)
+ParamNET_mDNS                – enable mDNS (default: on)
+ParamNET_HTTP                – enable webserver
+ParamNET_NTP                 – enable NTP client
+ParamNET_NTPServer           – NTP server FQDN (default: pool.ntp.org, max 50 chars)
+ParamNET_OTAUpdate           – OTA mode: 0=prog-mode only, 1=always, 2=disabled
+ParamNET_LanMode             – LAN speed: 0=auto, 1=100 Mbit, 3=10 Mbit power-save
+ParamNET_WifiSSID            – WiFi SSID (max 32 chars)
+ParamNET_WifiPassword        – WiFi PSK (max 63 chars)
+```
+
 **Compile defines:**
 ```
-OPENKNX_LED_IP           – LED for network status (optional)
-OPENKNX_PING_TIMEOUT     – Ping timeout ms (default 1000)
-OPENKNX_PING_PARALLEL    – Max concurrent pings (default 5)
-OPENKNX_NET_SPI_SPEED    – W5500 SPI speed Hz (default 28000000)
+OPENKNX_LED_IP               – LED for network status (optional)
+OPENKNX_PING                 – enable ICMP ping handler
+OPENKNX_PING_TIMEOUT         – ping timeout ms (default 1000)
+OPENKNX_PING_PARALLEL        – max concurrent pings (default 5)
+OPENKNX_NET_SPI_SPEED        – W5500 SPI speed Hz (default 28000000)
+OPENKNX_WEBSERVER            – enable HTTP server
+OPENKNX_WEBCONSOLE           – enable /console page + WS logger (requires WEBSERVER)
+OPENKNX_WEBCONSOLE_BUFFER    – logger ring buffer size bytes (default 4096, max 65535)
+OPENKNX_WEBFS                – enable FileManager (requires WEBSERVER)
+OPENKNX_WEBSERVER_MAX_BODY   – max POST body: 4 KB (RP2040), 32 KB (ESP32)
+HAS_USB                      – enable USB-Exchange support (RP2040)
 ```
 
 ---
 
-## Embedded Constraints
+## Additional Coding Conventions
 
-This code runs on microcontrollers with severe resource limits — treat every byte and cycle as precious:
-
-- **RAM**: RP2040 has 264 KB total (shared with stack, heap, lwIP, KNX stack). ESP32 has ~320 KB free heap typical. No dynamic allocation in hot paths.
-- **Flash**: Use `const` for read-only data — the linker places `.rodata` in flash automatically. `PROGMEM` does not exist on ESP32/RP2040. Avoid duplicating string literals.
-- **No heap churn**: No `new`/`delete` or `std::string` construction in `loop()` — use fixed buffers, stack locals, or pre-allocated members.
-- **No STL bloat**: Avoid `std::map`, `std::function`, `std::stringstream` — prefer arrays, raw function pointers, `snprintf`.
-- **Stack depth**: RP2040 has a single stack (no RTOS). Keep recursion and large stack frames out of callbacks.
-- **CPU**: Single-core RP2040 @ 125 MHz, no FPU on Cortex-M0+. Avoid float where integer math suffices.
-- When in doubt: measure before adding, and prefer the smaller solution.
-
----
-
-## Coding Conventions
-
-- **No `delay()`** — everything non-blocking, state machines with `millis()`
-- **Platform guards**: `#ifdef ARDUINO_ARCH_ESP32` / `#ifdef ARDUINO_ARCH_RP2040`
 - **Connectivity guards**: `#ifdef KNX_IP_WIFI` / `#ifdef KNX_IP_LAN`
 - No external libraries in `library.json` — only Arduino framework builtins and OpenKNX core
-- Comments in German or English (mixed OK, but consistent per file)
 - OTA port: ESP32 = 3232, RP2040 = 2040
 - mDNS hostname: `OpenKNX-XXXXXXXX` (8 hex chars from serial number)
 
-### Formatting (Allman style, `.clang-format`)
-- **Always follow `.clang-format` exactly** — it is the authoritative style definition
-- Curly braces always on their **own line** (classes, functions, `if`, `else`, `for`, `while`, `case`, `enum`, `struct`, `namespace`, `extern`)
-- No column limit — no artificial line breaks
-- 4 spaces indentation, no tabs
-- `namespace` content indented, `case` labels indented
-- `if` without braces only for a **single** statement (`OnlyFirstIf`) — no single-line `else`
-- Preprocessor directives not indented
-- Short functions, lambdas, enums, and `case` labels may stay on one line (as per `AllowShort*` rules)
-- When writing new code, match the style of the surrounding file exactly
+---
+
+## Console Commands
+
+```
+net / n                        Show network info (IP, mask, gateway, DNS, WiFi RSSI)
+net reset                      Reset PHY adapter
+net mc [address|reset]         Get/set multicast address (KNX-IP only, mask 0x091A / 0x57B0)
+ping <ip|hostname>             ICMP ping (2 s timeout in console)
+wifi <SEP><SSID><SEP><PSK>     Set WiFi credentials (any delimiter, e.g. "wifi:mySSID:myPSK")
+erase wifi                     Delete WiFi credentials (KNX_IP_WIFI only)
+```
 
 ---
 
 ## Webserver
 
-Compile flags:
-- `OPENKNX_WEBSERVER` — enables HTTP server, routing, all routes
-- `OPENKNX_WEBCONSOLE` — enables `/console` page, WS endpoint `/console`, logger ring buffer (requires `OPENKNX_WEBSERVER`)
-- `OPENKNX_WEBCONSOLE_BUFFER` — ring buffer size bytes (default 4096, max 65535)
-
 | Platform | Stack | Implementation |
 |----------|-------|----------------|
 | **ESP32** | FreeRTOS + esp-idf `httpd` | `Webserver_ESP32.cpp` |
 | **RP2040** | lwIP `NO_SYS=1`, single-threaded | `Webserver_RP2040.cpp` |
+
+### Built-in Routes
+
+| Method | URI | Flag | Description |
+|--------|-----|------|-------------|
+| GET | `/` | — | Overview dashboard |
+| GET | `/prog` | — | Prog-mode toggle (`?mode=0/1`) |
+| GET | `/assets/base.css` | — | Base stylesheet (inline embedded) |
+| GET | `/assets/base.js` | — | Base JavaScript (inline embedded) |
+| GET | `/assets/logo/black.svg` | — | OpenKNX logo |
+| GET | `/assets/favicon.svg` | — | Favicon |
+| GET | `/console` | `WEBCONSOLE` | Web console UI |
+| WS | `/console` | `WEBCONSOLE` | Logger streaming + commands |
+| GET | `/filemanager` | `WEBFS` | Directory listing |
+| GET | `/filemanager/download` | `WEBFS` | Streaming file download |
+| POST | `/filemanager/upload` | `WEBFS` | Chunked file upload |
+| POST | `/filemanager/delete` | `WEBFS` | Delete file |
+| POST | `/filemanager/mkdir` | `WEBFS` | Create directory |
+
+Wildcard routing supported: `/path/*` matches all sub-paths.
 
 ### Asset Management
 ```cpp
@@ -118,20 +155,29 @@ openknxNetwork.webserver.addJavaScript("/assets/custom.js");
 - `addStylesheet()` → inserted in `<head>` via `buildHeader()`
 - `addJavaScript()` → inserted before `</body>` via `buildFooter()`, with `defer`
 - Cache buster: automatic query param `YYYYMMDDHHII` from build time
-- `Webserver._stylesheets` / `Webserver._scripts` → `std::vector<std::string>`
+
+### Web UI Pages — Style Guidelines
+- **No inline CSS** — never use `style="..."` attributes in generated HTML
+- Page-specific styles go into a dedicated `.css` file served from LittleFS (e.g. `/assets/filemanager.css`), registered via `addStylesheet()` in the page's route handler or module init
+- Global styles that apply to all pages belong in the shared base stylesheet, not per-page assets
+- Same rule for JavaScript: page-specific logic → own `.js` file via `addJavaScript()`, not `<script>` blocks inline in the HTML response
 
 ### Layout: `.container`
-`buildHeader()` emits only `<nav>` + `<main>` — no wrapping container div. Pages decide independently: wrap in `<div class='container'>` (max-width 960px) or emit directly into `<main>` (fullscreen, flex-column).
+`buildHeader()` emits only `<nav>` + `<main>` — no wrapping container div. Normal pages wrap content in `<div class="container">` (max-width 960px). Only omit when explicitly building a fullscreen/flex-column page.
+
+### WebRequest / WebResponse
+- `req.getQueryParam(name)` — reads URL query parameter (URL-decoded)
+- `res.sendStatic(...)` — points directly to flash, no RAM copy (RP2040-optimized)
+- Body size limit: ESP32 = 32 KB, RP2040 = 4 KB → HTTP 413 on overflow
 
 ### Logger Ring Buffer
 Lives in `OpenKNX::Log::Logger` (OGM-Common). Fills regardless of WS clients connected — new clients get full history.
-- Type: byte-addressed ring buffer, variable entry length
 - Entry format: `[uint32_t seq][uint16_t len][char text[len]]` = 6-byte header + payload
 - Sentinel: remaining bytes zeroed (seq=0) when entry doesn't fit at end, `_logTail` resets to 0
 - API: `openknx.logger.getLogEntryAfter(lastSeq, buf, size, &outSeq)`
 
 ### RP2040 Webserver (lwIP `NO_SYS=1`)
-Callbacks (`onAccept`, `onRecv`, `onSent`, `onPoll`, `onErr`) must not block. 3 connection slots (`MAX_CONN = 3`), each with 1536 B RX buffer. `idx` set after `memset` via pointer arithmetic. WS state machine: `WR_HDR → WR_EXTLEN2/WR_EXTLEN8 → WR_MASK → WR_PAYLOAD`. Commands dequeued in `loop()` (not in `onRecv`) to avoid blocking USB-CDC. Only 1 pending command slot (`_pendingCmd[256]`).
+Callbacks (`onAccept`, `onRecv`, `onSent`, `onPoll`, `onErr`) must not block. 3 connection slots (`MAX_CONN = 3`), each with 1536 B RX buffer. WS state machine: `WR_HDR → WR_EXTLEN2/WR_EXTLEN8 → WR_MASK → WR_PAYLOAD`. WS payload max 512 B (truncated on overflow). Commands dequeued in `loop()` (not in `onRecv`). Only 1 pending command slot (`_pendingCmd[256]`).
 
 ### ESP32 Webserver
 `httpd` in its own FreeRTOS task. `processCommand()` called directly in `wsFrameRecv`. `wsSendText()` uses `MSG_DONTWAIT`. `Webserver::loop()` is a no-op. TCP keepalive: 3 s idle, 2 s interval, 3 probes.
@@ -148,7 +194,6 @@ No automatic reconnect — on disconnect shows `[Connection lost — reload page
 - [README.Ping.md](README.Ping.md) — ping handler usage
 - [doc/Applikationsbeschreibung-Netzwerk.md](doc/Applikationsbeschreibung-Netzwerk.md) — full KNX application documentation
 - [CHANGELOG.md](CHANGELOG.md) — version history
-- [AGENTS.md](AGENTS.md) — extended agent instructions (source of this content)
 
 ---
 
