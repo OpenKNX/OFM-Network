@@ -429,6 +429,7 @@ namespace OpenKNX
             config.max_open_sockets = 7; // page + assets (css/js/svg) + WS + headroom
             config.recv_wait_timeout = 5;
             config.send_wait_timeout = 5;
+            config.stack_size = 8192; // Logger-Mutex (xSemaphoreTakeRecursive) braucht ~400 B extra gegenüber Default 4096
 
             httpd_handle_t server;
             if (httpd_start(&server, &config) != ESP_OK)

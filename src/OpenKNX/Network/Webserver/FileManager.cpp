@@ -29,7 +29,7 @@ namespace OpenKNX
             "const end=Math.min(off+CHUNK,file.size);"
             "const r=await fetch('/filemanager/upload?path='+encodeURIComponent(path)+'&offset='+off,"
             "{method:'POST',body:file.slice(off,end),headers:{'Content-Type':'application/octet-stream'}});"
-            "if(!r.ok){const msg=await r.text();throw new Error(r.status===409?'Datei existiert bereits \xe2\x80\x93 zuerst l\xc3\xb6schen':msg);}"
+            "if(!r.ok){const msg=await r.text();throw new Error(r.status===409?'Datei existiert bereits \xe2\x80\x93 zuerst l\xc3\xb6schen':r.status===413?'Dateisystem voll \xe2\x80\x93 Speicherplatz reicht nicht aus':msg);}"
             "bar.value=Math.round(end/file.size*100);"
             "if(end>=file.size)break;"
             "}"
@@ -184,6 +184,17 @@ namespace OpenKNX
             std::string html;
             html.reserve(2048);
 
+            auto fmtBytes = [](size_t b) -> std::string {
+                char buf[24];
+                if (b >= 1024 * 1024)
+                    snprintf(buf, sizeof(buf), "%.1f MB", b / 1048576.0f);
+                else if (b >= 1024)
+                    snprintf(buf, sizeof(buf), "%.1f KB", b / 1024.0f);
+                else
+                    snprintf(buf, sizeof(buf), "%zu B", b);
+                return buf;
+            };
+
             html += "<div class='container'><h1>Dateiverwaltung";
             if (dir != "/")
             {
@@ -257,8 +268,8 @@ namespace OpenKNX
                             html += "<tr><td>";
                             html += displayName;
                             html += "</td><td class='right'>";
-                            html += std::to_string(sz);
-                            html += " B</td><td class='right'><a href='/filemanager/download?path=";
+                            html += fmtBytes(sz);
+                            html += "</td><td class='right'><a href='/filemanager/download?path=";
                             html += urlEncode(path);
                             html += "'>Download</a> | <a href='#' onclick=\"delFile('";
                             html += jsStr(path);
@@ -282,6 +293,24 @@ namespace OpenKNX
                     "<button onclick='mkDir()'>Anlegen</button>";
 
             html += "<h2>Datei hochladen</h2>";
+
+            {
+#ifdef ARDUINO_ARCH_ESP32
+                size_t total = LittleFS.totalBytes();
+                size_t freeBytes = total - LittleFS.usedBytes();
+#else
+                FSInfo fsInfo;
+                LittleFS.info(fsInfo);
+                size_t total = (size_t)fsInfo.totalBytes;
+                size_t freeBytes = (size_t)(fsInfo.totalBytes - fsInfo.usedBytes);
+#endif
+                html += "<p style='margin:0 0 6px'>Speicher: <strong>";
+                html += fmtBytes(freeBytes);
+                html += "</strong> frei von ";
+                html += fmtBytes(total);
+                html += "</p>";
+            }
+
             html += "<input type='file' id='fi'>&nbsp;"
                     "<button onclick='uploadFile()'>Hochladen</button>&nbsp;"
                     "<progress id='bar' value='0' max='100' style='display:none;width:160px'></progress>&nbsp;"
@@ -376,14 +405,26 @@ namespace OpenKNX
                 return;
             }
 
-            size_t written = f.write(req.body(), req.bodyLength());
+            size_t needed = req.bodyLength();
+
+            f.write(req.body(), needed);
             f.close();
 
-            if (written != req.bodyLength())
+            // LittleFS schreibt erst beim close() auf Flash — write() gibt immer
+            // die Puffergröße zurück, auch wenn kein Platz mehr da ist.
+            // Einzige zuverlässige Prüfung: Dateigröße nach dem Schließen vergleichen.
             {
-                res.setStatus(500);
-                res.send("Write incomplete");
-                return;
+                File verify = LittleFS.open(path.c_str(), "r");
+                size_t actualSize = verify ? verify.size() : 0;
+                if (verify) verify.close();
+
+                if (actualSize != offset + needed)
+                {
+                    LittleFS.remove(path.c_str());
+                    res.setStatus(413);
+                    res.send("Dateisystem voll");
+                    return;
+                }
             }
 
             res.setContentType("text/plain");
