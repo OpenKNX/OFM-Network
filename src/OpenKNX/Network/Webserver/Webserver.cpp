@@ -88,16 +88,19 @@ namespace OpenKNX
                 "<meta charset='utf-8'>"
                 "<title>OpenKNX</title>"
                 "<link rel='icon' type='image/svg+xml' href='/assets/favicon.svg?" +
-                _assetCacheBuster + "'>"
-                                    "<link rel='stylesheet' href='/assets/base.css?" +
-                _assetCacheBuster + "'>"
-                                    "<script src='/assets/base.js?" +
-                _assetCacheBuster + "' defer></script>"
-                                    "</head><body>"
-                                    "<nav>"
-                                    "<div class='logo'>"
-                                    "<a href='https://www.openknx.de' target='_blank' rel='noopener noreferrer'>"
-                                    "<img src='/assets/logo/black.svg?" +
+                _assetCacheBuster + "'>";
+
+            // Add registered stylesheets
+            for (const auto& stylesheet : _stylesheets)
+            {
+                html += "<link rel='stylesheet' href='" + stylesheet + "?" + _assetCacheBuster + "'>";
+            }
+
+            html += "</head><body>"
+                    "<nav>"
+                    "<div class='logo'>"
+                    "<a href='https://www.openknx.de' target='_blank' rel='noopener noreferrer'>"
+                    "<img src='/assets/logo/black.svg?" +
                 _assetCacheBuster + "' alt='OpenKNX'>"
                                     "</a>"
                                     "</div>";
@@ -134,7 +137,26 @@ namespace OpenKNX
 
         std::string Webserver::buildFooter()
         {
-            return "</main></body></html>";
+            std::string html = "</main>";
+
+            // Add registered scripts before closing body
+            for (const auto& script : _scripts)
+            {
+                html += "<script src='" + script + "?" + _assetCacheBuster + "' defer></script>";
+            }
+
+            html += "</body></html>";
+            return html;
+        }
+
+        void Webserver::addStylesheet(const char* uri)
+        {
+            _stylesheets.push_back(uri);
+        }
+
+        void Webserver::addJavaScript(const char* uri)
+        {
+            _scripts.push_back(uri);
         }
 
 #ifdef OPENKNX_WEBSERVER
@@ -303,8 +325,32 @@ namespace OpenKNX
 #ifdef OPENKNX_WEBSERVER
         void Webserver::setup()
         {
-            // Create cache buster from build time (changes on every rebuild)
-            _assetCacheBuster = std::string(__DATE__) + " " + std::string(__TIME__);
+            // Create cache buster from build time: YYYYMMDDHHII format
+            // __DATE__ = "May 23 2026", __TIME__ = "14:35:42"
+            static const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+            std::string dateStr = __DATE__;
+            std::string timeStr = __TIME__;
+
+            int month = 1;
+            std::string monthStr = dateStr.substr(0, 3);
+            for (int i = 0; i < 12; i++)
+            {
+                if (monthStr == months[i])
+                {
+                    month = i + 1;
+                    break;
+                }
+            }
+
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%s%02d%s%s",
+                dateStr.substr(7, 4).c_str(),   // YYYY
+                month,                           // MM (01-12)
+                dateStr.substr(4, 2).c_str(),   // DD
+                timeStr.substr(0, 5).c_str()    // HHMM
+            );
+            _assetCacheBuster = buf;
 
             addMenuItem("Übersicht", "/", -127);
 
@@ -329,6 +375,9 @@ namespace OpenKNX
             addRoute(WEB_GET, "/assets/logo/black.svg", Static("image/svg+xml", logoSvg));
             addRoute(WEB_GET, "/assets/favicon.svg", Static("image/svg+xml", faviconSvg));
 
+            addStylesheet("/assets/base.css");
+            addJavaScript("/assets/base.js");
+
             addRoute(WEB_GET, "/", [this](WebRequest&, WebResponse& res) {
                 buildOverviewPage(res);
             });
@@ -342,8 +391,8 @@ namespace OpenKNX
                     knx.progMode(mode != 0);
                 }
                 // Redirect to home
-                res.setStatus(301);
-                res.addHeader("Location", "/");
+                res.setStatus(303);
+                res.setHeader("Location", "/");
                 res.send("");
             });
 
@@ -427,7 +476,7 @@ namespace OpenKNX
         {
             return [target](WebRequest& req, WebResponse& res) {
                 res.setStatus(301);
-                res.addHeader("Location", target.c_str());
+                res.setHeader("Location", target.c_str());
                 res.send("");
             };
         }
@@ -437,7 +486,7 @@ namespace OpenKNX
             std::string mime(mimeType);
             return [mime, text](WebRequest& req, WebResponse& res) {
                 res.setContentType(mime.c_str());
-                res.addHeader("Cache-Control", "public, max-age=86400");
+                res.setHeader("Cache-Control", "public, max-age=86400");
                 res.sendStatic(text);
             };
         }
@@ -447,7 +496,7 @@ namespace OpenKNX
             std::string mime(mimeType);
             return [mime, data, length](WebRequest& req, WebResponse& res) {
                 res.setContentType(mime.c_str());
-                res.addHeader("Cache-Control", "public, max-age=86400");
+                res.setHeader("Cache-Control", "public, max-age=86400");
                 res.sendStatic(data, length);
             };
         }

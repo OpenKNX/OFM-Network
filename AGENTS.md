@@ -141,6 +141,27 @@ Ohne `OPENKNX_WEBSERVER` wird keinerlei Webserver-Code compiliert — keine Klas
 | **ESP32** | FreeRTOS + esp-idf `httpd` | `Webserver_ESP32.cpp` |
 | **RP2040** | lwIP `NO_SYS=1`, single-threaded | `Webserver_RP2040.cpp` |
 
+### Asset-Management (`addStylesheet` / `addJavaScript`)
+
+Der Webserver bietet ein flexibles System zur Verwaltung von CSS und JavaScript Assets:
+
+**API:**
+```cpp
+openknxNetwork.webserver.addStylesheet("/assets/custom.css");
+openknxNetwork.webserver.addJavaScript("/assets/custom.js");
+```
+
+**Verhalten:**
+- `addStylesheet()` → registriert URI, wird im `<head>` eingefügt (via `buildHeader()`)
+- `addJavaScript()` → registriert URI, wird vor `</body>` eingefügt (via `buildFooter()`)
+- **Cache-Buster**: automatisch Query-Parameter `YYYYMMDDHHII` (z.B. `?202605231435`) aus Build-Zeitpunkt
+- **Defer-Attribut**: JavaScript-Tags erhalten `defer` für non-blocking Ausführung
+- `base.css` und `base.js` werden während `setup()` über diese Funktionen registriert
+
+**Implementierung:**
+- `Webserver._stylesheets` → `std::vector<std::string>` in buildHeader durchlaufen
+- `Webserver._scripts` → `std::vector<std::string>` in buildFooter durchlaufen
+
 ### Logger-Ring-Buffer (`OPENKNX_WEBCONSOLE`)
 
 Der Ring-Buffer lebt in `OpenKNX::Log::Logger` (OGM-Common), **nicht** im Webserver. Er füllt sich unabhängig davon, ob WS-Clients verbunden sind – neue Clients erhalten damit automatisch die History.

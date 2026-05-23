@@ -12,9 +12,11 @@ namespace OpenKNX
         class WebResponse
         {
           public:
+            WebResponse();
+
             void setStatus(uint16_t code);
             void setContentType(const char* mimeType);
-            void addHeader(const char* name, const char* value);
+            void setHeader(const char* name, const char* value);
             void setLayout(bool useLayout) { _useLayout = useLayout; }
             void setActiveMenu(const std::string& uri) { _activeMenuUri = uri; }
 

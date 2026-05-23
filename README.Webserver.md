@@ -111,7 +111,20 @@ openknxNetwork.webserver.addMenuItem("Status",  "/status");
 openknxNetwork.webserver.addMenuItem("Geräte",  "/devices");
 ```
 
-### Layout einbetten
+### Assets (Stylesheets und Scripts)
+
+```cpp
+// CSS-Datei im <head> registrieren
+openknxNetwork.webserver.addStylesheet("/assets/custom.css");
+
+// JavaScript-Datei vor </body> registrieren (mit defer-Attribut)
+openknxNetwork.webserver.addJavaScript("/assets/custom.js");
+```
+
+Die registrierten Assets werden automatisch in das HTML-Layout eingebunden:
+- **Stylesheets** werden im `<head>` eingefügt
+- **Scripts** werden vor dem `</body>`-Tag eingefügt (mit `defer`-Attribut für nicht-blockierende Ausführung)
+- Beide erhalten automatisch einen **Cache-Buster** Query-Parameter im Format `YYYYMMDDHHII` (z.B. `?202605231435`), generiert vom Build-Zeitpunkt — verhindert Caching-Probleme bei Updates
 
 ```cpp
 void MyModule::buildMyPage(WebResponse& res) {
@@ -147,7 +160,7 @@ class WebRequest {
 class WebResponse {
     void setStatus(uint16_t code);          // default: 200
     void setContentType(const char* mime);  // default: "text/html"
-    void addHeader(const char* name, const char* value);
+    void setHeader(const char* name, const char* value);
     
     // Dynamische Daten — wird kopiert, für jede Anfrage neu allokiert
     void send(const char* text);

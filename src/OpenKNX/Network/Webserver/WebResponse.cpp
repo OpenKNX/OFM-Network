@@ -6,6 +6,11 @@ namespace OpenKNX
     namespace Network
     {
 
+        WebResponse::WebResponse()
+        {
+            _headers.push_back({"Cache-Control", "no-store"});
+        }
+
         void WebResponse::setStatus(uint16_t code)
         {
             _statusCode = code;
@@ -16,8 +21,16 @@ namespace OpenKNX
             _contentType = mimeType;
         }
 
-        void WebResponse::addHeader(const char* name, const char* value)
+        void WebResponse::setHeader(const char* name, const char* value)
         {
+            for (auto& h : _headers)
+            {
+                if (h.first == name)
+                {
+                    h.second = value;
+                    return;
+                }
+            }
             _headers.push_back({name, value});
         }
 
