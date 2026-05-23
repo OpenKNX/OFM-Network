@@ -10,6 +10,14 @@
 #include <string>
 #include <vector>
 
+#ifndef OPENKNX_WEBSERVER_MAX_BODY
+#ifdef ARDUINO_ARCH_RP2040
+#define OPENKNX_WEBSERVER_MAX_BODY (4 * 1024) // 4 KB – RAM-begrenzt auf RP2040
+#else
+#define OPENKNX_WEBSERVER_MAX_BODY (32 * 1024) // 32 KB für ESP32
+#endif
+#endif
+
 namespace OpenKNX
 {
     namespace Network

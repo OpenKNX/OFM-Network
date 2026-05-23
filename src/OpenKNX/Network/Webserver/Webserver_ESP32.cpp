@@ -335,6 +335,22 @@ namespace OpenKNX
             request.setRemoteAddr(remoteIpAddr);
             request.setRemotePort(remotePort);
 
+            // Body lesen (POST/PUT) – bis OPENKNX_WEBSERVER_MAX_BODY
+            std::vector<uint8_t> bodyData;
+            if (req->content_len > 0 && req->content_len <= OPENKNX_WEBSERVER_MAX_BODY)
+            {
+                bodyData.resize(req->content_len);
+                int remaining = (int)req->content_len, received = 0;
+                while (remaining > 0)
+                {
+                    int r = httpd_req_recv(req, (char*)bodyData.data() + received, remaining);
+                    if (r <= 0) break;
+                    received += r;
+                    remaining -= r;
+                }
+                request.setBody(bodyData.data(), (size_t)received);
+            }
+
             WebResponse response;
             ws->handleRequest(request, response);
 
@@ -346,12 +362,16 @@ namespace OpenKNX
             if (statusCode == 404) statusText = "Not Found";
             else if (statusCode == 301)
                 statusText = "Moved Permanently";
+            else if (statusCode == 303)
+                statusText = "See Other";
             else if (statusCode == 400)
                 statusText = "Bad Request";
             else if (statusCode == 401)
                 statusText = "Unauthorized";
             else if (statusCode == 403)
                 statusText = "Forbidden";
+            else if (statusCode == 413)
+                statusText = "Content Too Large";
             else if (statusCode == 500)
                 statusText = "Internal Server Error";
 
@@ -362,7 +382,17 @@ namespace OpenKNX
             for (auto& h : response.responseHeaders())
                 httpd_resp_set_hdr(req, h.first.c_str(), h.second.c_str());
 
-            if (response.useLayout())
+            if (response.isStreaming())
+            {
+                // Streaming-Download: Transfer-Encoding: chunked (kein Content-Length nötig)
+                uint8_t buf[512];
+                size_t got;
+                while ((got = response.readStreamChunk(buf, sizeof(buf))) > 0)
+                    httpd_resp_send_chunk(req, (char*)buf, (ssize_t)got);
+                httpd_resp_send_chunk(req, nullptr, 0);
+                response.cleanupStream();
+            }
+            else if (response.useLayout())
             {
                 std::string header = ws->buildHeader(
                     response.activeMenuUri().empty() ? uri : response.activeMenuUri());
@@ -395,7 +425,7 @@ namespace OpenKNX
             // httpd runs in its own FreeRTOS task; wsFrameRecv loops per WS session
             httpd_config_t config = HTTPD_DEFAULT_CONFIG();
             config.uri_match_fn = httpd_uri_match_wildcard;
-            config.max_uri_handlers = 4;
+            config.max_uri_handlers = 8; // 4 Methoden × Wildcard + Headroom
             config.max_open_sockets = 7; // page + assets (css/js/svg) + WS + headroom
             config.recv_wait_timeout = 5;
             config.send_wait_timeout = 5;
@@ -409,13 +439,16 @@ namespace OpenKNX
             _server = server;
 
             static const char wildcardUri[] = "/*";
-            httpd_uri_t httpUri = {
-                .uri = wildcardUri,
-                .method = (httpd_method_t)HTTP_GET,
-                .handler = platformHttpHandler,
-                .user_ctx = this,
-            };
-            httpd_register_uri_handler(server, &httpUri);
+            for (int m : {HTTP_GET, HTTP_POST, HTTP_PUT, HTTP_DELETE})
+            {
+                httpd_uri_t httpUri = {
+                    .uri = wildcardUri,
+                    .method = (httpd_method_t)m,
+                    .handler = platformHttpHandler,
+                    .user_ctx = this,
+                };
+                httpd_register_uri_handler(server, &httpUri);
+            }
 
             openknx.logger.logWithValues("Started on port 80");
         }

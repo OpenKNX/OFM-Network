@@ -9,6 +9,9 @@ namespace OpenKNX
     namespace Network
     {
 
+        using WebStreamReadFn = size_t (*)(void* ctx, uint8_t* buf, size_t maxLen);
+        using WebStreamCleanupFn = void (*)(void* ctx);
+
         class WebResponse
         {
           public:
@@ -25,6 +28,10 @@ namespace OpenKNX
             void sendStatic(const char* text);
             void sendStatic(const uint8_t* data, int length);
 
+            // Streaming-Response: Plattform ruft readFn wiederholt auf; cleanupFn nach EOF/Fehler
+            void sendStream(size_t totalLength,
+                            WebStreamReadFn readFn, WebStreamCleanupFn cleanupFn, void* ctx);
+
             uint16_t statusCode() const { return _statusCode; }
             const char* contentType() const { return _contentType; }
             const char* body() const { return (const char*)_body; }
@@ -34,6 +41,15 @@ namespace OpenKNX
             const std::string& activeMenuUri() const { return _activeMenuUri; }
 
             const std::vector<std::pair<std::string, std::string>>& responseHeaders() const { return _headers; }
+
+            // Streaming-Accessoren für Plattform-Code
+            bool isStreaming() const { return _streaming; }
+            size_t streamTotal() const { return _streamTotal; }
+            WebStreamReadFn streamReadFn() const { return _streamReadFn; }
+            WebStreamCleanupFn streamCleanupFn() const { return _streamCleanupFn; }
+            void* streamCtx() const { return _streamCtx; }
+            size_t readStreamChunk(uint8_t* buf, size_t maxLen);
+            void cleanupStream();
 
             ~WebResponse();
 
@@ -46,6 +62,13 @@ namespace OpenKNX
             bool _useLayout = false;
             std::string _activeMenuUri;
             std::vector<std::pair<std::string, std::string>> _headers;
+
+            // Streaming
+            bool _streaming = false;
+            size_t _streamTotal = 0;
+            WebStreamReadFn _streamReadFn = nullptr;
+            WebStreamCleanupFn _streamCleanupFn = nullptr;
+            void* _streamCtx = nullptr;
         };
 
     } // namespace Network

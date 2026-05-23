@@ -17,6 +17,7 @@ namespace OpenKNX
 
         static const char baseCss[] =
             "*{box-sizing:border-box;margin:0;padding:0}"
+            "button,input,select,textarea{font-family:inherit;font-size:inherit;padding:6px;margin:revert;border:revert;background:revert;color:revert}"
             "body{display:flex;min-height:100vh;font-family:sans-serif;background:#fff;color:#111}"
             "nav{width:220px;min-width:220px;background:#000;display:flex;flex-direction:column;"
             "align-items:center;padding:6px 0;height:100vh;position:sticky;top:0;overflow-y:auto;"
@@ -41,7 +42,7 @@ namespace OpenKNX
             ".dot-green{background:#449841}.dot-red{background:#ff5555}.dot-off{background:#555}"
             ".nav-firm{font-weight:bold;font-size:.8em;color:#aaa}"
             ".nav-info{display:flex;align-items:center;color:#666;font-size:.8em;gap:8px}"
-            "main{flex:1;padding:2em;min-width:0}"
+            "main{flex:1;padding:2em;min-width:0;display:flex;flex-direction:column}"
             ".meta{color:#666;font-size:.8em;margin-bottom:1.5em}"
             ".red{color:#ff5555}.green{color:#449841}.yellow{color:#ffff55}.gray{color:#888}"
             "h1{font-size:1.25em;font-weight:600;margin-bottom:1.5em;color:#111}"
@@ -52,7 +53,10 @@ namespace OpenKNX
             "th{background:#eee;color:#000;border-bottom:1px solid #bbb}"
             "td{border-top:1px solid #eee}"
             "tr:last-child td{border-bottom:1px solid #eee}"
-            ".attribute-table td:first-child{color:#888;white-space:nowrap;width:200px}";
+            ".attribute-table td:first-child{color:#888;white-space:nowrap;width:200px}"
+            "main a{color:#449841;text-decoration:none;transition:color .15s}"
+            "main a:hover{color:#5ab857;text-decoration:underline}"
+            ".container{max-width:960px}";
 
         static const char baseJs[] = "/* OpenKNX */";
 
@@ -101,9 +105,9 @@ namespace OpenKNX
                     "<div class='logo'>"
                     "<a href='https://www.openknx.de' target='_blank' rel='noopener noreferrer'>"
                     "<img src='/assets/logo/black.svg?" +
-                _assetCacheBuster + "' alt='OpenKNX'>"
-                                    "</a>"
-                                    "</div>";
+                    _assetCacheBuster + "' alt='OpenKNX'>"
+                                        "</a>"
+                                        "</div>";
 
             html += nav;
             html += "<div class='nav-wiki'>"
@@ -167,7 +171,7 @@ namespace OpenKNX
             };
 
             char buf[64];
-            std::string page = "<h1>Übersicht</h1>";
+            std::string page = "<div class='container'><h1>Übersicht</h1>";
 
             // ── Gerät ──────────────────────────────────────────────────────────
             page += "<h2>Gerät</h2><table class='attribute-table'><tbody>";
@@ -305,6 +309,7 @@ namespace OpenKNX
             page += row("Build-Zeit", __TIME__);
             page += "</tbody></table>";
 
+            page += "</div>";
             res.setContentType("text/html");
             res.setLayout(true);
             res.send(page.c_str());
@@ -345,10 +350,10 @@ namespace OpenKNX
 
             char buf[16];
             snprintf(buf, sizeof(buf), "%s%02d%s%s",
-                dateStr.substr(7, 4).c_str(),   // YYYY
-                month,                           // MM (01-12)
-                dateStr.substr(4, 2).c_str(),   // DD
-                timeStr.substr(0, 5).c_str()    // HHMM
+                     dateStr.substr(7, 4).c_str(), // YYYY
+                     month,                        // MM (01-12)
+                     dateStr.substr(4, 2).c_str(), // DD
+                     timeStr.substr(0, 5).c_str()  // HHMM
             );
             _assetCacheBuster = buf;
 
@@ -419,7 +424,7 @@ namespace OpenKNX
         {
             _menu.push_back({label, uri, priority});
             std::stable_sort(_menu.begin(), _menu.end(),
-                [](const WebMenuItem& a, const WebMenuItem& b) { return a.priority < b.priority; });
+                             [](const WebMenuItem& a, const WebMenuItem& b) { return a.priority < b.priority; });
         }
 
         std::vector<int> Webserver::connectedClientFds(const std::string& uri) const

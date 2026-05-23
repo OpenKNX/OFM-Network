@@ -85,6 +85,21 @@ namespace OpenKNX
             uint8_t wsHdrRcvd;
 
             bool hasPendingRequest = false;
+
+            // POST body buffering
+            uint32_t contentLength = 0; // aus Content-Length Header
+            uint16_t headerEnd = 0;     // Offset nach \r\n\r\n in rxBuf
+            uint8_t* bodyBuf = nullptr; // heap-alloc für Overflow
+            uint32_t bodyReceived = 0;
+            bool waitingForBody = false;
+
+            // Streaming Download (LittleFS → TCP)
+            WebStreamReadFn streamReader = nullptr;
+            WebStreamCleanupFn streamCleanup = nullptr;
+            void* streamCtx = nullptr;
+            size_t streamTotal = 0;
+            size_t streamSent = 0;
+            bool streaming = false;
         };
 
         static constexpr int MAX_CONN = 3;
@@ -115,6 +130,19 @@ namespace OpenKNX
                 s->txFree = false;
             }
             s->txData = nullptr;
+            if (s->bodyBuf)
+            {
+                delete[] s->bodyBuf;
+                s->bodyBuf = nullptr;
+            }
+            if (s->streaming && s->streamCleanup)
+            {
+                s->streamCleanup(s->streamCtx);
+                s->streaming = false;
+            }
+            s->streamReader = nullptr;
+            s->streamCleanup = nullptr;
+            s->streamCtx = nullptr;
             s->pcb = nullptr;
         }
 
@@ -131,6 +159,31 @@ namespace OpenKNX
             tcp_write(s->pcb, s->txData + s->txSent, (u16_t)toWrite, TCP_WRITE_FLAG_COPY);
             tcp_output(s->pcb);
             s->txSent += toWrite;
+        }
+
+        // Streaming-Download: liest Chunks aus LittleFS und schreibt sie via TCP.
+        // 512-Byte Stack-Buffer — kein Heap, kein Fragmentierungsrisiko.
+        static void tcpSendStreamChunk(ConnSlot* s)
+        {
+            uint8_t buf[512];
+            while (s->streamSent < s->streamTotal)
+            {
+                int avail = (int)tcp_sndbuf(s->pcb);
+                if (avail <= 0) break; // onSent feuert wenn Platz frei
+                size_t toRead = sizeof(buf);
+                if (toRead > (size_t)avail) toRead = (size_t)avail;
+                size_t rem = s->streamTotal - s->streamSent;
+                if (toRead > rem) toRead = rem;
+                size_t got = s->streamReader(s->streamCtx, buf, toRead);
+                if (got == 0)
+                {
+                    s->streamSent = s->streamTotal;
+                    break;
+                } // EOF
+                if (tcp_write(s->pcb, buf, (u16_t)got, TCP_WRITE_FLAG_COPY) != ERR_OK) break;
+                s->streamSent += got;
+            }
+            tcp_output(s->pcb);
         }
 
         // Sends a WS text frame over the lwIP TCP connection.
@@ -223,6 +276,7 @@ namespace OpenKNX
 
             s->isWs = false;
             s->wsKey[0] = '\0';
+            s->contentLength = 0;
             bool hasUpgrade = false;
 
             while (p < end)
@@ -244,10 +298,13 @@ namespace OpenKNX
                         hasUpgrade = true;
                     else if (strcasecmp(name, "Sec-WebSocket-Key") == 0)
                         strncpy(s->wsKey, value, sizeof(s->wsKey) - 1);
+                    else if (strcasecmp(name, "Content-Length") == 0)
+                        s->contentLength = (uint32_t)atoi(value);
                 }
                 p = nl + 2;
             }
 
+            s->headerEnd = (uint16_t)((end + 4) - s->rxBuf);
             s->isWs = hasUpgrade && s->wsKey[0] != '\0' && s->method == WEB_GET;
             return true;
         }
@@ -269,7 +326,7 @@ namespace OpenKNX
                 {
                     const ip4_addr_t* ip4 = ip_2_ip4(&s->pcb->remote_ip);
                     uint32_t remoteIpAddr = ((uint32_t)ip4_addr1(ip4) << 0) | ((uint32_t)ip4_addr2(ip4) << 8) |
-                                           ((uint32_t)ip4_addr3(ip4) << 16) | ((uint32_t)ip4_addr4(ip4) << 24);
+                                            ((uint32_t)ip4_addr3(ip4) << 16) | ((uint32_t)ip4_addr4(ip4) << 24);
                     wsReq.setRemoteAddr(remoteIpAddr);
                     wsReq.setRemotePort(s->pcb->remote_port);
                 }
@@ -351,6 +408,15 @@ namespace OpenKNX
                 request.setRemotePort(remotePort);
             }
 
+            // POST-Body übergeben (aus rxBuf oder heap-alloc bodyBuf)
+            if (s->contentLength > 0)
+            {
+                if (s->bodyBuf)
+                    request.setBody(s->bodyBuf, s->bodyReceived);
+                else
+                    request.setBody((const uint8_t*)s->rxBuf + s->headerEnd, s->contentLength);
+            }
+
             WebResponse response;
             s->ws->handleRequest(request, response);
 
@@ -360,11 +426,63 @@ namespace OpenKNX
             int statusCode = response.statusCode();
             const char* statusText = "OK";
             if (statusCode == 404) statusText = "Not Found";
-            else if (statusCode == 301) statusText = "Moved Permanently";
-            else if (statusCode == 400) statusText = "Bad Request";
-            else if (statusCode == 401) statusText = "Unauthorized";
-            else if (statusCode == 403) statusText = "Forbidden";
-            else if (statusCode == 500) statusText = "Internal Server Error";
+            else if (statusCode == 301)
+                statusText = "Moved Permanently";
+            else if (statusCode == 303)
+                statusText = "See Other";
+            else if (statusCode == 400)
+                statusText = "Bad Request";
+            else if (statusCode == 401)
+                statusText = "Unauthorized";
+            else if (statusCode == 403)
+                statusText = "Forbidden";
+            else if (statusCode == 413)
+                statusText = "Content Too Large";
+            else if (statusCode == 500)
+                statusText = "Internal Server Error";
+
+            if (response.isStreaming())
+            {
+                // Streaming-Download: HTTP-Header mit Content-Length senden, dann chunks via onSent
+                char hdr[512];
+                char statusStr[32];
+                snprintf(statusStr, sizeof(statusStr), "%d %s", statusCode, statusText);
+                int hLen = snprintf(hdr, sizeof(hdr),
+                                    "HTTP/1.1 %s\r\n"
+                                    "Content-Type: %s\r\n"
+                                    "Content-Length: %zu\r\n"
+                                    "Connection: close\r\n",
+                                    statusStr,
+                                    response.contentType(),
+                                    response.streamTotal());
+                for (auto& h : response.responseHeaders())
+                {
+                    int n = snprintf(hdr + hLen, sizeof(hdr) - hLen,
+                                     "%s: %s\r\n", h.first.c_str(), h.second.c_str());
+                    hLen += n;
+                    if (hLen >= (int)sizeof(hdr) - 4) break;
+                }
+                hdr[hLen++] = '\r';
+                hdr[hLen++] = '\n';
+                hdr[hLen] = '\0';
+
+                tcp_write(s->pcb, hdr, (u16_t)hLen, TCP_WRITE_FLAG_COPY);
+
+                s->streamReader = response.streamReadFn();
+                s->streamCleanup = response.streamCleanupFn();
+                s->streamCtx = response.streamCtx();
+                s->streamTotal = response.streamTotal();
+                s->streamSent = 0;
+                s->streaming = true;
+                s->txData = nullptr;
+                s->txLen = 0;
+                s->txSent = 0;
+                s->txFree = false;
+                s->state = CS_HTTP_SEND;
+
+                tcpSendStreamChunk(s);
+                return;
+            }
 
             // Calculate content length, including layout if needed
             std::string layoutHeader;
@@ -633,7 +751,30 @@ namespace OpenKNX
 
             if (s->state == CS_HTTP_SEND)
             {
-                if (s->txSent < s->txLen)
+                if (s->streaming)
+                {
+                    if (s->streamSent < s->streamTotal)
+                    {
+                        tcpSendStreamChunk(s);
+                    }
+                    else
+                    {
+                        // Streaming fertig — Cleanup und Verbindung schließen
+                        if (s->streamCleanup) s->streamCleanup(s->streamCtx);
+                        s->streaming = false;
+                        s->streamReader = nullptr;
+                        s->streamCleanup = nullptr;
+                        s->streamCtx = nullptr;
+                        tcp_pcb* pcb = s->pcb;
+                        tcp_arg(pcb, nullptr);
+                        tcp_recv(pcb, nullptr);
+                        tcp_sent(pcb, nullptr);
+                        tcp_poll(pcb, nullptr, 0);
+                        releaseSlot(s);
+                        tcp_close(pcb);
+                    }
+                }
+                else if (s->txSent < s->txLen)
                 {
                     tcpSendChunk(s);
                 }
@@ -671,18 +812,74 @@ namespace OpenKNX
 
             if (s->state == CS_HTTP_RECV)
             {
-                // Accumulate into rxBuf
-                for (pbuf* q = p; q != nullptr; q = q->next)
+                if (s->waitingForBody)
                 {
-                    size_t space = sizeof(s->rxBuf) - s->rxLen - 1;
-                    size_t copy = q->len < space ? q->len : space;
-                    memcpy(s->rxBuf + s->rxLen, q->payload, copy);
-                    s->rxLen += (uint16_t)copy;
-                    s->rxBuf[s->rxLen] = '\0';
+                    // Header bereits geparst – restliche Body-Bytes sammeln
+                    for (pbuf* q = p; q != nullptr; q = q->next)
+                    {
+                        uint32_t space = s->contentLength - s->bodyReceived;
+                        uint32_t toCopy = (q->len < space) ? (uint32_t)q->len : space;
+                        memcpy(s->bodyBuf + s->bodyReceived, q->payload, toCopy);
+                        s->bodyReceived += toCopy;
+                    }
+                    if (s->bodyReceived >= s->contentLength)
+                    {
+                        s->waitingForBody = false;
+                        s->hasPendingRequest = true;
+                    }
                 }
+                else
+                {
+                    // Bytes in rxBuf akkumulieren (Header noch nicht komplett)
+                    for (pbuf* q = p; q != nullptr; q = q->next)
+                    {
+                        size_t space = sizeof(s->rxBuf) - s->rxLen - 1;
+                        size_t copy = q->len < space ? q->len : space;
+                        memcpy(s->rxBuf + s->rxLen, q->payload, copy);
+                        s->rxLen += (uint16_t)copy;
+                        s->rxBuf[s->rxLen] = '\0';
+                    }
 
-                if (parseHeaders(s))
-                    s->hasPendingRequest = true;
+                    if (parseHeaders(s))
+                    {
+                        if (s->contentLength == 0)
+                        {
+                            s->hasPendingRequest = true;
+                        }
+                        else
+                        {
+                            uint32_t bodyInBuf = (uint32_t)(s->rxLen - s->headerEnd);
+                            if (bodyInBuf >= s->contentLength)
+                            {
+                                // Body vollständig im rxBuf
+                                s->hasPendingRequest = true;
+                            }
+                            else if (s->contentLength > OPENKNX_WEBSERVER_MAX_BODY)
+                            {
+                                // Zu groß – 413 senden und Verbindung schließen
+                                const char resp413[] =
+                                    "HTTP/1.1 413 Content Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                                tcp_pcb* pcb = s->pcb;
+                                tcp_write(pcb, resp413, sizeof(resp413) - 1, TCP_WRITE_FLAG_COPY);
+                                tcp_output(pcb);
+                                tcp_arg(pcb, nullptr);
+                                tcp_recv(pcb, nullptr);
+                                tcp_sent(pcb, nullptr);
+                                tcp_poll(pcb, nullptr, 0);
+                                releaseSlot(s);
+                                tcp_close(pcb);
+                            }
+                            else
+                            {
+                                // Body-Buffer allozieren und bereits empfangene Bytes kopieren
+                                s->bodyBuf = new uint8_t[s->contentLength];
+                                memcpy(s->bodyBuf, s->rxBuf + s->headerEnd, bodyInBuf);
+                                s->bodyReceived = bodyInBuf;
+                                s->waitingForBody = true;
+                            }
+                        }
+                    }
+                }
             }
             else if (s->state == CS_WS)
             {

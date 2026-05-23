@@ -83,6 +83,37 @@ namespace OpenKNX
         WebResponse::~WebResponse()
         {
             if (_bodyOwned) delete[] _body;
+            // _streamCtx wird NICHT hier freigegeben – Ownership liegt bei der Plattform
+        }
+
+        void WebResponse::sendStream(size_t totalLength,
+                                     WebStreamReadFn readFn, WebStreamCleanupFn cleanupFn, void* ctx)
+        {
+            if (_bodyOwned) delete[] _body;
+            _body = nullptr;
+            _bodyLength = 0;
+            _bodyOwned = false;
+            _streaming = true;
+            _streamTotal = totalLength;
+            _streamReadFn = readFn;
+            _streamCleanupFn = cleanupFn;
+            _streamCtx = ctx;
+        }
+
+        size_t WebResponse::readStreamChunk(uint8_t* buf, size_t maxLen)
+        {
+            if (!_streamReadFn || !_streamCtx) return 0;
+            return _streamReadFn(_streamCtx, buf, maxLen);
+        }
+
+        void WebResponse::cleanupStream()
+        {
+            if (_streamCleanupFn && _streamCtx)
+                _streamCleanupFn(_streamCtx);
+            _streaming = false;
+            _streamCtx = nullptr;
+            _streamReadFn = nullptr;
+            _streamCleanupFn = nullptr;
         }
 
     } // namespace Network

@@ -44,20 +44,20 @@ Full documentation: [`README.Ping.md`](README.Ping.md)
 
 ## OTA
 
-Mit dem Netzwerkmodul wird eine OTA (Over the air) Update Funktion der Firmware ermöglicht.
-Das OTA muss jedoch zuerst am Gerät erlaubt werden.
-Dies kann durch drücken des PROG Tasters oder über die Konsole durch den Befehl `ota` erfolgen.
+The network module provides OTA (Over the Air) firmware update functionality.
+OTA must first be enabled on the device.
+This can be done by pressing the PROG button or via the console using the `ota` command.
 
-In platformio.custom.ini muss eine Section als OTA Target angelegt werden.
-In dieser muss das upload_protocol OTA und die IP-Adresse oder der Hostname des Gerätes festgelegt werden.
+A section must be added to `platformio.custom.ini` as an OTA target,
+specifying the upload protocol and the IP address or hostname of the device:
 
 ```ini
 upload_protocol = espota
 upload_port = XXX.XXX.XXX.XXX # IP Address or Hostname
 ```
 
-Hinweis: Der Hostname des Gerätes kann in der ETS im Abschnitt Netzwerk unter mDNS festgelegt werden.
+Note: The device hostname can be set in ETS under the Network → mDNS section.
 
 ## Webserver
 
-Der integrierte HTTP/WebSocket-Server wird in [`README.Webserver.md`](README.Webserver.md) beschrieben.
+The built-in HTTP/WebSocket server is documented in [`README.Webserver.md`](README.Webserver.md).

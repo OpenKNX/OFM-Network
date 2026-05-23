@@ -3,8 +3,8 @@
 #include <iostream>
 #include <sstream>
 
-#include "Module.h"
 #include "DNS.h"
+#include "Module.h"
 #include "ModuleVersionCheck.h"
 #include "NtpTimeProvider.h"
 
@@ -559,12 +559,18 @@ namespace OpenKNX
 #ifdef OPENKNX_WEBCONSOLE
                     webconsole.setup();
 #endif
+#ifdef OPENKNX_WEBFS
+                    filemanager.setup();
+#endif
                 }
                 if (webserver.isRunning())
                 {
                     webserver.loop();
 #ifdef OPENKNX_WEBCONSOLE
                     webconsole.loop();
+#endif
+#ifdef OPENKNX_WEBFS
+                    filemanager.loop();
 #endif
                 }
             }

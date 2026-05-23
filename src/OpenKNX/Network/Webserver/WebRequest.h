@@ -33,9 +33,23 @@ namespace OpenKNX
 
             std::map<std::string, std::string> headers;
 
+            // Non-owning view auf den POST-Body (Platform setzt den Pointer vor handleRequest)
+            void setBody(const uint8_t* data, size_t length)
+            {
+                _body = data;
+                _bodyLength = length;
+            }
+            const uint8_t* body() const { return _body; }
+            size_t bodyLength() const { return _bodyLength; }
+
+            // Query-Parameter aus URI auslesen (URL-dekodiert)
+            std::string getQueryParam(const std::string& name) const;
+
           private:
             uint32_t _remoteIpAddr = 0;
             uint16_t _remotePort = 0;
+            const uint8_t* _body = nullptr;
+            size_t _bodyLength = 0;
         };
 
     } // namespace Network

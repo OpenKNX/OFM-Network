@@ -1,149 +1,149 @@
 # OFM-Network – Agent Instructions
 
-## Projekt-Kontext
+## Project Context
 
-**OFM-Network** ist ein Netzwerk-Funktionsmodul im **OpenKNX**-Ökosystem – einem Open-Source-Framework für KNX-Gebäudeautomation auf Embedded-Hardware. Das Modul stellt IP-Konnektivität (WiFi & Ethernet), OTA-Updates, mDNS, NTP-Zeitsync und ICMP-Ping für OpenKNX-Geräte bereit.
+**OFM-Network** is a network function module in the **OpenKNX** ecosystem — an open-source framework for KNX building automation on embedded hardware. The module provides IP connectivity (WiFi & Ethernet), OTA updates, mDNS, NTP time sync, and ICMP ping for OpenKNX devices.
 
-- **Branch-Konvention**:
-  - `v1` – öffentlicher Release-Branch (stable)
-  - `v1dev` – aktiver Entwicklungsbranch
-  - Weitere Branches (z.B. `v1dev-ping`) sind Feature- oder Fix-Branches, die in `v1dev` gemergt werden
-- **Sprache**: C++17, Arduino-Framework
-- **Entwickler-Expertise**: Fortgeschrittenes Niveau in Arduino, RP2040 (arduino-pico by Earle Philhower), ESP32 und Netzwerktechnik – Grundlagen dieser Plattformen nicht erklären, direkt auf den Punkt kommen.
+- **Branch convention**:
+  - `v1` – public release branch (stable)
+  - `v1dev` – active development branch
+  - Additional branches (e.g. `v1dev-ping`) are feature or fix branches merged into `v1dev`
+- **Language**: C++17, Arduino framework
+- **Developer expertise**: Advanced level in Arduino, RP2040 (arduino-pico by Earle Philhower), ESP32, and networking — do not explain the basics of these platforms, get straight to the point.
 
-Vollständige Dokumentation: [`doc/Applikationsbeschreibung-Netzwerk.md`](doc/Applikationsbeschreibung-Netzwerk.md)
+Full documentation: [`doc/Applikationsbeschreibung-Netzwerk.md`](doc/Applikationsbeschreibung-Netzwerk.md)
 
 ---
 
-## Hardware-Plattformen
+## Hardware Platforms
 
-| Plattform | Konnektivität | Stack | Compile-Define |
-|-----------|--------------|-------|----------------|
+| Platform | Connectivity | Stack | Compile Define |
+|----------|-------------|-------|----------------|
 | **ESP32** | WiFi | `WiFi.h` (Arduino IDF) | `KNX_IP_WIFI` |
 | **ESP32** | Ethernet | `ETH.h` (Arduino IDF) | `KNX_IP_LAN` |
 | **RP2040** (PicoW) | WiFi | arduino-pico by Earle Philhower | `KNX_IP_WIFI` |
 | **RP2040** | Ethernet | W5500lwIP (`W5500lwIP.h`) via SPI | `KNX_IP_LAN` |
 
-**Wichtige Eigenheiten:**
-- RP2040 verwendet **arduino-pico** von Earle Philhower (nicht den offiziellen Arduino Mbed Core) – lwip im Single-Thread-Modus (`NO_SYS=1`), kein FreeRTOS
-- ESP32 hat FreeRTOS, DNS muss via TCPIP-Task-Callback aufgerufen werden (siehe `PingHandler_ESP32.cpp`)
-- W5500 SPI-Speed: `OPENKNX_NET_SPI_SPEED` (default 28 MHz), Credentials in LittleFS (`/WIFI.TXT`)
-- ESP32 WiFi-Credentials via `Preferences` API
+**Important platform notes:**
+- RP2040 uses **arduino-pico** by Earle Philhower (not the official Arduino Mbed Core) — lwIP in single-thread mode (`NO_SYS=1`), no FreeRTOS
+- ESP32 has FreeRTOS; DNS must be called via the TCPIP task callback (see `PingHandler_ESP32.cpp`)
+- W5500 SPI speed: `OPENKNX_NET_SPI_SPEED` (default 28 MHz), credentials in LittleFS (`/WIFI.TXT`)
+- ESP32 WiFi credentials via `Preferences` API
 
 ---
 
-## Architektur & Schlüsselklassen
+## Architecture & Key Classes
 
 ### `NetworkModule` (`src/NetworkModule.h/.cpp`)
-Hauptmodul, erbt von `OpenKNX::Module`. Verwaltet:
-- PHY-Init (`initPhy`) → IP-Init (`initIp`) → mDNS → OTA → NTP
-- DHCP vs. Static IP (aus KNX-Parametern)
-- WiFi-Credential-Management (save/read/erase)
-- Network-State-LED via `OpenKNX::Led::FunctionGroup` (wenn `OPENKNX_LED_IP` definiert)
-- Console-Commands: `net`, `net reset`, `ping`, `wifi SSID PSK`, `erase wifi`, `net mc`
-- Callback-Registrierung für Netzwerkänderungen (`registerCallback`)
+Main module, inherits from `OpenKNX::Module`. Manages:
+- PHY init (`initPhy`) → IP init (`initIp`) → mDNS → OTA → NTP
+- DHCP vs. static IP (from KNX parameters)
+- WiFi credential management (save/read/erase)
+- Network state LED via `OpenKNX::Led::FunctionGroup` (when `OPENKNX_LED_IP` is defined)
+- Console commands: `net`, `net reset`, `ping`, `wifi SSID PSK`, `erase wifi`, `net mc`
+- Callback registration for network changes (`registerCallback`)
 
 ### `PingHandler` (`src/OpenKNX/Network/PingHandler.*`)
-Non-blocking ICMP-Ping mit Queue + parallelen Slots:
-- **Pending-Queue**: unbegrenzt, FIFO
-- **Active Slots**: `OPENKNX_PING_PARALLEL` (default 5) gleichzeitige Pings
-- DNS-Auflösung transparent vor dem Ping
-- Callback-Signatur: `void(IPAddress target, bool reachable, uint32_t rttMs)`
-- `loop()` muss im Arduino-Loop aufgerufen werden
-- Plattform-Implementierungen:
-  - **ESP32**: BSD-Socket-API (`SOCK_RAW`, `IPPROTO_ICMP`), non-blocking via `fcntl(O_NONBLOCK)`, FreeRTOS-Queue für Thread-safe DNS
-  - **RP2040**: lwip raw API (`raw_pcb`, `raw_sendto_if_src`), Interrupt-Callback `icmpRecvCallback`
+Non-blocking ICMP ping with queue + parallel slots:
+- **Pending queue**: unlimited, FIFO
+- **Active slots**: `OPENKNX_PING_PARALLEL` (default 5) concurrent pings
+- DNS resolution transparently before ping
+- Callback signature: `void(IPAddress target, bool reachable, uint32_t rttMs)`
+- `loop()` must be called from the Arduino loop
+- Platform implementations:
+  - **ESP32**: BSD socket API (`SOCK_RAW`, `IPPROTO_ICMP`), non-blocking via `fcntl(O_NONBLOCK)`, FreeRTOS queue for thread-safe DNS
+  - **RP2040**: lwIP raw API (`raw_pcb`, `raw_sendto_if_src`), interrupt callback `icmpRecvCallback`
 
 ### `NtpTimeProvider` (`src/NtpTimeProvider.h/.cpp`)
-- Erbt von `OpenKNX::Time::TimeProvider`
+- Inherits from `OpenKNX::Time::TimeProvider`
 - ESP32: `esp_sntp_*` API (non-blocking, smooth mode)
-- RP2040: Arduino-NTP-Library, sync alle 3600 s
-- NTP-Server via KNX-Parameter `ParamNET_NTPServer` (default: `pool.ntp.org`)
+- RP2040: Arduino NTP library, sync every 3600 s
+- NTP server via KNX parameter `ParamNET_NTPServer` (default: `pool.ntp.org`)
 
 ---
 
-## KNX-Konzepte & Integration
+## KNX Concepts & Integration
 
-**OpenKNX-Module** implementieren ein Interface mit: `init()`, `setup()`, `loop()`, `processCommand()`, `readFlash()`, `writeFlash()`.
+**OpenKNX modules** implement an interface with: `init()`, `setup()`, `loop()`, `processCommand()`, `readFlash()`, `writeFlash()`.
 
-**KNX-Parameter** werden aus dem generierten `knxprod.h` gelesen via Makros wie `ParamNET_*`. Parameter-Definition in [`src/Network.share.xml`](src/Network.share.xml).
+**KNX parameters** are read from the generated `knxprod.h` via macros like `ParamNET_*`. Parameter definitions are in [`src/Network.share.xml`](src/Network.share.xml).
 
-**KNX IP-Properties** (BAU-Interface):
+**KNX IP properties** (BAU interface):
 - `PID_IP_ADDRESS`, `PID_SUBNET_MASK`, `PID_DEFAULT_GATEWAY`, `PID_IP_ASSIGNMENT_METHOD`
 - `PID_IP_CAPABILITIES` → advertise DHCP+AutoIP (value: 6)
-- Routing Multicast: `PID_ROUTING_MULTICAST_ADDRESS` (Mask 0x091A / 0x57B0)
+- Routing multicast: `PID_ROUTING_MULTICAST_ADDRESS` (mask 0x091A / 0x57B0)
 
-**Function Property** (Object 160, Property 5): Überträgt WiFi-Credentials aus ETS via `Network.script.js`.
+**Function property** (object 160, property 5): transfers WiFi credentials from ETS via `Network.script.js`.
 
-**Compile-Defines (wichtig):**
+**Compile defines (important):**
 ```
-OPENKNX_LED_IP          – LED für Netzwerkstatus (optional)
-OPENKNX_PING_TIMEOUT    – Ping-Timeout in ms (default 1000)
-OPENKNX_PING_PARALLEL   – Max. parallele Pings (default 5)
-OPENKNX_NET_SPI_SPEED   – W5500 SPI-Speed Hz (default 28000000)
+OPENKNX_LED_IP          – LED for network status (optional)
+OPENKNX_PING_TIMEOUT    – Ping timeout in ms (default 1000)
+OPENKNX_PING_PARALLEL   – Max concurrent pings (default 5)
+OPENKNX_NET_SPI_SPEED   – W5500 SPI speed Hz (default 28000000)
 ```
 
 ---
 
-## Coding-Konventionen
+## Coding Conventions
 
-- **Kein `delay()`** – alles non-blocking, State-Machines mit `millis()`-Checks
-- **Plattform-Guards**: `#ifdef ARDUINO_ARCH_ESP32` / `#ifdef ARDUINO_ARCH_RP2040`
-- **Connectivity-Guards**: `#ifdef KNX_IP_WIFI` / `#ifdef KNX_IP_LAN`
-- Keine externen Bibliotheken in `library.json` – nur Arduino-Framework-Builtins und OpenKNX-Core
-- Kommentare auf Deutsch oder Englisch (gemischt ist OK, aber konsistent pro Datei)
-- OTA-Port: ESP32 = 3232, RP2040 = 2040 (beide Plattformen unterstützen OTA, Implementierung ist identisch)
-- mDNS-Hostname: auto-generiert als `OpenKNX-XXXXXXXX` (8 Hex-Zeichen aus Seriennummer)
+- **No `delay()`** — everything non-blocking, state machines with `millis()` checks
+- **Platform guards**: `#ifdef ARDUINO_ARCH_ESP32` / `#ifdef ARDUINO_ARCH_RP2040`
+- **Connectivity guards**: `#ifdef KNX_IP_WIFI` / `#ifdef KNX_IP_LAN`
+- No external libraries in `library.json` — only Arduino framework builtins and OpenKNX core
+- Comments in German or English (mixed is OK, but consistent per file)
+- OTA port: ESP32 = 3232, RP2040 = 2040 (both platforms support OTA, implementation is identical)
+- mDNS hostname: auto-generated as `OpenKNX-XXXXXXXX` (8 hex chars from serial number)
 
-### Formatierung (`.clang-format`)
+### Formatting (`.clang-format`)
 
-Basiert auf **LLVM-Style** mit folgenden Abweichungen – bei Code-Generierung strikt einhalten:
+Based on **LLVM style** with the following deviations — strictly follow when generating code:
 
-- **Geschweifte Klammern** immer auf **eigener Zeile** (Allman-Style) – gilt für Klassen, Funktionen, `if`, `else`, `for`, `while`, `case`, `enum`, `struct`, `namespace`, `extern`
-- **Kein Zeilenlimit** (`ColumnLimit: 0`) – keine künstlichen Umbrüche
-- **4 Spaces** Einrückung, **kein Tab** (`UseTab: Never`)
-- `namespace`-Inhalt wird eingerückt (`NamespaceIndentation: All`)
-- `case`-Labels werden eingerückt (`IndentCaseLabels: true`)
-- Kurze `case`-Labels, Enums, Lambdas und Funktionen dürfen einzeilig bleiben
-- `if` ohne Block nur erlaubt wenn **einziges** Statement (`OnlyFirstIf`) – kein `else` einzeilig
-- Pointer-Alignment wird aus dem Code abgeleitet (`DerivePointerAlignment: true`)
-- Präprozessor-Direktiven **nicht** eingerückt (`IndentPPDirectives: None`)
+- **Curly braces** always on their **own line** (Allman style) — applies to classes, functions, `if`, `else`, `for`, `while`, `case`, `enum`, `struct`, `namespace`, `extern`
+- **No column limit** (`ColumnLimit: 0`) — no artificial line breaks
+- **4 spaces** indentation, **no tabs** (`UseTab: Never`)
+- `namespace` content is indented (`NamespaceIndentation: All`)
+- `case` labels are indented (`IndentCaseLabels: true`)
+- Short `case` labels, enums, lambdas, and functions may remain single-line
+- `if` without braces only allowed for a **single** statement (`OnlyFirstIf`) — no single-line `else`
+- Pointer alignment derived from existing code (`DerivePointerAlignment: true`)
+- Preprocessor directives **not** indented (`IndentPPDirectives: None`)
 
 ---
 
 ## Build & Test
 
-Kein eigenes `platformio.ini` – das Modul wird als Library in übergeordnete OpenKNX-Projekte eingebunden. `platformio.network.ini` ist leer (Vorlage für Projekte).
+No standalone `platformio.ini` — the module is included as a library in parent OpenKNX device projects. `platformio.network.ini` is empty (template for projects).
 
-Zum Testen: Integration in ein OpenKNX-Geräteprojekt, das dieses Modul referenziert.
+For testing: integrate into an OpenKNX device project that references this module.
 
 ---
 
 ## Webserver
 
-Vollständige API-Referenz: [`README.Webserver.md`](README.Webserver.md)
+Full API reference: [`README.Webserver.md`](README.Webserver.md)
 
-### Compile-Flags
+### Compile Flags
 
-| Flag | Effekt |
+| Flag | Effect |
 |------|--------|
-| `OPENKNX_WEBSERVER` | Aktiviert HTTP-Server, Routing, Übersichtsseite, Logo-Asset, alle Routen |
-| `OPENKNX_WEBCONSOLE` | Aktiviert `/console`-Seite, WS-Endpoint `/console`, **und** den Logger-Ring-Buffer in OGM-Common |
-| `OPENKNX_WEBCONSOLE_BUFFER` | Gesamtgröße des Ring-Buffers in Bytes (optional, default: 4096, max: 65535) |
+| `OPENKNX_WEBSERVER` | Enables HTTP server, routing, overview page, logo asset, all routes |
+| `OPENKNX_WEBCONSOLE` | Enables `/console` page, WS endpoint `/console`, **and** the logger ring buffer in OGM-Common |
+| `OPENKNX_WEBCONSOLE_BUFFER` | Total ring buffer size in bytes (optional, default: 4096, max: 65535) |
 
-`OPENKNX_WEBCONSOLE` setzt `OPENKNX_WEBSERVER` voraus.
-Ohne `OPENKNX_WEBSERVER` wird keinerlei Webserver-Code compiliert — keine Klasse, keine Stubs, kein `webserver`-Member im Module.
+`OPENKNX_WEBCONSOLE` requires `OPENKNX_WEBSERVER`.
+Without `OPENKNX_WEBSERVER` no webserver code is compiled at all — no class, no stubs, no `webserver` member in the module.
 
-### Plattform-Unterstützung
+### Platform Support
 
-| Plattform | Stack | Implementierung |
-|-----------|-------|----------------|
+| Platform | Stack | Implementation |
+|----------|-------|----------------|
 | **ESP32** | FreeRTOS + esp-idf `httpd` | `Webserver_ESP32.cpp` |
 | **RP2040** | lwIP `NO_SYS=1`, single-threaded | `Webserver_RP2040.cpp` |
 
-### Asset-Management (`addStylesheet` / `addJavaScript`)
+### Asset Management (`addStylesheet` / `addJavaScript`)
 
-Der Webserver bietet ein flexibles System zur Verwaltung von CSS und JavaScript Assets:
+The webserver provides a flexible system for managing CSS and JavaScript assets:
 
 **API:**
 ```cpp
@@ -151,71 +151,79 @@ openknxNetwork.webserver.addStylesheet("/assets/custom.css");
 openknxNetwork.webserver.addJavaScript("/assets/custom.js");
 ```
 
-**Verhalten:**
-- `addStylesheet()` → registriert URI, wird im `<head>` eingefügt (via `buildHeader()`)
-- `addJavaScript()` → registriert URI, wird vor `</body>` eingefügt (via `buildFooter()`)
-- **Cache-Buster**: automatisch Query-Parameter `YYYYMMDDHHII` (z.B. `?202605231435`) aus Build-Zeitpunkt
-- **Defer-Attribut**: JavaScript-Tags erhalten `defer` für non-blocking Ausführung
-- `base.css` und `base.js` werden während `setup()` über diese Funktionen registriert
+**Behavior:**
+- `addStylesheet()` → registers URI, inserted in `<head>` (via `buildHeader()`)
+- `addJavaScript()` → registers URI, inserted before `</body>` (via `buildFooter()`)
+- **Cache buster**: automatic query parameter `YYYYMMDDHHII` (e.g. `?202605231435`) from build time
+- **Defer attribute**: JavaScript tags receive `defer` for non-blocking execution
+- `base.css` and `base.js` are registered via these functions during `setup()`
 
-**Implementierung:**
-- `Webserver._stylesheets` → `std::vector<std::string>` in buildHeader durchlaufen
-- `Webserver._scripts` → `std::vector<std::string>` in buildFooter durchlaufen
+**Implementation:**
+- `Webserver._stylesheets` → `std::vector<std::string>` iterated in `buildHeader`
+- `Webserver._scripts` → `std::vector<std::string>` iterated in `buildFooter`
 
-### Logger-Ring-Buffer (`OPENKNX_WEBCONSOLE`)
+### Layout Convention: `.container`
 
-Der Ring-Buffer lebt in `OpenKNX::Log::Logger` (OGM-Common), **nicht** im Webserver. Er füllt sich unabhängig davon, ob WS-Clients verbunden sind – neue Clients erhalten damit automatisch die History.
+`buildHeader()` emits only `<nav>` + `<main>` — no wrapping `<div class='container'>`.
+Each page decides independently whether to use the container div.
 
-- **Typ**: Byte-adressierter Ringpuffer variabler Eintrags-Länge (keine Fixed-Slots)
-- **Größe**: `OPENKNX_WEBCONSOLE_BUFFER` Bytes gesamt (default: 4096)
-- **Eintragsformat**: `[uint32_t seq][uint16_t len][char text[len]]` = `LOG_ENTRY_HDR`(6) + len Bytes
-- **Sentinel**: Wenn ein neuer Eintrag nicht mehr ans Ende passt, werden die verbleibenden Bytes auf 0 gesetzt (seq=0 = Sentinel), und `_logTail` wird auf 0 zurückgesetzt
-- **Overflow**: Wenn der neue Eintrag den Head überschreiben würde, werden alte Einträge von `_logHead` her verdrängt
-- **Sequenznummern**: monoton steigend (`_logNextSeq`), beginnen bei 1; seq=0 ist reserviert für Sentinels/ungeschriebene Bereiche
-- **Per-Line-Accumulator**: `_lineAccum[LOG_LINE_MAX]` (256 Zeichen) – wird bei jedem Log-Aufruf befüllt und nach `\n` via `commitLineToRing()` in den Buffer geschrieben
-- **API**: `openknx.logger.getLogEntryAfter(lastSeq, buf, size, &outSeq)` — gibt ersten Eintrag mit `seq > lastSeq` zurück; iteriert von `_logHead` aus, überspringt Sentinels automatisch
+- **With container** (`max-width: 960px`): wrap page content in `<div class='container'>...</div>`
+- **Without container** (fullscreen): emit content directly into `main`; `main` is a flex-column (`flex:1`), so direct children with `flex:1` fill the full height. No C++ flag needed — controlled purely via CSS.
 
-**Implementierung im Logger:**
-- `beforeLog()`: setzt `_lineAccumLen = 0`
-- Jeder Print-Aufruf (`printMessage`, `printPrefix`, `printTimestamp`, etc.) ruft zusätzlich `appendWebconsoleBuffer()` auf
-- `afterLog()`: hängt `\n` an, ruft `commitLineToRing()` auf
+### Logger Ring Buffer (`OPENKNX_WEBCONSOLE`)
 
-### RP2040-Architektur (lwIP `NO_SYS=1`)
+The ring buffer lives in `OpenKNX::Log::Logger` (OGM-Common), **not** in the webserver. It fills regardless of whether WebSocket clients are connected — new clients automatically receive the history.
 
-Kritische Eigenheit: lwIP läuft single-threaded. Callbacks (`onAccept`, `onRecv`, `onSent`, `onPoll`, `onErr`) dürfen **nicht blockieren** und keine langen Operationen ausführen.
+- **Type**: byte-addressed ring buffer with variable entry length (no fixed slots)
+- **Size**: `OPENKNX_WEBCONSOLE_BUFFER` bytes total (default: 4096)
+- **Entry format**: `[uint32_t seq][uint16_t len][char text[len]]` = `LOG_ENTRY_HDR`(6) + len bytes
+- **Sentinel**: when a new entry no longer fits at the end, the remaining bytes are zeroed (seq=0 = sentinel) and `_logTail` resets to 0
+- **Overflow**: when a new entry would overwrite the head, old entries are evicted from `_logHead`
+- **Sequence numbers**: monotonically increasing (`_logNextSeq`), starting at 1; seq=0 is reserved for sentinels/unwritten areas
+- **Per-line accumulator**: `_lineAccum[LOG_LINE_MAX]` (256 chars) — filled on every log call and committed to the buffer after `\n` via `commitLineToRing()`
+- **API**: `openknx.logger.getLogEntryAfter(lastSeq, buf, size, &outSeq)` — returns the first entry with `seq > lastSeq`; iterates from `_logHead`, skips sentinels automatically
 
-**Connection Slots:**
+**Logger implementation:**
+- `beforeLog()`: sets `_lineAccumLen = 0`
+- Every print call (`printMessage`, `printPrefix`, `printTimestamp`, etc.) also calls `appendWebconsoleBuffer()`
+- `afterLog()`: appends `\n`, calls `commitLineToRing()`
+
+### RP2040 Architecture (lwIP `NO_SYS=1`)
+
+Critical characteristic: lwIP runs single-threaded. Callbacks (`onAccept`, `onRecv`, `onSent`, `onPoll`, `onErr`) must **not block** and must not perform long operations.
+
+**Connection slots:**
 ```
 static constexpr int MAX_CONN = 3;
 static ConnSlot g_slots[MAX_CONN];
 ```
 
-Jeder `ConnSlot` hält: HTTP-RX-Buffer (1536 B), HTTP-TX-Zeiger, WS-Statemachine-Zustand, `wsSentSeq` (wenn `OPENKNX_WEBCONSOLE`).
+Each `ConnSlot` holds: HTTP RX buffer (1536 B), HTTP TX pointer, WS state machine state, `wsSentSeq` (when `OPENKNX_WEBCONSOLE`).
 
-**Wichtig:** `onAccept` ruft `memset(s, 0, sizeof(*s))` auf. Das löscht `s->idx`. Deshalb wird `idx` **nach** dem memset per Pointer-Arithmetik gesetzt:
+**Important:** `onAccept` calls `memset(s, 0, sizeof(*s))`, which clears `s->idx`. Therefore `idx` is set **after** the memset via pointer arithmetic:
 ```cpp
 int slotIdx = (int)(s - g_slots);
 memset(s, 0, sizeof(*s));
 s->idx = slotIdx;
 ```
 
-**WS-State-Machine** (`wsProcessData`):
+**WS state machine** (`wsProcessData`):
 ```
 WR_HDR → WR_EXTLEN2 / WR_EXTLEN8 → WR_MASK → WR_PAYLOAD
 ```
-Zustände werden vollständig in `ConnSlot` gehalten — kein globaler Parser-State.
+State is fully held in `ConnSlot` — no global parser state.
 
-**TCP-Send:** `wsTcpSend()` prüft `tcp_sndbuf()` — ist der Buffer voll (langsamer Client), wird der Frame gedroppt statt zu blockieren. Die Verbindung bleibt bestehen.
+**TCP send:** `wsTcpSend()` checks `tcp_sndbuf()` — if the buffer is full (slow client) the frame is dropped rather than blocking. The connection remains open.
 
-**Ping/Keepalive:** `onPoll` sendet alle ~60 s einen WS-Ping (Opcode 0x09). Antwortet der Browser nicht, erkennt lwIPs Retransmit-Timeout den toten Socket und feuert `onErr`.
+**Ping/keepalive:** `onPoll` sends a WS ping (opcode 0x09) every ~60 s. If the browser does not respond, lwIP's retransmit timeout detects the dead socket and fires `onErr`.
 
-### Befehlsverarbeitung auf RP2040 (Entkopplung von lwIP-Callbacks)
+### Command Processing on RP2040 (Decoupling from lwIP Callbacks)
 
-**Problem:** `processCommand()` ruft viele Log-Funktionen auf, die serielle TX-Ausgabe erzeugen. Innerhalb eines lwIP-Callbacks (`onRecv`) würde dies den USB-CDC-FIFO blockieren und die Ausgabe abschneiden.
+**Problem:** `processCommand()` calls many log functions that generate serial TX output. Inside an lwIP callback (`onRecv`) this would block the USB-CDC FIFO and truncate the output.
 
-**Lösung:** Queue-and-Defer-Pattern:
-- WS-Message-Handler (läuft in `onRecv`) schreibt nur in `_pendingCmd[256]` und setzt `_hasPendingCmd = true`
-- `Webserver::loop()` (sauberer Stack, außerhalb aller lwIP-Callbacks) liest `_pendingCmd`, setzt Flag zurück, ruft dann `processCommand()` auf
+**Solution:** Queue-and-defer pattern:
+- The WS message handler (running in `onRecv`) only writes to `_pendingCmd[256]` and sets `_hasPendingCmd = true`
+- `Webserver::loop()` (clean stack, outside all lwIP callbacks) reads `_pendingCmd`, clears the flag, then calls `processCommand()`
 
 ```cpp
 // in loop():
@@ -226,33 +234,33 @@ if (_hasPendingCmd) {
 }
 ```
 
-**Einschränkung:** Es gibt nur einen `_pendingCmd`-Slot. Bei mehreren gleichzeitigen WS-Clients überschreibt die zuletzt empfangene Nachricht die vorherige. Für eine einzelne Konsolen-Session ist das ausreichend.
+**Limitation:** There is only one `_pendingCmd` slot. With multiple simultaneous WS clients the last received message overwrites the previous one. This is sufficient for a single console session.
 
-**Binär-Frame-Filter:** WS-Frames vom Browser mit Bytes außerhalb printable ASCII (`0x20–0x7E`, `\r`, `\n`, `\t`) werden still verworfen. Schützt vor Garbage durch fehlerhafte oder protokoll-interne Frames (z.B. Browser-Reconnect-Artefakte).
+**Binary frame filter:** WS frames from the browser containing bytes outside printable ASCII (`0x20–0x7E`, `\r`, `\n`, `\t`) are silently discarded. Protects against garbage from malformed or protocol-internal frames (e.g. browser reconnect artifacts).
 
-### History für neue WebSocket-Clients
+### History for New WebSocket Clients
 
-Neue Clients verbinden sich mit `wsSentSeq = 0` (durch `memset` in `onAccept` automatisch). `loop()` ruft `getLogEntryAfter(0, ...)` auf und sendet alle 32 Ring-Buffer-Einträge sequenziell. Kein spezieller „History-Dump"-Code nötig — der normale Drain-Loop deckt es ab.
+New clients connect with `wsSentSeq = 0` (automatically zeroed by `memset` in `onAccept`). `loop()` calls `getLogEntryAfter(0, ...)` and sends all ring buffer entries sequentially. No special "history dump" code needed — the normal drain loop covers it.
 
-Per-Client-Tracking: `ConnSlot.wsSentSeq` enthält die zuletzt erfolgreich gesendete Sequenznummer. `loop()` sendet pro Tick so viele Einträge wie in den TCP-Buffer passen (bricht bei `wsTcpSend() == false` ab, Retry beim nächsten Tick).
+Per-client tracking: `ConnSlot.wsSentSeq` holds the last successfully sent sequence number. `loop()` sends as many entries per tick as fit in the TCP buffer (breaks on `wsTcpSend() == false`, retries next tick).
 
-### ESP32-Architektur
+### ESP32 Architecture
 
-- `httpd` läuft in eigenem FreeRTOS-Task
-- Pro WS-Session installiert `wsFrameRecv` sich als `httpd_sess_set_recv_override` — läuft in einer Endlosschleife im httpd-Task
-- `processCommand()` wird direkt in `wsFrameRecv` aufgerufen (kein Dequeue nötig, FreeRTOS hat eigenen Stack)
-- `wsSendText()` nutzt `MSG_DONTWAIT` — blockiert nie, EAGAIN = Frame gedroppt
-- `Webserver::loop()` ist auf ESP32 ein No-Op (httpd-Task erledigt alles)
-- TCP-Keepalive: 3 s idle, 2 s interval, 3 probes → tote Verbindungen nach ~9 s erkannt
+- `httpd` runs in its own FreeRTOS task
+- Per WS session, `wsFrameRecv` installs itself as `httpd_sess_set_recv_override` — runs in an endless loop in the httpd task
+- `processCommand()` is called directly in `wsFrameRecv` (no dequeue needed, FreeRTOS has its own stack)
+- `wsSendText()` uses `MSG_DONTWAIT` — never blocks; EAGAIN = frame dropped
+- `Webserver::loop()` is a no-op on ESP32 (the httpd task handles everything)
+- TCP keepalive: 3 s idle, 2 s interval, 3 probes → dead connections detected after ~9 s
 
-**Wichtig:** ESP32 draint den Logger-Ring-Buffer derzeit **nicht** aus `loop()`. Auf ESP32 geht die Logger-Integration via `sendWebsocketMessage` aus einem Callback — oder kann künftig ebenfalls auf Ring-Buffer-Drain via `loop()` umgestellt werden.
+**Note:** ESP32 currently does not drain the logger ring buffer from `loop()`. On ESP32, logger integration works via `sendWebsocketMessage` from a callback — or can be switched to ring-buffer drain via `loop()` in the future.
 
-### Web-UI: Console-Seite
+### Web UI: Console Page
 
-- **Kein automatischer Reconnect** — bei Verbindungsverlust erscheint `[Verbindung getrennt — Seite neu laden]` und die Seite muss manuell neu geladen werden
-- **Grund:** Automatischer Reconnect erzeugte race conditions im Log-Output und erschwerte das Debugging von Disconnect-Ursachen
-- ANSI-Farben werden durch `ansiToHtml()` in CSS-Klassen umgewandelt (`red`, `green`, `yellow`, `gray`)
-- Commands werden als Text-Frames (WS Opcode 0x01) gesendet, Antworten kommen als Ring-Buffer-Drain zurück
+- **No automatic reconnect** — on connection loss `[Connection lost — reload page]` is shown and the page must be reloaded manually
+- **Reason:** Automatic reconnect caused race conditions in log output and made it harder to debug disconnect causes
+- ANSI colors are converted to CSS classes by `ansiToHtml()` (`red`, `green`, `yellow`, `gray`)
+- Commands are sent as text frames (WS opcode 0x01), responses come back as ring buffer drain
 
 ---
 

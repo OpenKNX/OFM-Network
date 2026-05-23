@@ -9,6 +9,9 @@
 #ifdef OPENKNX_WEBCONSOLE
 #include "OpenKNX/Network/Webserver/Webconsole.h"
 #endif
+#ifdef OPENKNX_WEBFS
+#include "OpenKNX/Network/Webserver/FileManager.h"
+#endif
 #include "strings.h"
 #include <functional>
 
@@ -96,7 +99,7 @@ namespace OpenKNX
             IPAddress nameServerIP();
             std::string phyMode();
             void macAddress(uint8_t *addr);
-            const char* hostName() const { return _hostName; }
+            const char *hostName() const { return _hostName; }
 #if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
             void setMulticastAddress(IPAddress address, bool rebootToTakeEffect);
 #endif
@@ -117,6 +120,9 @@ namespace OpenKNX
 #endif
 #ifdef OPENKNX_WEBCONSOLE
             OpenKNX::Network::Webconsole webconsole;
+#endif
+#ifdef OPENKNX_WEBFS
+            OpenKNX::Network::FileManager filemanager;
 #endif
 
 #ifdef ARDUINO_ARCH_ESP32
