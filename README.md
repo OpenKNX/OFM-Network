@@ -2,6 +2,10 @@
 
 This module provides the network functionality for the OpenKNX stack.
 
+## Release Notes
+
+Die vollständige Historie liegt in [release_notes.md](release_notes.md).
+
 ## Platforms
 
 * ARDUINO_ARCH_ESP32
