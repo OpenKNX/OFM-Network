@@ -779,6 +779,7 @@ namespace OpenKNX
 // }
 #endif
 
+#ifdef OPENKNX_PING
             else if (cmd.compare(0, 5, "ping ") == 0)
             {
                 ping(cmd.substr(5), [](IPAddress ip, bool reachable, uint32_t rttMs) {
@@ -789,6 +790,7 @@ namespace OpenKNX
                 });
                 return true;
             }
+#endif
 
             return false;
         }
@@ -859,7 +861,9 @@ namespace OpenKNX
             // openknx.console.printHelpLine("net mc [address|reset]", "Get/Set multicast address");
 #endif
             openknx.console.printHelpLine("net reset", "Reset network adapter");
+#ifdef OPENKNX_PING
             openknx.console.printHelpLine("ping x.x.x.x", "Ping an IP address");
+#endif
         }
 
         // Link status
