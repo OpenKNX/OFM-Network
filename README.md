@@ -61,3 +61,7 @@ Note: The device hostname can be set in ETS under the Network → mDNS section.
 ## Webserver
 
 The built-in HTTP/WebSocket server is documented in [`README.Webserver.md`](README.Webserver.md).
+
+## MQTT
+
+The built-in MQTT 3.1.1 client and broker is documented in [`README.MQTT.md`](README.MQTT.md).

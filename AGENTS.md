@@ -60,6 +60,34 @@ Non-blocking ICMP ping with queue + parallel slots:
 - RP2040: Arduino NTP library, sync every 3600 s
 - NTP server via KNX parameter `ParamNET_NTPServer` (default: `pool.ntp.org`)
 
+### `OpenKNX::Network::MQTT::Module` (`src/OpenKNX/Network/MQTT/`)
+MQTT 3.1.1 client + broker, no external dependencies. Guard: `#ifdef OPENKNX_MQTT`. Accessed as `openknxNetwork.mqtt`.
+
+**Files:**
+- `Packet.h/.cpp` — MQTT 3.1.1 packet serialization/deserialization, topic matching (`+`/`#` wildcards)
+- `Client.h/.cpp` — connects to an external MQTT broker
+- `Broker.h/.cpp` — embedded MQTT broker (auth, retained messages, QoS 0+1, keep-alive)
+- `Module.h/.cpp` — OpenKNX::Module subclass with public publish/subscribe API
+
+**Platform behaviour:**
+- **ESP32**: Broker/Client loop in FreeRTOS task (Core 0). `publish()` and `subscribe()` are mutex-protected.
+- **RP2040**: Broker/Client loop in main `loop()` (NO_SYS=1). lwIP callbacks (`tcp_accept/recv/err/poll`) only buffer data — all protocol processing in `loop()`.
+
+**Setup lifecycle:** Deferred — `mqtt.setup()` is called from `Network::Module::loop()` only when `established()` is true.
+
+**API:**
+```cpp
+openknxNetwork.mqtt.publish("abs/topic", payload, len, qos, retain);
+openknxNetwork.mqtt.publishP("rel/topic", payload);  // prepends devicePrefix()
+openknxNetwork.mqtt.subscribe("openknx/+/cmd", callback, qos);
+openknxNetwork.mqtt.connected();
+openknxNetwork.mqtt.devicePrefix();  // e.g. "openknx/abc12345/"
+```
+
+Full reference: [`README.MQTT.md`](README.MQTT.md)
+
+Full reference: [`README.MQTT.md`](README.MQTT.md)
+
 ---
 
 ## KNX Concepts & Integration
@@ -81,6 +109,10 @@ OPENKNX_LED_IP          – LED for network status (optional)
 OPENKNX_PING_TIMEOUT    – Ping timeout in ms (default 1000)
 OPENKNX_PING_PARALLEL   – Max concurrent pings (default 5)
 OPENKNX_NET_SPI_SPEED   – W5500 SPI speed Hz (default 28000000)
+OPENKNX_MQTT            – Enable MQTT client/broker
+OPENKNX_MQTT_STATUS_TIME     – Status publish interval ms (default 10000)
+OPENKNX_MQTT_TASK_STACK      – ESP32 task stack bytes (default 4096)
+OPENKNX_MQTT_BROKER_MAX_CLIENTS – Max broker clients (default 5/3)
 ```
 
 ---

@@ -52,6 +52,14 @@ void ping(IPAddress|string target, void(IPAddress, bool) callback, uint8_t retri
 ### `NtpTimeProvider` (`src/OpenKNX/Network/NtpTimeProvider.h/.cpp`)
 Inherits `OpenKNX::Time::TimeProvider`. ESP32: `esp_sntp_*` (non-blocking, smooth mode). RP2040: Arduino NTP library, sync every 3600 s. Server via `ParamNET_NTPServer` (default: `pool.ntp.org`).
 
+### `OpenKNX::Network::MQTT::Module` (`src/OpenKNX/Network/MQTT/Module.h/.cpp`)
+MQTT 3.1.1 client + broker, no external dependencies. Accessed via `openknxNetwork.mqtt`. Guard: `#ifdef OPENKNX_MQTT`. Setup is deferred to `loop()` when `established()` is true.
+- **ESP32**: Broker/Client loop in FreeRTOS task (Core 0, `OPENKNX_MQTT_TASK_STACK` bytes). `publish()`/`subscribe()` mutex-protected.
+- **RP2040**: Broker/Client loop in main `loop()`. Broker uses lwIP callbacks (`tcp_accept/recv/err/poll`) for data buffering only; all protocol processing in `loop()`.
+- **Device prefix**: `openknx/<MQTTPrefix>/` (custom) or `openknx/<last8serialHex>/` (auto)
+- **Built-in publishes**: `status` = "1" every 10 s, `uptime` = seconds; LWT sets `status` = "0"
+- **Broker**: auth, retained messages, QoS 0+1, keep-alive, local observer subscriptions
+
 ---
 
 ## KNX Concepts & Integration
@@ -79,6 +87,15 @@ ParamNET_OTAUpdate           – OTA mode: 0=prog-mode only, 1=always, 2=disable
 ParamNET_LanMode             – LAN speed: 0=auto, 1=100 Mbit, 3=10 Mbit power-save
 ParamNET_WifiSSID            – WiFi SSID (max 32 chars)
 ParamNET_WifiPassword        – WiFi PSK (max 63 chars)
+ParamNET_MQTT                – enable MQTT
+ParamNET_MQTTMode            – mode: 0=Client, 1=Broker
+ParamNET_MQTTServer          – broker FQDN or IP (Client mode, max 20 chars)
+ParamNET_MQTTPort            – TCP port (default 1883)
+ParamNET_MQTTUsername        – username (max 20 chars)
+ParamNET_MQTTPassword        – password (max 20 chars)
+ParamNET_MQTTCustomPrefix    – enable custom device prefix
+ParamNET_MQTTPrefix          – custom prefix string (max 20 chars)
+ParamNET_MQTTTPRawData       – publish KNX TP raw frames (ESP32 TP-UART, mask 0x07B0)
 ```
 
 **Compile defines:**
@@ -94,6 +111,10 @@ OPENKNX_WEBCONSOLE_BUFFER    – logger ring buffer size bytes (default 4096, ma
 OPENKNX_WEBFS                – enable FileManager (requires WEBSERVER)
 OPENKNX_WEBSERVER_MAX_BODY   – max POST body: 4 KB (RP2040), 32 KB (ESP32)
 HAS_USB                      – enable USB-Exchange support (RP2040)
+OPENKNX_MQTT                 – enable MQTT client/broker
+OPENKNX_MQTT_STATUS_TIME     – status publish interval ms (default 10000)
+OPENKNX_MQTT_TASK_STACK      – ESP32 FreeRTOS task stack size bytes (default 4096)
+OPENKNX_MQTT_BROKER_MAX_CLIENTS – max simultaneous broker clients (default 5 ESP32, 3 RP2040)
 ```
 
 ---
@@ -192,6 +213,7 @@ No automatic reconnect — on disconnect shows `[Connection lost — reload page
 - [README.md](README.md) — module overview and quick start
 - [README.Webserver.md](README.Webserver.md) — webserver API reference
 - [README.Ping.md](README.Ping.md) — ping handler usage
+- [README.MQTT.md](README.MQTT.md) — MQTT client/broker usage
 - [doc/Applikationsbeschreibung-Netzwerk.md](doc/Applikationsbeschreibung-Netzwerk.md) — full KNX application documentation
 - [CHANGELOG.md](CHANGELOG.md) — version history
 
@@ -203,9 +225,10 @@ After **any code change**, update all affected READMEs in the same response:
 
 | Change type | Files to update |
 |-------------|----------------|
-| Public API / new feature | `README.md` + feature-specific README (e.g. `README.Webserver.md`, `README.Ping.md`) |
+| Public API / new feature | `README.md` + feature-specific README (e.g. `README.Webserver.md`, `README.Ping.md`, `README.MQTT.md`) |
 | Webserver routes, assets, layout | `README.Webserver.md` |
 | Ping / ICMP behaviour | `README.Ping.md` |
+| MQTT client/broker | `README.MQTT.md` |
 | KNX parameters, compile defines | `README.md` + `doc/Applikationsbeschreibung-Netzwerk.md` |
 | Bug fix (no API change) | No README update required |
 

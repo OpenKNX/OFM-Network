@@ -399,6 +399,7 @@ namespace OpenKNX
             });
         }
 
+
 #ifdef HAS_USB
         void Module::fillNetworkFile(UsbExchangeFile *file)
         {
@@ -573,6 +574,13 @@ namespace OpenKNX
                     filemanager.loop();
 #endif
                 }
+            }
+#endif
+#ifdef OPENKNX_MQTT
+            if (established())
+            {
+                mqtt.setup(configured);
+                mqtt.loop(configured);
             }
 #endif
         }
