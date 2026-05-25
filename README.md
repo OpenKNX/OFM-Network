@@ -23,6 +23,11 @@ This module provides the network functionality for the OpenKNX stack.
 | OPENKNX_PING             |         | Enable ping functionality            | Requires inclusion of Header in setup        |
 | OPENKNX_PING_TIMEOUT     | 1000    | Default ping timeout in milliseconds | Can be overridden per call                   |
 | OPENKNX_PING_PARALLEL    | 5       | Max concurrent pings                 | Additional requests are queued automatically |
+| OPENKNX_WEBCLIENT        |         | Enable HTTP(S) client                | See below for API                            |
+| OPENKNX_WEBCLIENT_SLOTS  | 2       | Parallel request slots (RP2040) / queue depth (ESP32) | |
+| OPENKNX_WEBCLIENT_TIMEOUT| 10000   | Request timeout in milliseconds      |                                              |
+| OPENKNX_WEBCLIENT_TASK_STACK | 6144| ESP32 FreeRTOS task stack size (bytes) | SSL handshake requires ~4 KB             |
+| OPENKNX_WEBCLIENT_MAX_BODY | 4096  | Max request body size (bytes)        |                                              |
 
 ## IP LED
 
@@ -41,6 +46,12 @@ Possible values for OPENKNX_LED_IP: info1Led, info2Led, info3Led. Recommended va
 The module provides a non-blocking ping API with an internal queue, parallel slot management, and optional retry logic.
 
 Full documentation: [`README.Ping.md`](README.Ping.md)
+
+## Webclient
+
+`#define OPENKNX_WEBCLIENT` enables a non-blocking HTTP/HTTPS client accessible via `openknxNetwork.webclient`.
+
+Full documentation: [`README.Webclient.md`](README.Webclient.md)
 
 ## OTA
 

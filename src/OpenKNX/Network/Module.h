@@ -15,6 +15,9 @@
 #ifdef OPENKNX_MQTT
 #include "OpenKNX/Network/MQTT/Module.h"
 #endif
+#ifdef OPENKNX_WEBCLIENT
+#include "OpenKNX/Network/Webclient/Handler.h"
+#endif
 #include "strings.h"
 #include <functional>
 
@@ -129,6 +132,9 @@ namespace OpenKNX
 #endif
 #ifdef OPENKNX_MQTT
             OpenKNX::Network::MQTT::Module mqtt;
+#endif
+#ifdef OPENKNX_WEBCLIENT
+            OpenKNX::Network::Webclient::Handler webclient;
 #endif
 
 #ifdef ARDUINO_ARCH_ESP32

@@ -115,6 +115,11 @@ OPENKNX_MQTT                 – enable MQTT client/broker
 OPENKNX_MQTT_STATUS_TIME     – status publish interval ms (default 10000)
 OPENKNX_MQTT_TASK_STACK      – ESP32 FreeRTOS task stack size bytes (default 4096)
 OPENKNX_MQTT_BROKER_MAX_CLIENTS – max simultaneous broker clients (default 5 ESP32, 3 RP2040)
+OPENKNX_WEBCLIENT            – enable HTTP(S) client (openknxNetwork.webclient)
+OPENKNX_WEBCLIENT_SLOTS      – parallel slots / queue depth (default 2)
+OPENKNX_WEBCLIENT_TIMEOUT    – request timeout ms (default 10000)
+OPENKNX_WEBCLIENT_TASK_STACK – ESP32 FreeRTOS task stack bytes (default 6144, SSL needs ~4 KB)
+OPENKNX_WEBCLIENT_MAX_BODY   – max request body size bytes (default 4096)
 ```
 
 ---
@@ -214,6 +219,7 @@ No automatic reconnect — on disconnect shows `[Connection lost — reload page
 - [README.Webserver.md](README.Webserver.md) — webserver API reference
 - [README.Ping.md](README.Ping.md) — ping handler usage
 - [README.MQTT.md](README.MQTT.md) — MQTT client/broker usage
+- [README.Webclient.md](README.Webclient.md) — HTTP(S) client usage
 - [doc/Applikationsbeschreibung-Netzwerk.md](doc/Applikationsbeschreibung-Netzwerk.md) — full KNX application documentation
 - [CHANGELOG.md](CHANGELOG.md) — version history
 
@@ -225,10 +231,11 @@ After **any code change**, update all affected READMEs in the same response:
 
 | Change type | Files to update |
 |-------------|----------------|
-| Public API / new feature | `README.md` + feature-specific README (e.g. `README.Webserver.md`, `README.Ping.md`, `README.MQTT.md`) |
+| Public API / new feature | `README.md` + feature-specific README (e.g. `README.Webserver.md`, `README.Ping.md`, `README.MQTT.md`, `README.Webclient.md`) |
 | Webserver routes, assets, layout | `README.Webserver.md` |
 | Ping / ICMP behaviour | `README.Ping.md` |
 | MQTT client/broker | `README.MQTT.md` |
+| Webclient HTTP(S) | `README.Webclient.md` |
 | KNX parameters, compile defines | `README.md` + `doc/Applikationsbeschreibung-Netzwerk.md` |
 | Bug fix (no API change) | No README update required |
 
