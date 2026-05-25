@@ -20,11 +20,11 @@ Without `OPENKNX_WEBCLIENT`, all Webclient code is excluded from compilation.
 ## Compile Flags
 
 ```
-OPENKNX_WEBCLIENT              – enable the Webclient (openknxNetwork.webclient)
-OPENKNX_WEBCLIENT_SLOTS        – parallel request slots (RP2040) / queue depth (ESP32) — default: 2
-OPENKNX_WEBCLIENT_TIMEOUT      – total request timeout in ms — default: 10000
-OPENKNX_WEBCLIENT_TASK_STACK   – ESP32 FreeRTOS worker task stack size in bytes — default: 6144
-OPENKNX_WEBCLIENT_MAX_BODY     – maximum request body size in bytes — default: 4096
+OPENKNX_WEBCLIENT                  – enable the Webclient (openknxNetwork.webclient)
+OPENKNX_WEBCLIENT_SLOTS            – parallel request slots (RP2040) / queue depth (ESP32) — default: 2
+OPENKNX_WEBCLIENT_TIMEOUT          – total request timeout in ms — default: 10000
+OPENKNX_WEBCLIENT_TASK_STACK       – ESP32 FreeRTOS worker task stack size in bytes — default: 6144
+OPENKNX_WEBCLIENT_MAX_BODY         – default max response body size buffered into Response.body() — default: 4096
 ```
 
 ---
@@ -54,70 +54,122 @@ Each returns a `Request` object on which you chain builder modifiers before call
 | `.body(text)` | Set the request body from a `std::string` |
 | `.body(data, len)` | Set the request body from a byte buffer |
 | `.contentType(ct)` | Shorthand for `.header("Content-Type", ct)` |
-| `.insecure()` | Disable TLS certificate verification |
-| `.ca(pemCert)` | PEM root CA for verified TLS (caller manages lifetime) |
+| `.verifyCertificate(pemCert)` | Verify TLS with a PEM root CA certificate (caller manages lifetime) |
+| `.onData(cb)` | Set streaming data callback — called for each body chunk |
+| `.onDone(cb)` | Set completion callback — receives a `Response` object |
+| `.maxBodySize(maxSize)` | Override the response body buffer limit (default: `OPENKNX_WEBCLIENT_MAX_BODY`) |
+| `.ignoreBody()` | Disable response body buffering — `res.body()` stays empty; use when only the status matters or the body is evaluated via `onData` |
+| `.ignoreHeaders()` | Discard response headers — `res.header()` always returns `""` (saves heap; headers are stored by default) |
 
-### `send()` variants
-
-```cpp
-// Streaming: receive data chunks, get notified on completion
-.send(DataCallback onData, DoneCallback onDone = nullptr);
-
-// Fire-and-forget / HEAD: only care about success and HTTP status
-.send(DoneCallback onDone);
-```
-
-**Callback signatures:**
+### `send()`
 
 ```cpp
-using DataCallback = std::function<bool(const uint8_t* data, size_t len)>;
-//   return false → abort the request immediately
-
-using DoneCallback = std::function<void(bool success, uint16_t httpStatus)>;
-//   success=false → network error, timeout, or DataCallback returned false
-//   success=true, httpStatus=0 → connection failed before headers were received
+bool send();
 ```
+
+Enqueues the request. Returns `false` if the queue is full or the URL is invalid — in that case `onDone` is called with an empty `Response` (`success() == false`, `status() == 0`).
+
+### Body reading
+
+The response body is always read to completion and the connection is gracefully closed. `onData` is called for each chunk whenever it is set, regardless of buffering.
+
+By default the body is buffered into `Response.body()` up to `OPENKNX_WEBCLIENT_MAX_BODY` bytes. When `Content-Length` is known from the response headers, the internal buffer is pre-reserved to avoid heap fragmentation.
+
+| Builder call | `res.body()` populated | Heap pre-reserved | `onData` called |
+|---|---|---|---|
+| *(none)* | Yes (up to `OPENKNX_WEBCLIENT_MAX_BODY`) | If Content-Length known | Yes, if set |
+| `.maxBodySize(maxSize)` | Yes (up to `maxSize`) | If Content-Length known | Yes, if set |
+| `.ignoreBody()` | No | — | Yes, if set |
+
+If the body exceeds the active `maxSize` limit, body buffering stops and `bodyIncomplete()` is set to `true` in `onDone`. `success()` is unaffected — it reflects only the HTTP status and network result.
+
+### Callback signatures
+
+```cpp
+using DataCallback = std::function<void(const uint8_t* data, size_t len)>;
+
+using DoneCallback = std::function<void(const Response& response)>;
+```
+
+### `Response` object
+
+```cpp
+bool              res.success()          // true if no network error and HTTP 2xx — independent of body completeness
+uint16_t          res.status()           // HTTP status code (0 if connection failed before headers)
+uint32_t          res.bodySize()         // body size: Content-Length header if present, otherwise bytes received
+bool              res.bodyIncomplete()   // true if body was truncated (maxSize exceeded, connection drop, or timeout) — always false when .ignoreBody() is used; does not affect success()
+const std::string& res.body()            // buffered body; non-empty only if .maxBodySize() was used (or default buffering active)
+std::string       res.header("name")     // case-insensitive header lookup; "" if not present or .ignoreHeaders() was set
+```
+
+Headers are stored by default. Call `.ignoreHeaders()` to discard them and save heap.
 
 ---
 
 ## Examples
 
-### HTTPS GET with streaming
-
-```cpp
-openknxNetwork.webclient.get("https://api.example.com/data")
-    .header("Authorization", "Bearer abc123")
-    .insecure()
-    .send(
-        [](const uint8_t* data, size_t len) -> bool {
-            // process chunk — return false to abort
-            Serial.write(data, len);
-            return true;
-        },
-        [](bool ok, uint16_t status) {
-            logInfo("wclient", "HTTP %d ok=%d", status, ok);
-        }
-    );
-```
-
-### POST with JSON body
+### Fire-and-forget POST (no body buffering)
 
 ```cpp
 openknxNetwork.webclient.post("https://api.example.com/event")
     .contentType("application/json")
     .body("{\"temperature\": 22.5}")
-    .send([](bool ok, uint16_t status) {
-        if (!ok) logError("wclient", "POST failed (HTTP %d)", status);
-    });
+    .ignoreBody()
+    .onDone([](const Response& res) {
+        if (!res.success()) logError("wclient", "POST failed (HTTP %d)", res.status());
+    })
+    .send();
+```
+
+### GET with buffered response body
+
+```cpp
+openknxNetwork.webclient.get("http://192.168.1.1/config.json")
+    .maxBodySize(2048)
+    .onDone([](const Response& res) {
+        if (res.success())
+            logInfo("wclient", "Config (%u bytes): %s", res.bodySize(), res.body().c_str());
+    })
+    .send();
+```
+
+### GET with streaming chunks
+
+```cpp
+openknxNetwork.webclient.get("https://api.example.com/stream")
+    .ignoreBody()
+    .onData([](const uint8_t* data, size_t len) {
+        // process chunk
+        Serial.write(data, len);
+    })
+    .onDone([](const Response& res) {
+        logInfo("wclient", "Done, HTTP %d, %u bytes", res.status(), res.bodySize());
+    })
+    .send();
 ```
 
 ### HEAD — check server reachability
 
 ```cpp
 openknxNetwork.webclient.head("http://192.168.1.100/update")
-    .send([](bool ok, uint16_t status) {
-        if (ok && status == 200) startUpdate();
-    });
+    .onDone([](const Response& res) {
+        if (res.success()) startUpdate();
+    })
+    .send();
+```
+
+### Response headers
+
+```cpp
+openknxNetwork.webclient.get("https://api.example.com/data")
+    .maxBodySize(4096)
+    .ignoreHeaders()
+    .onDone([](const Response& res) {
+        if (res.success())
+            logInfo("wclient", "Type: %s  Body: %s",
+                res.header("Content-Type").c_str(), res.body().c_str());
+    })
+    .send();
 ```
 
 ### Verified TLS with CA certificate
@@ -130,8 +182,10 @@ static const char* MY_ROOT_CA = R"(
 )";
 
 openknxNetwork.webclient.get("https://api.secure.example.com/data")
-    .ca(MY_ROOT_CA)    // must remain valid for the lifetime of the request
-    .send([](bool ok, uint16_t s) { });
+    .verifyCertificate(MY_ROOT_CA)    // must remain valid for the lifetime of the request
+    .maxBodySize(4096)
+    .onDone([](const Response& res) { })
+    .send();
 ```
 
 ---
@@ -142,11 +196,11 @@ SSL/HTTPS works on all supported platforms:
 
 | Platform | SSL library | Notes |
 |----------|------------|-------|
-| ESP32 (WiFi + LAN) | mbedTLS (ESP-IDF built-in) | Runs in FreeRTOS worker task; non-blocking from main thread |
-| RP2040 WiFi (PicoW) | BearSSL (arduino-pico built-in) | Plain HTTP: fully non-blocking via lwIP raw `tcp_`. HTTPS: BearSSL state machine driven one step per `loop()` — non-blocking |
-| RP2040 LAN (W5500) | BearSSL (arduino-pico built-in) | Same as WiFi. BearSSL runs directly over our lwIP raw `tcp_` connection — bypasses `WiFiClientSecure` which was unusable on W5500 |
+| ESP32 (WiFi + LAN) | mbedTLS (ESP-IDF built-in) | Runs in FreeRTOS worker task; non-blocking from main thread. Supports `verifyCertificate()`. |
+| RP2040 WiFi (PicoW) | BearSSL (arduino-pico built-in) | Plain HTTP: fully non-blocking via lwIP raw `tcp_`. HTTPS: BearSSL state machine driven one step per `loop()` — non-blocking. Supports `verifyCertificate()`. |
+| RP2040 LAN (W5500) | BearSSL (arduino-pico built-in) | Same as WiFi. BearSSL runs directly over our lwIP raw `tcp_` connection — bypasses `WiFiClientSecure` which was unusable on W5500. Supports `verifyCertificate()`. |
 
-Use `.insecure()` for most embedded use cases to skip certificate verification and reduce memory usage.
+Without a verify call, TLS connections skip certificate verification (insecure mode).
 
 ---
 
@@ -156,7 +210,9 @@ Use `.insecure()` for most embedded use cases to skip certificate verification a
 
 Requests are processed in a dedicated FreeRTOS worker task (Core 0, `OPENKNX_WEBCLIENT_TASK_STACK` bytes). The task handles DNS resolution, TCP/SSL connect, header and body streaming. All `DataCallback` and `DoneCallback` calls are dispatched back to the main thread via an internal result queue drained in `loop()` — **user callbacks never need to be thread-safe**.
 
-Up to `OPENKNX_WEBCLIENT_SLOTS` requests can be queued. Additional requests beyond the queue depth are rejected with an error and `onDone(false, 0)`.
+The task always reads the response body to completion before signalling done. `DataCallback` entries are only queued when an `onData` callback is registered, avoiding unnecessary queue pressure for fire-and-forget requests. Body buffering (`.maxBodySize()`) is accumulated in the task and moved into the `Response` object before dispatch.
+
+Up to `OPENKNX_WEBCLIENT_SLOTS` requests can be queued. Additional requests beyond the queue depth are rejected: `send()` returns `false` and `onDone` is called immediately with an empty `Response`.
 
 ### RP2040 (WiFi + W5500)
 
@@ -174,4 +230,5 @@ Up to `OPENKNX_WEBCLIENT_SLOTS` requests can be active simultaneously. Additiona
 - Both plain and chunked `Transfer-Encoding` responses are decoded transparently
 - `HEAD`, `204 No Content`, and `304 Not Modified` responses never invoke `DataCallback`
 - Request bodies larger than `OPENKNX_WEBCLIENT_MAX_BODY` should be avoided on RP2040 due to RAM constraints
-- Aborting a request from within `DataCallback` (return `false`) causes immediate connection close; `DoneCallback` is called with `success=false`
+- `.maxBodySize()` exceeding `maxSize` stops body buffering; `bodyIncomplete() == true` in `onDone`, but `success()` is unaffected
+- `.ignoreHeaders()` discards all response headers — saves heap on memory-constrained RP2040 deployments
