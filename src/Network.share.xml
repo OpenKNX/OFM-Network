@@ -121,7 +121,7 @@
               <Union SizeInBit="8">
                 <Memory CodeSegment="%MID%" Offset="17" BitOffset="0" />
                 <Parameter Id="%AID%_UP-%TT%00031" Name="mDNS"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="0" Text="mDNS" Value="1" />
-                <Parameter Id="%AID%_UP-%TT%00032" Name="HTTP"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="1" Text="Weberver" Value="1" /> 
+                <Parameter Id="%AID%_UP-%TT%00032" Name="HTTP"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="1" Text="Weberver (BETA)" Value="0" /> 
                 <Parameter Id="%AID%_UP-%TT%00033" Name="NTP"                ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="2" Text="NTP-Client" Value="0" /> 
                 <Parameter Id="%AID%_UP-%TT%00034" Name="OTAUpdate"          ParameterType="%AID%_PT-OTAUpdate"          Offset="0" BitOffset="3" Text="OTA-Update" Value="0" />
                 <Parameter Id="%AID%_UP-%TT%00035" Name="MQTT"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="5" Text="MQTT" Value="0" />
@@ -307,14 +307,14 @@ Geräte, die ausschließlich per TP angebunden sind, benötigen hier keine Konfi
 
               </ParameterBlock>
 
-              <!-- HTTP -->
+              <!-- HTTP
               <choose ParamRefId="%AID%_UP-%TT%00032_R-%TT%0003201">
                 <when test="1">
                   <ParameterBlock Id="%AID%_PB-nnn" Name="HTTP" Text="Webserver" Icon="web" HelpContext="NET-Webserver">
                     <ParameterSeparator Id="%AID%_PS-nnn" Text="Webserver" UIHint="Headline" />
                   </ParameterBlock>
                 </when>
-              </choose>
+              </choose> -->
 
               <!-- MQTT -->
               <choose ParamRefId="%AID%_UP-%TT%00035_R-%TT%0003501">
