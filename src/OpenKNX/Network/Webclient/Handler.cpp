@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
 
 #ifdef ARDUINO_ARCH_ESP32
 #include <freertos/FreeRTOS.h>
@@ -19,10 +20,22 @@ namespace OpenKNX
     {
         namespace Webclient
         {
+            // ─── Response ─────────────────────────────────────────────────────────────
+
+            std::string Response::header(const char *name) const
+            {
+                for (auto &h : _headers)
+                {
+                    if (strcasecmp(h.first.c_str(), name) == 0)
+                        return h.second;
+                }
+                return "";
+            }
+
             // ─── Request builder ──────────────────────────────────────────────────────
 
             Request::Request(Handler *handler, const char *method, std::string url)
-                : _handler(handler), _url(std::move(url)), _caCert(nullptr), _insecure(false)
+                : _handler(handler), _url(std::move(url))
             {
                 strncpy(_method, method, sizeof(_method) - 1);
                 _method[sizeof(_method) - 1] = '\0';
@@ -51,35 +64,57 @@ namespace OpenKNX
                 return header("Content-Type", ct);
             }
 
-            Request &Request::insecure()
+            Request &Request::verifyCertificate(const char *pemCert)
             {
-                _insecure = true;
+                _verifyMode = VerifyMode::CERTIFICATE;
+                _verify = pemCert;
                 return *this;
             }
 
-            Request &Request::ca(const char *pemCert)
+            Request &Request::onData(DataCallback cb)
             {
-                _caCert = pemCert;
+                _onData = std::move(cb);
                 return *this;
             }
 
-            void Request::send(DataCallback onData, DoneCallback onDone)
+            Request &Request::onDone(DoneCallback cb)
+            {
+                _onDone = std::move(cb);
+                return *this;
+            }
+
+            Request &Request::ignoreHeaders()
+            {
+                _ignoreHeaders = true;
+                return *this;
+            }
+
+            Request &Request::maxBodySize(size_t maxSize)
+            {
+                _bodyMaxSize = maxSize;
+                return *this;
+            }
+
+            Request &Request::ignoreBody()
+            {
+                _bodyMaxSize = 0;
+                return *this;
+            }
+
+            bool Request::send()
             {
                 PendingRequest req;
                 req.url = std::move(_url);
                 strncpy(req.method, _method, sizeof(req.method));
                 req.body = std::move(_body);
-                req.caCert = _caCert;
-                req.insecure = _insecure;
+                req.verifyMode = _verifyMode;
+                req.verify = _verify;
                 req.headers = std::move(_headers);
-                req.onData = std::move(onData);
-                req.onDone = std::move(onDone);
-                _handler->enqueue(std::move(req));
-            }
-
-            void Request::send(DoneCallback onDone)
-            {
-                send(nullptr, std::move(onDone));
+                req.onData = std::move(_onData);
+                req.onDone = std::move(_onDone);
+                req.ignoreHeaders = _ignoreHeaders;
+                req.bodyMaxSize = _bodyMaxSize;
+                return _handler->enqueue(std::move(req));
             }
 
             // ─── Handler factory methods ───────────────────────────────────────────────
@@ -140,7 +175,7 @@ namespace OpenKNX
 
             // ─── Enqueue ───────────────────────────────────────────────────────────────
 
-            void Handler::enqueue(PendingRequest &&req)
+            bool Handler::enqueue(PendingRequest &&req)
             {
 #ifdef ARDUINO_ARCH_ESP32
                 if (_requestQueue == nullptr) initTask();
@@ -151,16 +186,23 @@ namespace OpenKNX
                 strncpy(tr->method, req.method, sizeof(tr->method) - 1);
                 tr->method[sizeof(tr->method) - 1] = '\0';
                 tr->body = std::move(req.body);
-                tr->caCert = req.caCert;
-                tr->insecure = req.insecure;
+                tr->verifyMode = req.verifyMode;
+                tr->verify = req.verify;
                 tr->headers = std::move(req.headers);
+                tr->ignoreHeaders = req.ignoreHeaders;
+                tr->hasDataCallback = (bool)req.onData;
+                tr->bodyMaxSize = req.bodyMaxSize;
 
                 if (!parseUrl(req.url, tr->host, tr->port, tr->path, tr->ssl))
                 {
                     logError("Webclient", "Invalid URL: %s", req.url.c_str());
                     delete tr;
-                    if (req.onDone) req.onDone(false, 0);
-                    return;
+                    if (req.onDone)
+                    {
+                        Response res;
+                        req.onDone(res);
+                    }
+                    return false;
                 }
 
                 ActiveCallback ac;
@@ -173,19 +215,26 @@ namespace OpenKNX
                     logError("Webclient", "Request queue full");
                     ActiveCallback cb = std::move(_activeCallbacks.back().second);
                     _activeCallbacks.pop_back();
-                    if (cb.onDone) cb.onDone(false, 0);
+                    if (cb.onDone)
+                    {
+                        Response res;
+                        cb.onDone(res);
+                    }
                     delete tr;
+                    return false;
                 }
+                return true;
 #else
                 for (int i = 0; i < OPENKNX_WEBCLIENT_SLOTS; i++)
                 {
                     if (_slots[i].state == Slot::State::IDLE)
                     {
                         startSlot(i, std::move(req));
-                        return;
+                        return true;
                     }
                 }
                 _pending.push_back(std::move(req));
+                return true;
 #endif
             }
 
@@ -205,20 +254,27 @@ namespace OpenKNX
                 if (!parseUrl(req.url, s.host, s.port, s.path, s.ssl))
                 {
                     logError("Webclient", "Invalid URL: %s", req.url.c_str());
-                    if (req.onDone) req.onDone(false, 0);
+                    if (req.onDone)
+                    {
+                        Response res;
+                        req.onDone(res);
+                    }
                     startNextPending();
                     return;
                 }
 
                 s.requestId = _nextRequestId++;
                 s.startMs = millis();
-                s.insecure = req.insecure;
-                s.caCert = req.caCert;
+                s.verifyMode = req.verifyMode;
+                s.verify = req.verify;
                 strncpy(s.method, req.method, sizeof(s.method) - 1);
                 s.requestBody = std::move(req.body);
                 s.extraHeaders = std::move(req.headers);
                 s.onData = std::move(req.onData);
                 s.onDone = std::move(req.onDone);
+                s.ignoreHeaders = req.ignoreHeaders;
+                s.bodyMaxSize = req.bodyMaxSize;
+                s.responseBody.clear();
                 s.state = Slot::State::RESOLVING;
 
                 uint32_t capturedId = s.requestId;
@@ -234,7 +290,6 @@ namespace OpenKNX
                         finishSlot(idx, false);
                         return;
                     }
-                    // Stay in CONNECTING — processSlot() polls platformConnectComplete()
                     return;
                 }
 
@@ -255,7 +310,6 @@ namespace OpenKNX
                         finishSlot(capturedIdx, false);
                         return;
                     }
-                    // Stay in CONNECTING — processSlot() polls platformConnectComplete()
                 });
             }
 
@@ -269,7 +323,8 @@ namespace OpenKNX
                 if ((uint32_t)(millis() - s.startMs) > OPENKNX_WEBCLIENT_TIMEOUT)
                 {
                     logError("Webclient", "Timeout slot %d", idx);
-                    finishSlot(idx, false);
+                    if (s.state == Slot::State::BODY && s.bodyMaxSize > 0) s.bodyIncomplete = true;
+                    finishSlot(idx, s.state == Slot::State::BODY);
                     return;
                 }
 
@@ -358,8 +413,9 @@ namespace OpenKNX
                                 finishSlot(idx, true);
                                 return;
                             }
+                            if (s.bodyMaxSize > 0 && s.contentLength > 0)
+                                s.responseBody.reserve((size_t)std::min((uint32_t)s.contentLength, (uint32_t)s.bodyMaxSize));
                             s.state = Slot::State::BODY;
-                            // Process body bytes that arrived in the same read as the final header line
                             if (i < n && !processBodyBytes(s, s.rxBuf + i, n - i))
                                 return;
                             if (s.contentLength >= 0 && (int32_t)s.bodyReceived >= s.contentLength)
@@ -381,7 +437,7 @@ namespace OpenKNX
                         if (n > 0)
                         {
                             if (!processBodyBytes(s, s.rxBuf, (size_t)n))
-                                return; // finishSlot already called inside processBodyBytes
+                                return;
                         }
 
                         if (s.contentLength >= 0 && (int32_t)s.bodyReceived >= s.contentLength)
@@ -397,7 +453,8 @@ namespace OpenKNX
                             bool ok = (s.contentLength < 0 && !s.isChunked) ||
                                       (s.contentLength >= 0 && (int32_t)s.bodyReceived >= s.contentLength) ||
                                       (s.isChunked && s.chunkDone);
-                            finishSlot(idx, ok);
+                            if (!ok && s.bodyMaxSize > 0) s.bodyIncomplete = true;
+                            finishSlot(idx, true);
                         }
                         break;
                     }
@@ -413,15 +470,25 @@ namespace OpenKNX
                 platformClose(s);
 
                 DoneCallback doneCb = std::move(s.onDone);
-                uint16_t status = s.httpStatus;
+
+                Response res;
+                res._success = success && s.httpStatus >= 200 && s.httpStatus < 300;
+                res._status  = s.httpStatus;
+                res._bodySize = s.contentLength >= 0 ? (uint32_t)s.contentLength : s.bodyReceived;
+                res._bodyIncomplete = s.bodyIncomplete;
+                if (s.bodyMaxSize > 0) res._body = std::move(s.responseBody);
+                if (!s.ignoreHeaders) res._headers = std::move(s.responseHeaders);
 
                 s.onData = nullptr;
                 s.onDone = nullptr;
                 s.state = Slot::State::IDLE;
+                s.bodyIncomplete = false;
                 s.requestBody.clear();
                 s.extraHeaders.clear();
+                s.responseHeaders.clear();
+                s.responseBody.clear();
 
-                if (doneCb) doneCb(success, status);
+                if (doneCb) doneCb(res);
 
                 startNextPending();
             }
@@ -530,6 +597,12 @@ namespace OpenKNX
                     for (const char *p = val; *p; p++)
                         if (strncasecmp(p, "chunked", 7) == 0) { s.isChunked = true; break; }
                 }
+
+                if (!s.ignoreHeaders)
+                {
+                    std::string name(line, nameLen);
+                    s.responseHeaders.emplace_back(std::move(name), val);
+                }
             }
 
             bool Handler::processBodyBytes(Slot &s, const uint8_t *data, size_t len)
@@ -537,11 +610,17 @@ namespace OpenKNX
                 if (!s.isChunked)
                 {
                     s.bodyReceived += len;
-                    if (s.onData && !s.onData(data, len))
+                    if (s.bodyMaxSize > 0)
                     {
-                        finishSlot((int)(&s - _slots), false);
-                        return false;
+                        if (s.responseBody.size() + len > s.bodyMaxSize)
+                        {
+                            s.bodyIncomplete = true;
+                            finishSlot((int)(&s - _slots), true);
+                            return false;
+                        }
+                        s.responseBody.append(reinterpret_cast<const char *>(data), len);
                     }
+                    if (s.onData) s.onData(data, len);
                     return true;
                 }
 
@@ -577,11 +656,18 @@ namespace OpenKNX
                             s.bodyReceived += deliver;
                             s.chunkRemaining -= deliver;
 
-                            if (s.onData && !s.onData(startPtr, deliver))
+                            if (s.bodyMaxSize > 0)
                             {
-                                finishSlot((int)(&s - _slots), false);
-                                return false;
+                                if (s.responseBody.size() + deliver > s.bodyMaxSize)
+                                {
+                                    s.bodyIncomplete = true;
+                                    finishSlot((int)(&s - _slots), true);
+                                    return false;
+                                }
+                                s.responseBody.append(reinterpret_cast<const char *>(startPtr), deliver);
                             }
+
+                            if (s.onData) s.onData(startPtr, deliver);
 
                             i += (deliver - 1);
                             if (s.chunkRemaining == 0) s.chunkState = Slot::ChunkState::DATA_CR;

@@ -3,9 +3,19 @@
 
 #include "OpenKNX/Network/Webclient/Handler.h"
 #include "OpenKNX.h"
+#include <algorithm>
 
 #include <WiFiClient.h>
 #include <WiFiClientSecure.h>
+
+#ifdef CONFIG_SPIRAM
+#include <esp_heap_caps.h>
+template<typename T> static T* wcNew()      { void *m = heap_caps_malloc(sizeof(T), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); return m ? new(m) T() : new T(); }
+template<typename T> static void wcDelete(T *p) { if (p) { p->~T(); free(p); } }
+#else
+template<typename T> static T* wcNew()          { return new T(); }
+template<typename T> static void wcDelete(T *p) { delete p; }
+#endif
 
 namespace OpenKNX
 {
@@ -55,36 +65,35 @@ namespace OpenKNX
                     Client *client = nullptr;
                     if (req->ssl)
                     {
-                        auto *sc = new WiFiClientSecure();
-                        if (req->insecure)
+                        auto *sc = wcNew<WiFiClientSecure>();
+                        if (req->verifyMode == VerifyMode::CERTIFICATE && req->verify)
+                            sc->setCACert(req->verify);
+                        else
                             sc->setInsecure();
-                        else if (req->caCert)
-                            sc->setCACert(req->caCert);
                         client = sc;
                     }
                     else
                     {
-                        client = new WiFiClient();
+                        client = wcNew<WiFiClient>();
                     }
 
                     client->setTimeout(req->timeoutMs / 1000);
 
-                    auto sendDone = [&](bool ok, uint16_t status) {
-                        auto *entry = new ResultEntry();
+                    auto sendDone = [&](Response res) {
+                        auto *entry = wcNew<ResultEntry>();
                         entry->type = ResultEntry::Type::DONE;
                         entry->requestId = req->requestId;
                         entry->dataLen = 0;
-                        entry->success = ok;
-                        entry->httpStatus = status;
+                        entry->response = std::move(res);
                         xQueueSend(self->_resultQueue, &entry, portMAX_DELAY);
                     };
 
                     // connect() by hostname — sets SNI for TLS
                     if (!client->connect(req->host, req->port))
                     {
-                        delete client;
+                        wcDelete(client);
                         delete req;
-                        sendDone(false, 0);
+                        sendDone(Response{});
                         continue;
                     }
 
@@ -128,6 +137,7 @@ namespace OpenKNX
                     uint16_t httpStatus = 0;
                     int32_t contentLength = -1;
                     bool isChunked = false;
+                    std::vector<std::pair<std::string, std::string>> responseHeaders;
                     {
                         char lineBuf[128];
                         int lineLen = 0;
@@ -176,6 +186,9 @@ namespace OpenKNX
                                             contentLength = atol(val);
                                         else if (nameLen == 17 && strncasecmp(lineBuf, "transfer-encoding", 17) == 0)
                                             if (strcasestr(val, "chunked")) isChunked = true;
+
+                                        if (!req->ignoreHeaders)
+                                            responseHeaders.emplace_back(std::string(lineBuf, nameLen), val);
                                     }
                                 }
                                 lineLen = 0;
@@ -193,20 +206,25 @@ namespace OpenKNX
                         if (!headersDone)
                         {
                             client->stop();
-                            delete client;
+                            wcDelete(client);
                             delete req;
-                            sendDone(false, 0);
+                            sendDone(Response{});
                             continue;
                         }
                     }
 
-                    // HEAD / 204 / 304: no body
+                    // HEAD / 204 / 304: done after headers, no body
                     if (strcmp(req->method, "HEAD") == 0 || httpStatus == 204 || httpStatus == 304)
                     {
                         client->stop();
-                        delete client;
+                        wcDelete(client);
+                        Response res;
+                        res._success = httpStatus >= 200 && httpStatus < 300;
+                        res._status = httpStatus;
+                        res._bodySize = contentLength >= 0 ? (uint32_t)contentLength : 0;
+                        if (!req->ignoreHeaders) res._headers = std::move(responseHeaders);
                         delete req;
-                        sendDone(true, httpStatus);
+                        sendDone(std::move(res));
                         continue;
                     }
 
@@ -214,6 +232,9 @@ namespace OpenKNX
                     uint8_t bodyBuf[512];
                     uint32_t bodyReceived = 0;
                     bool bodyOk = true;
+                    std::string bodyAccum;
+                    if (req->bodyMaxSize > 0 && contentLength > 0)
+                        bodyAccum.reserve((size_t)std::min((uint32_t)contentLength, req->bodyMaxSize));
                     uint32_t deadline = millis() + req->timeoutMs;
 
                     bool chunkDone = false;
@@ -237,14 +258,26 @@ namespace OpenKNX
                         if (!isChunked)
                         {
                             bodyReceived += n;
-                            auto *entry = new ResultEntry();
-                            entry->type = ResultEntry::Type::DATA;
-                            entry->requestId = req->requestId;
-                            entry->dataLen = (size_t)n;
-                            memcpy(entry->data, bodyBuf, n);
-                            entry->success = false;
-                            entry->httpStatus = httpStatus;
-                            xQueueSend(self->_resultQueue, &entry, portMAX_DELAY);
+
+                            if (req->bodyMaxSize > 0)
+                            {
+                                if (bodyAccum.size() + (size_t)n > req->bodyMaxSize)
+                                {
+                                    bodyOk = false;
+                                    break;
+                                }
+                                bodyAccum.append(reinterpret_cast<const char *>(bodyBuf), n);
+                            }
+
+                            if (req->hasDataCallback)
+                            {
+                                auto *entry = wcNew<ResultEntry>();
+                                entry->type = ResultEntry::Type::DATA;
+                                entry->requestId = req->requestId;
+                                entry->dataLen = (size_t)n;
+                                memcpy(entry->data, bodyBuf, n);
+                                xQueueSend(self->_resultQueue, &entry, portMAX_DELAY);
+                            }
 
                             if (contentLength >= 0 && (int32_t)bodyReceived >= contentLength)
                                 break;
@@ -280,14 +313,26 @@ namespace OpenKNX
                                         bodyReceived += deliver;
                                         chunkRemaining -= deliver;
 
-                                        auto *entry = new ResultEntry();
-                                        entry->type = ResultEntry::Type::DATA;
-                                        entry->requestId = req->requestId;
-                                        entry->dataLen = deliver;
-                                        memcpy(entry->data, bodyBuf + i, deliver);
-                                        entry->success = false;
-                                        entry->httpStatus = httpStatus;
-                                        xQueueSend(self->_resultQueue, &entry, portMAX_DELAY);
+                                        if (req->bodyMaxSize > 0)
+                                        {
+                                            if (bodyAccum.size() + deliver > req->bodyMaxSize)
+                                            {
+                                                bodyOk = false;
+                                                chunkDone = true;
+                                                break;
+                                            }
+                                            bodyAccum.append(reinterpret_cast<const char *>(bodyBuf + i), deliver);
+                                        }
+
+                                        if (req->hasDataCallback)
+                                        {
+                                            auto *entry = wcNew<ResultEntry>();
+                                            entry->type = ResultEntry::Type::DATA;
+                                            entry->requestId = req->requestId;
+                                            entry->dataLen = deliver;
+                                            memcpy(entry->data, bodyBuf + i, deliver);
+                                            xQueueSend(self->_resultQueue, &entry, portMAX_DELAY);
+                                        }
 
                                         i += (int)(deliver - 1);
                                         if (chunkRemaining == 0) chunkPhase = CS_DATA_CR;
@@ -312,9 +357,8 @@ namespace OpenKNX
 
                     if (!isChunked && !chunkDone)
                     {
-                        // plain: done when connection closed or content-length reached
-                        bodyOk = (contentLength < 0) ||
-                                 (contentLength >= 0 && (int32_t)bodyReceived >= contentLength);
+                        bodyOk = bodyOk && ((contentLength < 0) ||
+                                            (contentLength >= 0 && (int32_t)bodyReceived >= contentLength));
                     }
                     else if (isChunked && !chunkDone)
                     {
@@ -324,9 +368,17 @@ namespace OpenKNX
                     if (millis() >= deadline) bodyOk = false;
 
                     client->stop();
-                    delete client;
+                    wcDelete(client);
+
+                    Response res;
+                    res._bodyIncomplete = req->bodyMaxSize > 0 && !bodyOk;
+                    res._success = httpStatus >= 200 && httpStatus < 300;
+                    res._status = httpStatus;
+                    res._bodySize = contentLength >= 0 ? (uint32_t)contentLength : bodyReceived;
+                    if (req->bodyMaxSize > 0) res._body = std::move(bodyAccum);
+                    if (!req->ignoreHeaders) res._headers = std::move(responseHeaders);
                     delete req;
-                    sendDone(bodyOk, httpStatus);
+                    sendDone(std::move(res));
                 }
             }
 
@@ -353,13 +405,13 @@ namespace OpenKNX
                         else
                         {
                             if (it->second.onDone)
-                                it->second.onDone(entry->success, entry->httpStatus);
+                                it->second.onDone(entry->response);
                             _activeCallbacks.erase(it);
                         }
                         break;
                     }
 
-                    delete entry;
+                    wcDelete(entry);
                 }
             }
 
@@ -367,7 +419,8 @@ namespace OpenKNX
 
             void Handler::enqueueResult(ResultEntry &&entryVal)
             {
-                auto *entry = new ResultEntry(std::move(entryVal));
+                auto *entry = wcNew<ResultEntry>();
+                *entry = std::move(entryVal);
                 xQueueSend(_resultQueue, &entry, portMAX_DELAY);
             }
 

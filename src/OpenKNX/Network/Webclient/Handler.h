@@ -40,8 +40,29 @@ namespace OpenKNX
     {
         namespace Webclient
         {
-            using DataCallback = std::function<bool(const uint8_t *data, size_t len)>;
-            using DoneCallback = std::function<void(bool success, uint16_t httpStatus)>;
+            struct Response
+            {
+                bool _success = false;
+                uint16_t _status = 0;
+                uint32_t _bodySize = 0;
+                bool _bodyIncomplete = false;
+                std::string _body;
+                std::vector<std::pair<std::string, std::string>> _headers;
+
+                bool success() const { return _success; }
+                uint16_t status() const { return _status; }
+                uint32_t bodySize() const { return _bodySize; }
+                bool bodyIncomplete() const { return _bodyIncomplete; }
+                const std::string &body() const { return _body; }
+
+                // case-insensitive lookup; returns "" if not present
+                std::string header(const char *name) const;
+            };
+
+            using DataCallback = std::function<void(const uint8_t *data, size_t len)>;
+            using DoneCallback = std::function<void(const Response &response)>;
+
+            enum class VerifyMode : uint8_t { NONE, CERTIFICATE };
 
             class Handler;
 
@@ -52,11 +73,14 @@ namespace OpenKNX
                 Request &body(const char *data, size_t len);
                 Request &body(const std::string &text);
                 Request &contentType(const char *ct);
-                Request &insecure();
-                Request &ca(const char *pemCert);
+                Request &verifyCertificate(const char *pemCert);
+                Request &onData(DataCallback cb);
+                Request &onDone(DoneCallback cb);
+                Request &ignoreHeaders();
+                Request &maxBodySize(size_t maxSize = OPENKNX_WEBCLIENT_MAX_BODY);
+                Request &ignoreBody();
 
-                void send(DataCallback onData, DoneCallback onDone = nullptr);
-                void send(DoneCallback onDone);
+                bool send();
 
               private:
                 friend class Handler;
@@ -66,9 +90,13 @@ namespace OpenKNX
                 std::string _url;
                 char _method[8];
                 std::string _body;
-                const char *_caCert = nullptr;
-                bool _insecure = false;
+                VerifyMode _verifyMode = VerifyMode::NONE;
+                const char *_verify = nullptr;
                 std::vector<std::pair<std::string, std::string>> _headers;
+                DataCallback _onData;
+                DoneCallback _onDone;
+                bool _ignoreHeaders = false;
+                size_t _bodyMaxSize = OPENKNX_WEBCLIENT_MAX_BODY;
             };
 
             struct Slot
@@ -92,12 +120,16 @@ namespace OpenKNX
                 uint16_t port = 80;
                 char path[256] = {};
                 bool ssl = false;
-                bool insecure = false;
-                const char *caCert = nullptr;
+                VerifyMode verifyMode = VerifyMode::NONE;
+                const char *verify = nullptr;
                 char method[8] = {};
 
                 DataCallback onData;
                 DoneCallback onDone;
+
+                bool ignoreHeaders = false;
+                uint32_t bodyMaxSize = 0;
+                std::vector<std::pair<std::string, std::string>> responseHeaders;
 
                 uint8_t txBuf[512] = {};
                 uint16_t txLen = 0;
@@ -117,6 +149,8 @@ namespace OpenKNX
                 uint8_t hdrLineLen = 0;
 
                 uint32_t bodyReceived = 0;
+                bool bodyIncomplete = false;
+                std::string responseBody;
 
                 enum class ChunkState : uint8_t
                 {
@@ -153,11 +187,13 @@ namespace OpenKNX
                 std::string url;
                 char method[8];
                 std::string body;
-                const char *caCert;
-                bool insecure;
+                VerifyMode verifyMode = VerifyMode::NONE;
+                const char *verify = nullptr;
                 std::vector<std::pair<std::string, std::string>> headers;
                 DataCallback onData;
                 DoneCallback onDone;
+                bool ignoreHeaders = false;
+                uint32_t bodyMaxSize = 0;
             };
 
             class Handler
@@ -171,7 +207,7 @@ namespace OpenKNX
                 Request head(const std::string &url);
 
                 void loop();
-                void enqueue(PendingRequest &&req);
+                bool enqueue(PendingRequest &&req);
 
               private:
                 Slot _slots[OPENKNX_WEBCLIENT_SLOTS];
@@ -214,11 +250,14 @@ namespace OpenKNX
                     uint16_t port;
                     char path[256];
                     bool ssl;
-                    bool insecure;
-                    const char *caCert;
+                    VerifyMode verifyMode;
+                    const char *verify;
                     char method[8];
                     std::string body;
                     std::vector<std::pair<std::string, std::string>> headers;
+                    bool hasDataCallback;
+                    bool ignoreHeaders;
+                    uint32_t bodyMaxSize;
                 };
 
                 struct ResultEntry
@@ -227,8 +266,7 @@ namespace OpenKNX
                     uint32_t requestId;
                     uint8_t data[512];
                     size_t dataLen;
-                    bool success;
-                    uint16_t httpStatus;
+                    Response response;
                 };
 
                 struct ActiveCallback
