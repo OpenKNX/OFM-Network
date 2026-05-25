@@ -121,7 +121,7 @@
               <Union SizeInBit="8">
                 <Memory CodeSegment="%MID%" Offset="17" BitOffset="0" />
                 <Parameter Id="%AID%_UP-%TT%00031" Name="mDNS"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="0" Text="mDNS" Value="1" />
-                <Parameter Id="%AID%_UP-%TT%00032" Name="HTTP"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="1" Text="Weberver (BETA)" Value="0" /> 
+                <Parameter Id="%AID%_UP-9900032" Name="HTTP"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="1" Text="Weberver (BETA)" Value="0" /> 
                 <Parameter Id="%AID%_UP-%TT%00033" Name="NTP"                ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="2" Text="NTP-Client" Value="0" /> 
                 <Parameter Id="%AID%_UP-%TT%00034" Name="OTAUpdate"          ParameterType="%AID%_PT-OTAUpdate"          Offset="0" BitOffset="3" Text="OTA-Update" Value="0" />
                 <Parameter Id="%AID%_UP-%TT%00035" Name="MQTT"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="5" Text="MQTT" Value="0" />
@@ -179,7 +179,7 @@
               <ParameterRef Id="%AID%_UP-%TT%00013_R-%TT%0001301" RefId="%AID%_UP-%TT%00013" />
               <ParameterRef Id="%AID%_UP-%TT%00021_R-%TT%0002101" RefId="%AID%_UP-%TT%00021" />
               <ParameterRef Id="%AID%_UP-%TT%00031_R-%TT%0003101" RefId="%AID%_UP-%TT%00031" />
-              <ParameterRef Id="%AID%_UP-%TT%00032_R-%TT%0003201" RefId="%AID%_UP-%TT%00032" />
+              <ParameterRef Id="%AID%_UP-9900032_R-990003201" RefId="%AID%_UP-9900032" />
               <ParameterRef Id="%AID%_UP-%TT%00033_R-%TT%0003301" RefId="%AID%_UP-%TT%00033" />
               <ParameterRef Id="%AID%_UP-%TT%00052_R-%TT%0005201" RefId="%AID%_UP-%TT%00052" />
               <!-- NTPServer -->
@@ -244,7 +244,7 @@ Geräte, die ausschließlich per TP angebunden sind, benötigen hier keine Konfi
                 <!-- HTTP -->
                 <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000">
                   <when test="!=%NET_ServiceHTTP%">
-                    <ParameterRefRef RefId="%AID%_UP-%TT%00032_R-%TT%0003201" IndentLevel="1" HelpContext="NET-HTTP" />
+                    <ParameterRefRef RefId="%AID%_UP-9900032_R-990003201" IndentLevel="1" HelpContext="NET-HTTP" />
                   </when>
                 </choose>
 
