@@ -121,7 +121,7 @@
               <Union SizeInBit="8">
                 <Memory CodeSegment="%MID%" Offset="17" BitOffset="0" />
                 <Parameter Id="%AID%_UP-%TT%00031" Name="mDNS"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="0" Text="mDNS" Value="1" />
-                <Parameter Id="%AID%_UP-9900032" Name="HTTP"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="1" Text="Weberver (BETA)" Value="0" /> 
+                <Parameter Id="%AID%_UP-9900032" Name="HTTP"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="1" Text="Webserver (BETA)" Value="0" /> 
                 <Parameter Id="%AID%_UP-%TT%00033" Name="NTP"                ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="2" Text="NTP-Client" Value="0" /> 
                 <Parameter Id="%AID%_UP-%TT%00034" Name="OTAUpdate"          ParameterType="%AID%_PT-OTAUpdate"          Offset="0" BitOffset="3" Text="OTA-Update" Value="0" />
                 <Parameter Id="%AID%_UP-%TT%00035" Name="MQTT"               ParameterType="%AID%_PT-OnOffYesNo"         Offset="0" BitOffset="5" Text="MQTT" Value="0" />
