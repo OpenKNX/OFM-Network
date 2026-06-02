@@ -6,8 +6,6 @@
 #include "OpenKNX/Network/Webserver/Webserver.h"
 #include <arpa/inet.h>
 #include <esp_http_server.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/semphr.h>
 #include <map>
 #include <mbedtls/base64.h>
 #include <mbedtls/sha1.h>
@@ -92,154 +90,121 @@ namespace OpenKNX
         };
 
         static std::map<int, WsSession*> g_wsSessions; // fd → session, httpd-task only
-        static SemaphoreHandle_t g_wsStateMutex = nullptr;
-
-        static SemaphoreHandle_t wsStateMutex()
-        {
-            if (g_wsStateMutex == nullptr)
-            {
-                g_wsStateMutex = xSemaphoreCreateMutex();
-            }
-            return g_wsStateMutex;
-        }
-
-        class WsStateLock
-        {
-          public:
-            WsStateLock()
-            {
-                SemaphoreHandle_t m = wsStateMutex();
-                _locked = (m != nullptr) && (xSemaphoreTake(m, portMAX_DELAY) == pdTRUE);
-            }
-
-            ~WsStateLock()
-            {
-                if (_locked)
-                {
-                    xSemaphoreGive(wsStateMutex());
-                }
-            }
-
-          private:
-            bool _locked = false;
-        };
 
         // Installed as recv override; owns the socket for the WS session lifetime.
-        // Processes at most one WS frame per invocation so the HTTPD task is never
-        // monopolized by a single idle/alive websocket session.
+        // Loops internally so httpd never sees HTTPD_SOCK_ERR_TIMEOUT (which would
+        // trigger a 408 HTTP error on the upgraded socket).
         static int wsFrameRecv(httpd_handle_t hd, int fd, char* buf, size_t bufLen, int flags)
         {
             WsSession* sess = nullptr;
             {
-                WsStateLock lock;
                 auto it = g_wsSessions.find(fd);
                 if (it != g_wsSessions.end()) sess = it->second;
             }
 
-            uint8_t hdr[2];
-            int r = recv(fd, hdr, 2, MSG_WAITALL);
-            if (r <= 0)
+            for (;;)
             {
-                // No data right now: hand control back to HTTPD so other sockets/routes keep flowing.
-                if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-                    return HTTPD_SOCK_ERR_TIMEOUT;
-                if (sess) sess->ws->notifySocketConnect(sess->uri, fd, false);
-                return HTTPD_SOCK_ERR_FAIL;
-            }
-
-            bool fin = (hdr[0] & 0x80) != 0;
-            (void)fin;
-            uint8_t op = hdr[0] & 0x0F;
-            bool masked = (hdr[1] & 0x80) != 0;
-            uint64_t payLen = hdr[1] & 0x7F;
-
-            if (payLen == 126)
-            {
-                uint8_t ext[2];
-                if (recv(fd, ext, 2, MSG_WAITALL) != 2)
+                uint8_t hdr[2];
+                int r = recv(fd, hdr, 2, MSG_WAITALL);
+                if (r <= 0)
                 {
+                    // EAGAIN = SO_RCVTIMEO fired — no frame yet, keep waiting
+                    if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+                        continue;
                     if (sess) sess->ws->notifySocketConnect(sess->uri, fd, false);
                     return HTTPD_SOCK_ERR_FAIL;
                 }
-                payLen = ((uint16_t)ext[0] << 8) | ext[1];
-            }
-            else if (payLen == 127)
-            {
-                uint8_t ext[8];
-                if (recv(fd, ext, 8, MSG_WAITALL) != 8)
-                {
-                    if (sess) sess->ws->notifySocketConnect(sess->uri, fd, false);
-                    return HTTPD_SOCK_ERR_FAIL;
-                }
-                payLen = 0;
-                for (int i = 0; i < 8; ++i)
-                    payLen = (payLen << 8) | ext[i];
-            }
 
-            uint8_t mask[4] = {};
-            if (masked)
-            {
-                if (recv(fd, mask, 4, MSG_WAITALL) != 4)
-                {
-                    if (sess) sess->ws->notifySocketConnect(sess->uri, fd, false);
-                    return HTTPD_SOCK_ERR_FAIL;
-                }
-            }
+                bool fin = (hdr[0] & 0x80) != 0;
+                (void)fin;
+                uint8_t op = hdr[0] & 0x0F;
+                bool masked = (hdr[1] & 0x80) != 0;
+                uint64_t payLen = hdr[1] & 0x7F;
 
-            if (op == 0x08) // Close frame — reply and terminate immediately
-            {
-                uint8_t closeReply[2] = {0x88, 0x00};
-                send(fd, closeReply, 2, MSG_NOSIGNAL);
-                if (sess) sess->ws->notifySocketConnect(sess->uri, fd, false);
-                return HTTPD_SOCK_ERR_FAIL;
-            }
-
-            // Read payload for all remaining frame types (ping may carry data)
-            std::vector<uint8_t> payload((size_t)payLen);
-            if (payLen > 0)
-            {
-                size_t received = 0;
-                while (received < (size_t)payLen)
+                if (payLen == 126)
                 {
-                    int got = recv(fd, payload.data() + received, (size_t)payLen - received, 0);
-                    if (got <= 0)
+                    uint8_t ext[2];
+                    if (recv(fd, ext, 2, MSG_WAITALL) != 2)
                     {
                         if (sess) sess->ws->notifySocketConnect(sess->uri, fd, false);
                         return HTTPD_SOCK_ERR_FAIL;
                     }
-                    received += got;
+                    payLen = ((uint16_t)ext[0] << 8) | ext[1];
                 }
-                if (masked)
-                    for (size_t i = 0; i < (size_t)payLen; ++i)
-                        payload[i] ^= mask[i % 4];
-            }
-
-            if (op == 0x09) // Ping → pong (RFC 6455: works with any payload length)
-            {
-                uint8_t pong[2] = {0x8A, 0x00};
-                send(fd, pong, 2, MSG_NOSIGNAL);
-                return HTTPD_SOCK_ERR_TIMEOUT;
-            }
-
-            if (op == 0x0A) // Pong → silently discard
-                return HTTPD_SOCK_ERR_TIMEOUT;
-
-            if (sess && (op == 0x01 || op == 0x02))
-            {
-                bool isBinary = (op == 0x02);
-                sess->ws->notifySocketMessage(sess->uri, fd, payload.data(), (int)payLen, isBinary);
-
-                // Session may have been cleaned up while handling the message.
+                else if (payLen == 127)
                 {
-                    WsStateLock lock;
+                    uint8_t ext[8];
+                    if (recv(fd, ext, 8, MSG_WAITALL) != 8)
+                    {
+                        if (sess) sess->ws->notifySocketConnect(sess->uri, fd, false);
+                        return HTTPD_SOCK_ERR_FAIL;
+                    }
+                    payLen = 0;
+                    for (int i = 0; i < 8; ++i)
+                        payLen = (payLen << 8) | ext[i];
+                }
+
+                uint8_t mask[4] = {};
+                if (masked)
+                {
+                    if (recv(fd, mask, 4, MSG_WAITALL) != 4)
+                    {
+                        if (sess) sess->ws->notifySocketConnect(sess->uri, fd, false);
+                        return HTTPD_SOCK_ERR_FAIL;
+                    }
+                }
+
+                if (op == 0x08) // Close frame — reply and terminate immediately
+                {
+                    uint8_t closeReply[2] = {0x88, 0x00};
+                    send(fd, closeReply, 2, MSG_NOSIGNAL);
+                    if (sess) sess->ws->notifySocketConnect(sess->uri, fd, false);
+                    return HTTPD_SOCK_ERR_FAIL;
+                }
+
+                // Read payload for all remaining frame types (ping may carry data)
+                std::vector<uint8_t> payload((size_t)payLen);
+                if (payLen > 0)
+                {
+                    size_t received = 0;
+                    while (received < (size_t)payLen)
+                    {
+                        int got = recv(fd, payload.data() + received, (size_t)payLen - received, 0);
+                        if (got <= 0)
+                        {
+                            if (sess) sess->ws->notifySocketConnect(sess->uri, fd, false);
+                            return HTTPD_SOCK_ERR_FAIL;
+                        }
+                        received += got;
+                    }
+                    if (masked)
+                        for (size_t i = 0; i < (size_t)payLen; ++i)
+                            payload[i] ^= mask[i % 4];
+                }
+
+                if (op == 0x09) // Ping → pong (RFC 6455: works with any payload length)
+                {
+                    uint8_t pong[2] = {0x8A, 0x00};
+                    send(fd, pong, 2, MSG_NOSIGNAL);
+                    continue;
+                }
+
+                if (op == 0x0A) // Pong → silently discard
+                    continue;
+
+                if (sess && (op == 0x01 || op == 0x02))
+                {
+                    bool isBinary = (op == 0x02);
+                    sess->ws->notifySocketMessage(sess->uri, fd, payload.data(), (int)payLen, isBinary);
+
+                    // notifySocketMessage → processCommand → wsBroadcast may have cleaned up
+                    // this session. Refresh pointer before looping.
                     auto it = g_wsSessions.find(fd);
                     if (it == g_wsSessions.end())
                         return HTTPD_SOCK_ERR_FAIL;
+                    sess = it->second;
                 }
-                return HTTPD_SOCK_ERR_TIMEOUT;
             }
-
-            return HTTPD_SOCK_ERR_TIMEOUT;
         }
 
         // ── WebSocket upgrade ───────────────────────────────────────────────
@@ -278,10 +243,7 @@ namespace OpenKNX
             setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &rcvTv, sizeof(rcvTv));
 
             WsSession* sess = new WsSession{wsObj, (httpd_handle_t)wsObj->serverHandle(), fd, uri};
-            {
-                WsStateLock lock;
-                g_wsSessions[fd] = sess;
-            }
+            g_wsSessions[fd] = sess;
 
             httpd_sess_set_recv_override((httpd_handle_t)wsObj->serverHandle(), fd, wsFrameRecv);
 
@@ -520,34 +482,26 @@ namespace OpenKNX
 
         void Webserver::notifySocketConnect(const std::string& uri, int fd, bool connected)
         {
-            WebSocketConnectHandler onConnect = nullptr;
-
             if (connected)
             {
-                WsStateLock lock;
-                auto& clients = _socketClients[uri];
-                if (std::find(clients.begin(), clients.end(), fd) == clients.end())
-                    clients.push_back(fd);
+                _socketClients[uri].push_back(fd);
             }
             else
             {
                 // Remove from client list FIRST — uri may be a reference into the session
                 // object that gets deleted below (use-after-free otherwise)
+                auto it = _socketClients.find(uri);
+                if (it != _socketClients.end())
                 {
-                    WsStateLock lock;
-                    auto it = _socketClients.find(uri);
-                    if (it != _socketClients.end())
-                    {
-                        auto& v = it->second;
-                        v.erase(std::remove(v.begin(), v.end(), fd), v.end());
-                    }
+                    auto& v = it->second;
+                    v.erase(std::remove(v.begin(), v.end(), fd), v.end());
+                }
 
-                    auto sit = g_wsSessions.find(fd);
-                    if (sit != g_wsSessions.end())
-                    {
-                        delete sit->second;
-                        g_wsSessions.erase(sit);
-                    }
+                auto sit = g_wsSessions.find(fd);
+                if (sit != g_wsSessions.end())
+                {
+                    delete sit->second;
+                    g_wsSessions.erase(sit);
                 }
             }
 
@@ -555,13 +509,10 @@ namespace OpenKNX
             {
                 if (sock.uri == uri && sock.onConnect)
                 {
-                    onConnect = sock.onConnect;
+                    sock.onConnect(fd, connected);
                     break;
                 }
             }
-
-            if (onConnect)
-                onConnect(fd, connected);
         }
 
         void Webserver::notifySocketMessage(const std::string& uri, int fd,
@@ -589,14 +540,10 @@ namespace OpenKNX
                     notifySocketConnect(uri, fd, false);
                 return;
             }
-            std::vector<int> clients;
-            {
-                WsStateLock lock;
-                auto it = _socketClients.find(uri);
-                if (it == _socketClients.end() || it->second.empty()) return;
-                clients = it->second;
-            }
+            auto it = _socketClients.find(uri);
+            if (it == _socketClients.end() || it->second.empty()) return;
 
+            std::vector<int> clients = it->second;
             size_t len = strlen(message);
             for (int cfd : clients)
             {
