@@ -12,7 +12,22 @@ namespace OpenKNX
     {
 
         static const char filemanagerCss[] =
-            ".right{text-align:right;white-space:nowrap}";
+            ".right{text-align:right;white-space:nowrap}"
+            ".fm-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}"
+            ".fm-row button,.fm-row input[type=text]{height:34px;padding:0 14px;box-sizing:border-box;margin:0;border:1px solid #d0d0d0}"
+            ".fm-row input[type=text]{flex:1;min-width:180px}"
+            ".fm-storage{margin:0 0 6px}"
+            ".fm-file-hidden{display:none!important}"
+            ".fm-file-ctrl{flex:1;min-width:0;display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border:1px solid #d0d0d0;background:#fff;margin:0}"
+            ".fm-file-btn{flex:0 0 auto;display:inline-flex;align-items:center;padding:0 12px;height:24px;background:#333;color:#fff;cursor:pointer;font-weight:700;white-space:nowrap;user-select:none}"
+            ".fm-file-btn:hover{background:#555}"
+            ".fm-file-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#888}"
+            ".fm-hidden{display:none}"
+            "#bar{flex:1;width:0;height:20px;border:none;border-radius:4px;appearance:none;-webkit-appearance:none;background:#e0e0e0}"
+            "#bar::-webkit-progress-bar{background:#e0e0e0;border-radius:4px}"
+            "#bar::-webkit-progress-value{background:#449841;border-radius:4px;transition:width .1s linear}"
+            "#bar::-moz-progress-bar{background:#449841;border-radius:4px}"
+            ".fm-upload-status{margin-top:4px;min-height:1.2em;font-size:.9em;color:#555}";
 
         static const char filemanagerJs[] =
             "async function uploadFile(){"
@@ -23,7 +38,8 @@ namespace OpenKNX
             "const CHUNK=2048;"
             "const bar=document.getElementById('bar');"
             "const st=document.getElementById('st');"
-            "bar.style.display='inline';bar.value=0;st.textContent='';"
+            "const picker=document.getElementById('fm-picker');"
+            "picker.classList.add('fm-hidden');bar.classList.remove('fm-hidden');bar.value=0;st.textContent='';"
             "try{"
             "for(let off=0;off<file.size||off===0;off+=CHUNK){"
             "const end=Math.min(off+CHUNK,file.size);"
@@ -33,9 +49,9 @@ namespace OpenKNX
             "bar.value=Math.round(end/file.size*100);"
             "if(end>=file.size)break;"
             "}"
-            "st.textContent='OK';"
+            "st.textContent='\xe2\x9c\x93 Hochgeladen';"
             "setTimeout(()=>location.reload(),800);"
-            "}catch(e){st.textContent='Fehler: '+e.message;bar.style.display='none';}"
+            "}catch(e){st.textContent='Fehler: '+e.message;bar.classList.add('fm-hidden');picker.classList.remove('fm-hidden');}"
             "}"
             "async function delFile(path){"
             "if(!confirm('Datei l\xc3\xb6schen: '+path+'?'))return;"
@@ -54,7 +70,17 @@ namespace OpenKNX
             "const path=base+'/'+name;"
             "const r=await fetch('/filemanager/mkdir?path='+encodeURIComponent(path),{method:'POST'});"
             "if(r.ok)location.reload();else alert(await r.text());"
-            "}";
+            "}"
+            "{const _fi=document.getElementById('fi');"
+            "const _btn=document.getElementById('fi-btn');"
+            "const _nm=document.getElementById('fi-name');"
+            "if(_fi&&_btn&&_nm){"
+            "_btn.addEventListener('click',()=>_fi.click());"
+            "_btn.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')_fi.click();});"
+            "_fi.addEventListener('change',function(){"
+            "_nm.textContent=this.files[0]?this.files[0].name:'Keine Datei ausgew\xc3\xa4hlt.';"
+            "});}};";
+
 
         // ── LittleFS Streaming-Kontext ────────────────────────────────────────
 
@@ -289,8 +315,10 @@ namespace OpenKNX
             html += "</tbody></table>";
 
             html += "<h2>Ordner anlegen</h2>";
-            html += "<input type='text' id='nd' placeholder='Ordnername'>&nbsp;"
-                    "<button onclick='mkDir()'>Anlegen</button>";
+            html += "<div class='fm-row'>"
+                    "<input type='text' id='nd' placeholder='Ordnername'>"
+                    "<button onclick='mkDir()'>Anlegen</button>"
+                    "</div>";
 
             html += "<h2>Datei hochladen</h2>";
 
@@ -304,17 +332,23 @@ namespace OpenKNX
                 size_t total = (size_t)fsInfo.totalBytes;
                 size_t freeBytes = (size_t)(fsInfo.totalBytes - fsInfo.usedBytes);
 #endif
-                html += "<p style='margin:0 0 6px'>Speicher: <strong>";
+                html += "<p class='fm-storage'>Speicher: <strong>";
                 html += fmtBytes(freeBytes);
                 html += "</strong> frei von ";
                 html += fmtBytes(total);
                 html += "</p>";
             }
 
-            html += "<input type='file' id='fi'>&nbsp;"
-                    "<button onclick='uploadFile()'>Hochladen</button>&nbsp;"
-                    "<progress id='bar' value='0' max='100' style='display:none;width:160px'></progress>&nbsp;"
-                    "<span id='st'></span>";
+            html += "<div class='fm-row'>"
+                    "<input type='file' id='fi' class='fm-file-hidden'>"
+                    "<div class='fm-file-ctrl' id='fm-picker'>"
+                    "<span class='fm-file-btn' id='fi-btn' role='button' tabindex='0'>Durchsuchen &hellip;</span>"
+                    "<span class='fm-file-name' id='fi-name'>Keine Datei ausgew&auml;hlt.</span>"
+                    "</div>"
+                    "<progress id='bar' class='fm-hidden' value='0' max='100'></progress>"
+                    "<button onclick='uploadFile()'>Hochladen</button>"
+                    "</div>"
+                    "<div class='fm-upload-status'><span id='st'></span></div>";
 
             // Nur currentDir ist dynamisch – der Rest steckt in /assets/filemanager.js
             html += "<script>const currentDir='";

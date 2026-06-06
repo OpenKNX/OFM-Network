@@ -17,11 +17,11 @@ namespace OpenKNX
 
         static const char baseCss[] =
             "*{box-sizing:border-box;margin:0;padding:0}"
-            "button,input,select,textarea{font-family:inherit;font-size:inherit;padding:6px;margin:revert;border:revert;background:revert;color:revert}"
+            "button,input,select,textarea{font-family:inherit;font-size:inherit;padding:6px;margin:revert;border:revert;border-radius:0;background:revert;color:revert}"
             "body{display:flex;min-height:100vh;font-family:sans-serif;background:#fff;color:#111}"
             "nav{width:220px;min-width:220px;background:#000;display:flex;flex-direction:column;"
             "align-items:center;padding:6px 0;height:100vh;position:sticky;top:0;overflow-y:auto;"
-            "box-shadow:4px 0 18px rgba(0,0,0,.45);z-index:1}"
+            "box-shadow:3px 0 4px rgba(0,0,0,.18);z-index:1}"
             ".logo{width:180px;padding:0 24px;margin-top:12px;margin-bottom:12px}"
             ".logo img{width:100%;height:auto}"
             "nav a.menu{display:block;width:100%;padding:11px 24px;color:#aaa;text-decoration:none;"
@@ -90,24 +90,24 @@ namespace OpenKNX
             std::string html =
                 "<!DOCTYPE html><html><head>"
                 "<meta charset='utf-8'>"
-                "<title>OpenKNX</title>"
-                "<link rel='icon' type='image/svg+xml' href='/assets/favicon.svg?" +
-                _assetCacheBuster + "'>";
+                "<title>OpenKNX</title>";
+
+            std::string buster = "?v=" + std::to_string(BUILD_TIMESTAMP);
+            html += "<link rel='icon' type='image/svg+xml' href='/assets/favicon.svg" + buster + "'>";
 
             // Add registered stylesheets
             for (const auto& stylesheet : _stylesheets)
             {
-                html += "<link rel='stylesheet' href='" + stylesheet + "?" + _assetCacheBuster + "'>";
+                html += "<link rel='stylesheet' href='" + stylesheet + buster + "'>";
             }
 
             html += "</head><body>"
                     "<nav>"
                     "<div class='logo'>"
                     "<a href='https://www.openknx.de' target='_blank' rel='noopener noreferrer'>"
-                    "<img src='/assets/logo/black.svg?" +
-                    _assetCacheBuster + "' alt='OpenKNX'>"
-                                        "</a>"
-                                        "</div>";
+                    "<img src='/assets/logo/black.svg" + buster + "' alt='OpenKNX'>"
+                    "</a>"
+                    "</div>";
 
             html += nav;
             html += "<div class='nav-wiki'>"
@@ -144,9 +144,10 @@ namespace OpenKNX
             std::string html = "</main>";
 
             // Add registered scripts before closing body
+            std::string buster = "?v=" + std::to_string(BUILD_TIMESTAMP);
             for (const auto& script : _scripts)
             {
-                html += "<script src='" + script + "?" + _assetCacheBuster + "' defer></script>";
+                html += "<script src='" + script + buster + "' defer></script>";
             }
 
             html += "</body></html>";
@@ -305,8 +306,7 @@ namespace OpenKNX
                             openknx.modules.list[i]->version());
             }
             page += "<tr><td colspan='2' style='padding-top:1em'></td></tr>";
-            page += row("Build-Datum", __DATE__);
-            page += row("Build-Zeit", __TIME__);
+            page += row("Buildtime", BUILD_DATETIME);
             page += "</tbody></table>";
 
             page += "</div>";
@@ -330,33 +330,6 @@ namespace OpenKNX
 #ifdef OPENKNX_WEBSERVER
         void Webserver::setup()
         {
-            // Create cache buster from build time: YYYYMMDDHHII format
-            // __DATE__ = "May 23 2026", __TIME__ = "14:35:42"
-            static const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                                           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-            std::string dateStr = __DATE__;
-            std::string timeStr = __TIME__;
-
-            int month = 1;
-            std::string monthStr = dateStr.substr(0, 3);
-            for (int i = 0; i < 12; i++)
-            {
-                if (monthStr == months[i])
-                {
-                    month = i + 1;
-                    break;
-                }
-            }
-
-            char buf[16];
-            snprintf(buf, sizeof(buf), "%s%02d%s%s",
-                     dateStr.substr(7, 4).c_str(), // YYYY
-                     month,                        // MM (01-12)
-                     dateStr.substr(4, 2).c_str(), // DD
-                     timeStr.substr(0, 5).c_str()  // HHMM
-            );
-            _assetCacheBuster = buf;
-
             addMenuItem("Übersicht", "/", -127);
 
             static const char logoSvg[] =

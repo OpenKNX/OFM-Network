@@ -108,7 +108,6 @@ namespace OpenKNX
             std::vector<WebMenuItem> _menu;
             std::vector<std::string> _stylesheets;
             std::vector<std::string> _scripts;
-            std::string _assetCacheBuster;
 
           private:
             void buildOverviewPage(WebResponse& res);
