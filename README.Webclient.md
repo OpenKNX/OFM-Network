@@ -232,3 +232,9 @@ Up to `OPENKNX_WEBCLIENT_SLOTS` requests can be active simultaneously. Additiona
 - Request bodies larger than `OPENKNX_WEBCLIENT_MAX_BODY` should be avoided on RP2040 due to RAM constraints
 - `.maxBodySize()` exceeding `maxSize` stops body buffering; `bodyIncomplete() == true` in `onDone`, but `success()` is unaffected
 - `.ignoreHeaders()` discards all response headers — saves heap on memory-constrained RP2040 deployments
+
+### Platform-specific Notes
+
+**RP2040 — Loopback addresses (127.0.0.1)**
+
+Do not send webclient requests to `127.0.0.1` (localhost) from RP2040. Both the webserver and webclient run in the same main event loop (lwIP `NO_SYS=1`). A loopback request will block waiting for a response while the webserver cannot process it in the same loop — deadlock. Use the device's actual IP address instead (e.g. `192.168.1.x`). This limitation does not apply to ESP32 (FreeRTOS task isolation).
