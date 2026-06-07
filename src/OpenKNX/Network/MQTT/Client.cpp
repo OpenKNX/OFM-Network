@@ -78,7 +78,19 @@ namespace OpenKNX
                 uint16_t msgId = (qos > 0) ? _msgId++ : 0;
                 size_t n = buildPublish(_txBuf, sizeof(_txBuf), topic, payload, len, qos, retain, msgId);
                 if (!n) return false;
-                return sendRaw(_txBuf, n);
+                bool result = sendRaw(_txBuf, n);
+
+                // Echo to local subscribers
+                if (result)
+                {
+                    for (auto &sub : _subscriptions)
+                    {
+                        if (topicMatches(sub.topic.c_str(), topic))
+                            sub.callback(topic, payload, len);
+                    }
+                }
+
+                return result;
             }
 
             bool Client::publish(const std::string &topic, const std::string &payload,

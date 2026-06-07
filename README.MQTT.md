@@ -110,6 +110,8 @@ Wildcards `+` (single level) and `#` (multi level) are supported.
 On **ESP32**, `subscribe()` is mutex-protected and can be called from any task.  
 On **RP2040**, call only from the main Arduino loop (no lwIP callback context).
 
+In **Client mode**, subscribed callbacks are also triggered immediately when the device itself publishes to a matching topic (local echo). No separate API is required.
+
 ### Status
 
 ```cpp
@@ -150,6 +152,14 @@ src/OpenKNX/Network/MQTT/
 - QoS 0 and QoS 1
 - Keep-alive per connection with timeout
 - Local observer subscriptions (the device itself can subscribe to messages routed through its own broker via `openknxNetwork.mqtt.subscribe()`)
+
+### Client Features
+
+- Connection pooling with automatic reconnect and exponential backoff
+- QoS 0 and QoS 1
+- Keep-alive with ping/pong
+- Last Will & Testament (LWT)
+- Local echo: `subscribe()` callbacks fire immediately on own publishes
 
 ---
 
