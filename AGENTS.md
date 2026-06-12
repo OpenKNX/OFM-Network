@@ -113,6 +113,8 @@ OPENKNX_MQTT            – Enable MQTT client/broker
 OPENKNX_MQTT_STATUS_TIME     – Status publish interval ms (default 10000)
 OPENKNX_MQTT_TASK_STACK      – ESP32 task stack bytes (default 4096)
 OPENKNX_MQTT_BROKER_MAX_CLIENTS – Max broker clients (default 5/3)
+OPENKNX_MQTT_BROKER_MAX_RETAINED – Max retained messages in broker (default 32)
+OPENKNX_MQTT_BROKER_MAX_SUBS – Max subscriptions per broker client (default 16)
 ```
 
 ---

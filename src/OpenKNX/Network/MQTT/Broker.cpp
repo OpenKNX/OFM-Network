@@ -399,7 +399,19 @@ namespace OpenKNX
                     uint8_t qos = *p++ & 0x03;
                     rem--;
 
-                    c.subscriptions.push_back({topic, qos});
+                    // Update an existing subscription instead of accumulating
+                    // duplicates; cap the total to bound heap usage.
+                    bool found = false;
+                    for (auto &sub : c.subscriptions)
+                        if (sub.topic == topic) { sub.qos = qos; found = true; break; }
+                    if (!found)
+                    {
+                        if (c.subscriptions.size() < OPENKNX_MQTT_BROKER_MAX_SUBS)
+                            c.subscriptions.push_back({topic, qos});
+                        else
+                            logError("MQTT", "broker: subscription limit (%u) reached for '%s'",
+                                     (unsigned)OPENKNX_MQTT_BROKER_MAX_SUBS, c.clientId);
+                    }
 
                     if (ackLen < sizeof(subAck) - 1)
                         subAck[2 + ackLen++] = qos; // granted QoS
@@ -470,6 +482,7 @@ namespace OpenKNX
                 uint16_t msgId = 0;
                 if (qos > 0)
                 {
+                    if (pkt.payloadLen < (size_t)(2 + topicLen + 2)) return;
                     msgId = readU16(p);
                     p += 2;
                     if (qos == 1)
@@ -517,8 +530,11 @@ namespace OpenKNX
                 {
                     if (len == 0)
                         _retained.erase(topic);
-                    else
+                    else if (_retained.count(topic) || _retained.size() < OPENKNX_MQTT_BROKER_MAX_RETAINED)
                         _retained[topic] = {std::string((const char *)payload, len), qos};
+                    else
+                        logError("MQTT", "broker: retained limit (%u) reached, dropping '%s'",
+                                 (unsigned)OPENKNX_MQTT_BROKER_MAX_RETAINED, topic);
                 }
 
                 size_t n = buildPublish(_txBuf, sizeof(_txBuf), topic, payload, len, qos, false, 0);

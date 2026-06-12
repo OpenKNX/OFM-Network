@@ -108,9 +108,15 @@ namespace OpenKNX
                 switch (_state)
                 {
                     case STATE_DISCONNECTED:
-                        // Wait for reconnect timer
+                        // Reconnect timer elapsed → attempt a fresh connection.
+                        // On failure re-arm the timer so we retry in another 5 s.
                         if (_reconnectTimer && delayCheck(_reconnectTimer, 5000))
-                            reconnect();
+                        {
+                            if (tcpConnect(_host, _port))
+                                _reconnectTimer = 0;
+                            else
+                                _reconnectTimer = millis();
+                        }
                         return;
 
                     case STATE_CONNECTING:
@@ -330,6 +336,7 @@ namespace OpenKNX
 
             bool Client::tcpConnect(const char *host, uint16_t port)
             {
+                tcpDisconnect(); // free any previous client (e.g. repeated begin())
                 WiFiClient *c = new WiFiClient();
                 _wifiClient = c;
                 _lastActivity = millis();
@@ -387,6 +394,7 @@ namespace OpenKNX
 
             bool Client::tcpConnect(const char *host, uint16_t port)
             {
+                tcpDisconnect(); // free any previous pcb (e.g. repeated begin())
                 _instance = this;
                 _state = STATE_CONNECTING;
 

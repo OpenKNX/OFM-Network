@@ -20,6 +20,14 @@
 #endif
 #endif
 
+// Upper bounds to prevent unbounded heap growth from remote clients
+#ifndef OPENKNX_MQTT_BROKER_MAX_RETAINED
+#define OPENKNX_MQTT_BROKER_MAX_RETAINED 32
+#endif
+#ifndef OPENKNX_MQTT_BROKER_MAX_SUBS
+#define OPENKNX_MQTT_BROKER_MAX_SUBS 16
+#endif
+
 namespace OpenKNX
 {
     namespace Network

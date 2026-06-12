@@ -115,6 +115,8 @@ OPENKNX_MQTT                 – enable MQTT client/broker
 OPENKNX_MQTT_STATUS_TIME     – status publish interval ms (default 10000)
 OPENKNX_MQTT_TASK_STACK      – ESP32 FreeRTOS task stack size bytes (default 4096)
 OPENKNX_MQTT_BROKER_MAX_CLIENTS – max simultaneous broker clients (default 5 ESP32, 3 RP2040)
+OPENKNX_MQTT_BROKER_MAX_RETAINED – max retained messages stored by broker (default 32)
+OPENKNX_MQTT_BROKER_MAX_SUBS – max subscriptions per broker client (default 16)
 OPENKNX_WEBCLIENT            – enable HTTP(S) client (openknxNetwork.webclient)
 OPENKNX_WEBCLIENT_SLOTS      – parallel slots / queue depth (default 2)
 OPENKNX_WEBCLIENT_TIMEOUT    – request timeout ms (default 10000)
