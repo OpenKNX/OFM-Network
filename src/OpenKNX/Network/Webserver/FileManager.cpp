@@ -167,7 +167,7 @@ namespace OpenKNX
         {
             ensureFs();
 
-            openknxNetwork.webserver.addMenuItem("Dateien", "/filemanager", 50);
+            openknxNetwork.webserver.addMenuItem("Dateimanager", "/filemanager", 50);
 
             openknxNetwork.webserver.addRoute(WEB_GET, "/assets/filemanager.css",
                                               Webserver::Static("text/css", filemanagerCss));

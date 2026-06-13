@@ -671,7 +671,15 @@ namespace OpenKNX
                                 tcp_write(s->pcb, pong, 2, TCP_WRITE_FLAG_COPY);
                                 tcp_output(s->pcb);
                             }
-                            // Pong (0x0A) and empty text/binary frames: nothing to deliver.
+                            else if (s->wsOpcode == 0x01 || s->wsOpcode == 0x02) // empty text/binary
+                            {
+                                // Leeres Frame zustellen (z.B. blankes Enter in der Webconsole),
+                                // damit der Empfänger eine Leerzeile verarbeiten kann.
+                                bool isBinary = (s->wsOpcode == 0x02);
+                                std::string uri(s->uri);
+                                s->ws->notifySocketMessage(uri, s->idx, s->wsPayBuf, 0, isBinary);
+                            }
+                            // Pong (0x0A): nothing to deliver.
                             s->wsRx = WR_HDR;
                             s->wsHdrRcvd = 0;
                             break;

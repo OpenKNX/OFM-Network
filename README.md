@@ -73,6 +73,8 @@ Note: The device hostname can be set in ETS under the Network → mDNS section.
 
 The built-in HTTP/WebSocket server is documented in [`README.Webserver.md`](README.Webserver.md).
 
+It also offers an optional **group monitor** (`OPENKNX_WEBMONITOR`) — an ETS-style live view of all KNX telegrams at `/groupmonitor`, available on devices with a TP connection (`MASK_VERSION == 0x07B0`). See [`README.Webserver.md`](README.Webserver.md).
+
 ## MQTT
 
 The built-in MQTT 3.1.1 client and broker is documented in [`README.MQTT.md`](README.MQTT.md).

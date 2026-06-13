@@ -566,6 +566,11 @@ namespace OpenKNX
 #ifdef OPENKNX_WEBFS
                     filemanager.setup();
 #endif
+#if defined(OPENKNX_WEBMONITOR) && (MASK_VERSION == 0x07B0)
+                    gatable.begin();
+                    logInfoP("GA table: %u entries from /openknx_ga.tsv", (unsigned)gatable.count());
+                    groupmonitor.setup();
+#endif
                 }
                 if (webserver.isRunning())
                 {

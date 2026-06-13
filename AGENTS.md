@@ -164,6 +164,7 @@ Full API reference: [`README.Webserver.md`](README.Webserver.md)
 | `OPENKNX_WEBSERVER` | Enables HTTP server, routing, overview page, logo asset, all routes |
 | `OPENKNX_WEBCONSOLE` | Enables `/console` page, WS endpoint `/console`, **and** the logger ring buffer in OGM-Common |
 | `OPENKNX_WEBCONSOLE_BUFFER` | Total ring buffer size in bytes (optional, default: 4096, max: 65535) |
+| `OPENKNX_WEBMONITOR` | Enables `/groupmonitor` page + WS endpoint, live KNX telegram stream. Requires `OPENKNX_WEBSERVER`; **TP only**, additionally gated on `MASK_VERSION == 0x07B0` |
 
 `OPENKNX_WEBCONSOLE` requires `OPENKNX_WEBSERVER`.
 Without `OPENKNX_WEBSERVER` no webserver code is compiled at all — no class, no stubs, no `webserver` member in the module.
@@ -296,6 +297,19 @@ Per-client tracking: `ConnSlot.wsSentSeq` holds the last successfully sent seque
 - **Reason:** Automatic reconnect caused race conditions in log output and made it harder to debug disconnect causes
 - ANSI colors are converted to CSS classes by `ansiToHtml()` (`red`, `green`, `yellow`, `gray`)
 - Commands are sent as text frames (WS opcode 0x01), responses come back as ring buffer drain
+
+### Group Monitor (`OPENKNX_WEBMONITOR`, TP only)
+
+`GroupMonitor` (`src/OpenKNX/Network/Webserver/GroupMonitor.{h,cpp}`, member `openknxNetwork.groupmonitor`) — ETS-style live KNX telegram viewer, read-only. Whole feature gated on `#if defined(OPENKNX_WEBMONITOR) && (MASK_VERSION == 0x07B0)` (device with TP connection); class header is `#ifdef OPENKNX_WEBMONITOR` only, the member/setup-call/`.cpp` body add the TP-mask guard.
+
+- **Parallel tap, bypassing the stack:** registers `knx.bau().getDataLinkLayer()->getTPUart().registerReceivedFrame(...)` — the same hook MQTT raw-frame publish uses (`MQTT/Module.cpp`). The callback fires in `processRxFrameBuffer()` (loop task, after repetition filter, before stack processing) for **every** received frame — no filtering.
+- **Deliberately no ring buffer and no `loop()`** (unlike Webconsole, whose buffer exists because the logger fills independently of clients). `onFrame()` decodes the `TPUart::Frame` and broadcasts compact JSON directly via `webserver.sendWebsocketMessage("/groupmonitor", json)`. Safe from the callback because it shares the loop task with the webserver (ESP32: TX/state mutex; RP2040: single-thread). Slow clients are dropped by the WS layer; new clients see only telegrams arriving after connect.
+- **Decoding:** `humanSource()`/`humanDestination()`, `isGroupAddress()`; APCI from `((d[meta-2]&0x03)<<8)|d[meta-1]` masked to `0x03C0` → Read/Response/Write/other (group only); payload hex = `apduSize()` bytes from `metadataSize()-1`; `isTransmitted()`/`isRepeated()` flags. JSON keys `src,dst,ga,apci,len,hex,tx,rep`.
+- **Assets** `/assets/groupmonitor.css` + `.js` via `Static()` + `addStylesheet()`/`addJavaScript()`; client timestamps on arrival; autoscroll/pause/clear; 1000-row cap. `setup()` guarded with `_initialized` so a webserver restart never double-registers the frame callback.
+- **Name/Value/DPT from `/openknx_ga.tsv`** (LittleFS, tab-separated `ga\tdpt\tsubset\thauptgruppe\tmittelgruppe\tname`):
+  - `GATable` (`src/OpenKNX/Network/GATable.{h,cpp}`, member `openknxNetwork.gatable`) — `begin()` loads the TSV once (idempotent) into a sorted POD vector `GAEntry{uint16_t addr; uint8_t dpt; uint8_t sub;}` (4 B/GA, **no strings**, `PsramAllocator` under `OPENKNX_PSRAM`). `getDpt(addr, dpt, sub)` = binary search, no I/O. Parses only fields 0/1/2 on the fly (no large line buffer); skips header + lines without a valid addr. Member/begin-call gated identically to groupmonitor; `gatable.begin()` runs just before `groupmonitor.setup()` in `Module.cpp` and logs the entry count.
+  - **Value decode** in `onFrame()` for Write/Response only, via already-linked knx-stack `KNX_Decode_Value()` (`<knx/dptconvert.h>`, `Dpt`, `KNXValue`) into a stack buffer. Payload prep: `len<=1` → 6-bit value in `d[meta-1]&0x3F`; else `len-1` bytes from `d[meta]`. Formatted (static `decodeValue()`) for DPT 1/5/6/7/8/9/12/13/14/16/17/18; **5.001** is raw 0–255 from the stack → converted to `%`. JSON gains `addr` (numeric GA, group only), `dpt` (`"m.sss"`), `val` (JSON-escaped via `appendJsonEscaped()`).
+  - **Names** stay client-side: browser fetches the TSV (`/filemanager/download?path=%2Fopenknx_ga.tsv`), builds `addr→name` Map, fills the Name column; backend never handles name strings. File absent → columns show `-`, no crash.
 
 ---
 
