@@ -10,6 +10,8 @@ Built-in HTTP/WebSocket server for OpenKNX devices.
 OPENKNX_WEBSERVER           – HTTP server, routing, overview page (/), logo
 OPENKNX_WEBCONSOLE          – /console page, WS /console, logger streaming
 OPENKNX_WEBCONSOLE_BUFFER   – Total size of the log ring buffer in bytes (default: 4096)
+OPENKNX_WEBSOCKET_MAX       – ESP32: max concurrent WebSocket connections (default: 3; excess → HTTP 503)
+OPENKNX_WEBSOCKET_RX_CAP    – ESP32: per-WebSocket RX accumulation cap in bytes (default: 2048)
 ```
 
 `OPENKNX_WEBCONSOLE` requires `OPENKNX_WEBSERVER`.  
@@ -102,7 +104,9 @@ std::vector<int> fds = openknxNetwork.webserver.connectedClientFds("/ws");
 ```
 
 On **RP2040** `sendWebsocketMessage` / `sendToClient` must only be called from `loop()` (single-threaded lwIP).  
-On **ESP32** both methods are callable from any task (non-blocking).
+On **ESP32** both methods are callable from any task (non-blocking); the registered `onMessage` callback runs in the main loop task.
+
+> **ESP32 concurrency:** WebSocket connections are detached from httpd (`httpd_req_async_handler_begin`) and serviced non-blocking from `Webserver::loop()` — **no extra FreeRTOS task per connection**. Multiple clients (e.g. several browser tabs on `/console`) work in parallel. The number of simultaneous connections is capped by `OPENKNX_WEBSOCKET_MAX` (default 3); beyond that, upgrade requests are answered with **HTTP 503**. Raise the limit via the compile flag, and increase `CONFIG_LWIP_MAX_SOCKETS` in the parent project if you push it substantially higher.
 
 ### Navigation Menu
 

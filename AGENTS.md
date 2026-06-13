@@ -281,13 +281,12 @@ Per-client tracking: `ConnSlot.wsSentSeq` holds the last successfully sent seque
 ### ESP32 Architecture
 
 - `httpd` runs in its own FreeRTOS task
-- Per WS session, `wsFrameRecv` installs itself as `httpd_sess_set_recv_override` — runs in an endless loop in the httpd task
-- `processCommand()` is called directly in `wsFrameRecv` (no dequeue needed, FreeRTOS has its own stack)
-- `wsSendText()` uses `MSG_DONTWAIT` — never blocks; EAGAIN = frame dropped
-- `Webserver::loop()` is a no-op on ESP32 (the httpd task handles everything)
+- **WebSockets use no per-connection task.** On upgrade the socket is detached from httpd via `httpd_req_async_handler_begin()` so httpd stops polling it; it is then serviced non-blocking from `Webserver::loop()` (driven by the main loop, just like RP2040). The earlier `httpd_sess_set_recv_override` endless-loop monopolized the single httpd task and limited the device to one working WebSocket (a second tab couldn't connect); the task-per-session variant fixed concurrency but cost ~4.3 KB RAM per connection — both are gone.
+- `Webserver::loop()` per session: `recv(MSG_DONTWAIT)` drains available bytes into the session's `rx` buffer, then `wsParseFrames()` dispatches every complete frame (partial frames wait for the next tick). On EOF/error/oversize → cleanup: `notifySocketConnect(false)` → `httpd_req_async_handler_complete()` (httpd closes the socket) → remove from registry → free.
+- `onMessage` runs in the loop task; for the console it only buffers the command into `_pendingCmd`, which `Webconsole::loop()` then runs via `processCommand()`.
+- Concurrency capped at `OPENKNX_WEBSOCKET_MAX` (default 3); excess upgrades get HTTP 503. `config.lru_purge_enable = true` frees idle HTTP keep-alives so new upgrades find a socket slot.
+- Shared state (`_socketClients` + the WS session registry) guarded by a recursive mutex (`Webserver::wsStateLock/Unlock`), reachable from both `Webserver_ESP32.cpp` and the platform-agnostic `Webserver.cpp` (`connectedClientFds`). `wsSendText()`/`wsRawSend()` use `MSG_DONTWAIT` and are serialized by a TX mutex so frames from different tasks never interleave.
 - TCP keepalive: 3 s idle, 2 s interval, 3 probes → dead connections detected after ~9 s
-
-**Note:** ESP32 currently does not drain the logger ring buffer from `loop()`. On ESP32, logger integration works via `sendWebsocketMessage` from a callback — or can be switched to ring-buffer drain via `loop()` in the future.
 
 ### Web UI: Console Page
 

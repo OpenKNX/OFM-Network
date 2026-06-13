@@ -4,15 +4,32 @@
 #include "OpenKNX.h"
 #include "OpenKNX/Network/Module.h"
 #include "OpenKNX/Network/Webserver/Webserver.h"
+#include <algorithm>
 #include <arpa/inet.h>
 #include <esp_http_server.h>
-#include <map>
+#include <fcntl.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <mbedtls/base64.h>
 #include <mbedtls/sha1.h>
 #include <sys/socket.h>
+#include <vector>
 
 #ifndef ESP32_WEB_CTRL_PORT
 #define ESP32_WEB_CTRL_PORT 9080
+#endif
+
+// Max number of concurrent WebSocket connections. Each one keeps one httpd "async"
+// socket slot alive; bounded by CONFIG_LWIP_MAX_SOCKETS / max_open_sockets. Excess
+// upgrade requests are answered with HTTP 503.
+#ifndef OPENKNX_WEBSOCKET_MAX
+#define OPENKNX_WEBSOCKET_MAX 3
+#endif
+
+// Per-connection RX accumulation cap. A frame larger than this (or a client that
+// dribbles bytes without ever completing a frame) closes the connection.
+#ifndef OPENKNX_WEBSOCKET_RX_CAP
+#define OPENKNX_WEBSOCKET_RX_CAP 2048
 #endif
 
 namespace OpenKNX
@@ -23,6 +40,33 @@ namespace OpenKNX
         // ── WS handshake helpers ────────────────────────────────────────────
 
         static const char WS_MAGIC[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+        // Serializes the actual send() syscalls. WS frames are emitted from the loop
+        // task (console streaming + control frames) and potentially from other tasks via
+        // the public send API; without this two senders could interleave bytes of
+        // different frames on the same socket and corrupt the stream.
+        static SemaphoreHandle_t g_wsTxMutex = nullptr;
+
+        // RAII guard for the shared WS state (Webserver::_socketClients + g_wsSessions).
+        // The recursive mutex lives on the Webserver instance (wsStateLock/Unlock) so it
+        // is reachable from both this file and the platform-agnostic Webserver.cpp.
+        class WsStateGuard
+        {
+            const Webserver* _w;
+
+          public:
+            explicit WsStateGuard(const Webserver* w) : _w(w) { _w->wsStateLock(); }
+            ~WsStateGuard() { _w->wsStateUnlock(); }
+        };
+
+        // Non-blocking raw socket write, serialized against other senders.
+        static int wsRawSend(int fd, const void* data, size_t len)
+        {
+            if (g_wsTxMutex) xSemaphoreTake(g_wsTxMutex, portMAX_DELAY);
+            int r = send(fd, data, len, MSG_NOSIGNAL | MSG_DONTWAIT);
+            if (g_wsTxMutex) xSemaphoreGive(g_wsTxMutex);
+            return r;
+        }
 
         static bool wsComputeAccept(const char* key, char* out, size_t outSize)
         {
@@ -73,7 +117,7 @@ namespace OpenKNX
             memcpy(frame.data(), hdr, hLen);
             if (len > 0) memcpy(frame.data() + hLen, data, len);
 
-            int r = send(fd, frame.data(), (int)frame.size(), MSG_NOSIGNAL | MSG_DONTWAIT);
+            int r = wsRawSend(fd, frame.data(), frame.size());
             if (r < 0)
                 return (errno == EAGAIN || errno == EWOULDBLOCK); // slow client → drop, stay connected
             return r == (int)frame.size();
@@ -84,127 +128,97 @@ namespace OpenKNX
         struct WsSession
         {
             Webserver* ws;
-            httpd_handle_t server;
             int fd;
             std::string uri;
+            httpd_req_t* async;       // async handle — keeps the socket out of httpd's poll set
+            std::vector<uint8_t> rx;  // RX accumulation buffer (partial frames span loop ticks)
         };
 
-        static std::map<int, WsSession*> g_wsSessions; // fd → session, httpd-task only
+        // Active WebSocket sessions, serviced from Webserver::loop(). Guarded by
+        // wsStateLock(): the httpd task appends on upgrade, the loop task iterates and
+        // removes on disconnect.
+        static std::vector<WsSession*> g_wsSessions;
 
-        // Installed as recv override; owns the socket for the WS session lifetime.
-        // Loops internally so httpd never sees HTTPD_SOCK_ERR_TIMEOUT (which would
-        // trigger a 408 HTTP error on the upgraded socket).
-        static int wsFrameRecv(httpd_handle_t hd, int fd, char* buf, size_t bufLen, int flags)
+        // Parses as many complete WS frames as are buffered in sess->rx and dispatches
+        // each. Consumes processed bytes and leaves any partial trailing frame for the
+        // next loop tick. Returns true if the connection should be closed (close frame
+        // or an oversize/protocol error). Pure buffer logic — never calls recv().
+        static bool wsParseFrames(WsSession* sess)
         {
-            WsSession* sess = nullptr;
-            {
-                auto it = g_wsSessions.find(fd);
-                if (it != g_wsSessions.end()) sess = it->second;
-            }
+            std::vector<uint8_t>& rx = sess->rx;
+            size_t off = 0;
+            bool close = false;
 
-            for (;;)
+            while (rx.size() - off >= 2)
             {
-                uint8_t hdr[2];
-                int r = recv(fd, hdr, 2, MSG_WAITALL);
-                if (r <= 0)
-                {
-                    // EAGAIN = SO_RCVTIMEO fired — no frame yet, keep waiting
-                    if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-                        continue;
-                    if (sess) sess->ws->notifySocketConnect(sess->uri, fd, false);
-                    return HTTPD_SOCK_ERR_FAIL;
-                }
-
-                bool fin = (hdr[0] & 0x80) != 0;
-                (void)fin;
-                uint8_t op = hdr[0] & 0x0F;
-                bool masked = (hdr[1] & 0x80) != 0;
-                uint64_t payLen = hdr[1] & 0x7F;
+                uint8_t b0 = rx[off];
+                uint8_t b1 = rx[off + 1];
+                uint8_t op = b0 & 0x0F;
+                bool masked = (b1 & 0x80) != 0;
+                uint64_t payLen = b1 & 0x7F;
+                size_t hdrLen = 2;
 
                 if (payLen == 126)
                 {
-                    uint8_t ext[2];
-                    if (recv(fd, ext, 2, MSG_WAITALL) != 2)
-                    {
-                        if (sess) sess->ws->notifySocketConnect(sess->uri, fd, false);
-                        return HTTPD_SOCK_ERR_FAIL;
-                    }
-                    payLen = ((uint16_t)ext[0] << 8) | ext[1];
+                    if (rx.size() - off < 4) break;
+                    payLen = ((uint16_t)rx[off + 2] << 8) | rx[off + 3];
+                    hdrLen = 4;
                 }
                 else if (payLen == 127)
                 {
-                    uint8_t ext[8];
-                    if (recv(fd, ext, 8, MSG_WAITALL) != 8)
-                    {
-                        if (sess) sess->ws->notifySocketConnect(sess->uri, fd, false);
-                        return HTTPD_SOCK_ERR_FAIL;
-                    }
+                    if (rx.size() - off < 10) break;
                     payLen = 0;
                     for (int i = 0; i < 8; ++i)
-                        payLen = (payLen << 8) | ext[i];
+                        payLen = (payLen << 8) | rx[off + 2 + i];
+                    hdrLen = 10;
                 }
+
+                // A frame larger than the bounded RX buffer can never complete → drop client.
+                if (payLen > OPENKNX_WEBSOCKET_RX_CAP)
+                {
+                    close = true;
+                    break;
+                }
+
+                size_t maskLen = masked ? 4 : 0;
+                uint64_t need = (uint64_t)hdrLen + maskLen + payLen;
+                if ((uint64_t)(rx.size() - off) < need) break; // frame incomplete → wait for more
 
                 uint8_t mask[4] = {};
                 if (masked)
-                {
-                    if (recv(fd, mask, 4, MSG_WAITALL) != 4)
-                    {
-                        if (sess) sess->ws->notifySocketConnect(sess->uri, fd, false);
-                        return HTTPD_SOCK_ERR_FAIL;
-                    }
-                }
+                    for (int i = 0; i < 4; ++i) mask[i] = rx[off + hdrLen + i];
 
-                if (op == 0x08) // Close frame — reply and terminate immediately
+                size_t dataOff = off + hdrLen + maskLen;
+                std::vector<uint8_t> payload((size_t)payLen);
+                for (size_t i = 0; i < (size_t)payLen; ++i)
+                    payload[i] = masked ? (rx[dataOff + i] ^ mask[i % 4]) : rx[dataOff + i];
+
+                off = dataOff + (size_t)payLen; // frame consumed
+
+                if (op == 0x08) // Close → reply and stop
                 {
                     uint8_t closeReply[2] = {0x88, 0x00};
-                    send(fd, closeReply, 2, MSG_NOSIGNAL);
-                    if (sess) sess->ws->notifySocketConnect(sess->uri, fd, false);
-                    return HTTPD_SOCK_ERR_FAIL;
+                    wsRawSend(sess->fd, closeReply, 2);
+                    close = true;
+                    break;
                 }
-
-                // Read payload for all remaining frame types (ping may carry data)
-                std::vector<uint8_t> payload((size_t)payLen);
-                if (payLen > 0)
-                {
-                    size_t received = 0;
-                    while (received < (size_t)payLen)
-                    {
-                        int got = recv(fd, payload.data() + received, (size_t)payLen - received, 0);
-                        if (got <= 0)
-                        {
-                            if (sess) sess->ws->notifySocketConnect(sess->uri, fd, false);
-                            return HTTPD_SOCK_ERR_FAIL;
-                        }
-                        received += got;
-                    }
-                    if (masked)
-                        for (size_t i = 0; i < (size_t)payLen; ++i)
-                            payload[i] ^= mask[i % 4];
-                }
-
-                if (op == 0x09) // Ping → pong (RFC 6455: works with any payload length)
+                if (op == 0x09) // Ping → pong
                 {
                     uint8_t pong[2] = {0x8A, 0x00};
-                    send(fd, pong, 2, MSG_NOSIGNAL);
+                    wsRawSend(sess->fd, pong, 2);
                     continue;
                 }
-
                 if (op == 0x0A) // Pong → silently discard
                     continue;
-
-                if (sess && (op == 0x01 || op == 0x02))
+                if (op == 0x01 || op == 0x02) // text / binary
                 {
                     bool isBinary = (op == 0x02);
-                    sess->ws->notifySocketMessage(sess->uri, fd, payload.data(), (int)payLen, isBinary);
-
-                    // notifySocketMessage → processCommand → wsBroadcast may have cleaned up
-                    // this session. Refresh pointer before looping.
-                    auto it = g_wsSessions.find(fd);
-                    if (it == g_wsSessions.end())
-                        return HTTPD_SOCK_ERR_FAIL;
-                    sess = it->second;
+                    sess->ws->notifySocketMessage(sess->uri, sess->fd, payload.data(), (int)payLen, isBinary);
                 }
             }
+
+            if (off > 0) rx.erase(rx.begin(), rx.begin() + off);
+            return close;
         }
 
         // ── WebSocket upgrade ───────────────────────────────────────────────
@@ -222,6 +236,14 @@ namespace OpenKNX
             int fd = httpd_req_to_sockfd(req);
             std::string uri = req->uri;
 
+            // Detach the socket from httpd's poll set FIRST so the loop task can recv() on
+            // it without httpd treating the bytes as a new HTTP request. Done before the
+            // 101 handshake so a failure here leaves the socket untouched and the caller
+            // can still emit a normal HTTP error response.
+            httpd_req_t* async = nullptr;
+            if (httpd_req_async_handler_begin(req, &async) != ESP_OK)
+                return false;
+
             char resp[256];
             int rLen = snprintf(resp, sizeof(resp),
                                 "HTTP/1.1 101 Switching Protocols\r\n"
@@ -231,21 +253,22 @@ namespace OpenKNX
                                 accept);
             send(fd, resp, rLen, MSG_NOSIGNAL);
 
-            // TCP keepalive — detect dead connections quickly instead of waiting for SO_RCVTIMEO
+            // TCP keepalive — detect silently dead peers within ~9 s
             int ka = 1, kaIdle = 3, kaIntvl = 2, kaCnt = 3;
             setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &ka, sizeof(ka));
             setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &kaIdle, sizeof(kaIdle));
             setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &kaIntvl, sizeof(kaIntvl));
             setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &kaCnt, sizeof(kaCnt));
 
-            // Reduce recv timeout to 1 s so the keepalive check loop is responsive
-            struct timeval rcvTv = {.tv_sec = 1, .tv_usec = 0};
-            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &rcvTv, sizeof(rcvTv));
+            // Non-blocking — the loop-task recv() in Webserver::loop() must never stall.
+            int fl = fcntl(fd, F_GETFL, 0);
+            if (fl >= 0) fcntl(fd, F_SETFL, fl | O_NONBLOCK);
 
-            WsSession* sess = new WsSession{wsObj, (httpd_handle_t)wsObj->serverHandle(), fd, uri};
-            g_wsSessions[fd] = sess;
-
-            httpd_sess_set_recv_override((httpd_handle_t)wsObj->serverHandle(), fd, wsFrameRecv);
+            WsSession* sess = new WsSession{wsObj, fd, uri, async, {}};
+            {
+                WsStateGuard guard(wsObj);
+                g_wsSessions.push_back(sess);
+            }
 
             wsObj->notifySocketConnect(uri, fd, true);
             return true;
@@ -322,6 +345,26 @@ namespace OpenKNX
                         httpd_resp_sendstr(req, "No WebSocket handler registered for this URI");
                         return ESP_OK;
                     }
+                    // Reject when all WS slots are in use rather than holding sockets open.
+                    size_t active;
+                    {
+                        WsStateGuard guard(ws);
+                        active = g_wsSessions.size();
+                    }
+                    if (active >= OPENKNX_WEBSOCKET_MAX)
+                    {
+                        WebRequest wsReq;
+                        wsReq.uri = uri;
+                        wsReq.method = WEB_GET;
+                        wsReq.setRemoteAddr(remoteIpAddr);
+                        wsReq.setRemotePort(remotePort);
+                        ws->logWebsocket(wsReq, 503);
+                        httpd_resp_set_status(req, "503 Service Unavailable");
+                        httpd_resp_set_type(req, "text/plain");
+                        httpd_resp_sendstr(req, "WebSocket connection limit reached");
+                        return ESP_OK;
+                    }
+
                     WebRequest wsReq;
                     wsReq.uri = uri;
                     wsReq.setRemoteAddr(remoteIpAddr);
@@ -426,12 +469,19 @@ namespace OpenKNX
 
         void Webserver::setupEsp32()
         {
-            // httpd runs in its own FreeRTOS task; wsFrameRecv loops per WS session
+            // Shared-state mutexes (created once, before any WS can be upgraded)
+            if (_wsLock == nullptr) _wsLock = xSemaphoreCreateRecursiveMutex();
+            if (g_wsTxMutex == nullptr) g_wsTxMutex = xSemaphoreCreateMutex();
+
+            // httpd runs in its own FreeRTOS task. WebSocket sockets are detached via the
+            // async handler API and serviced (non-blocking) from Webserver::loop(); no
+            // per-connection task and no blocking in the httpd task.
             httpd_config_t config = HTTPD_DEFAULT_CONFIG();
             config.uri_match_fn = httpd_uri_match_wildcard;
             config.ctrl_port = ESP32_WEB_CTRL_PORT;
             config.max_uri_handlers = 8; // 4 Methoden × Wildcard + Headroom
-            config.max_open_sockets = 7; // page + assets (css/js/svg) + WS + headroom
+            config.max_open_sockets = 7; // HTTP keep-alive + detached WS sockets (3 reserved internally)
+            config.lru_purge_enable = true; // free idle HTTP keep-alives so new WS upgrades find a slot
             config.recv_wait_timeout = 5;
             config.send_wait_timeout = 5;
             config.stack_size = 8192; // Logger-Mutex (xSemaphoreTakeRecursive) braucht ~400 B extra gegenüber Default 4096
@@ -463,6 +513,64 @@ namespace OpenKNX
 
         void Webserver::loop()
         {
+            if (!_server) return;
+
+            // Snapshot the session list under lock. Only this loop removes/deletes
+            // sessions, so the snapshot pointers stay valid for this iteration even
+            // though the httpd task may append new ones concurrently.
+            std::vector<WsSession*> sessions;
+            {
+                WsStateGuard guard(this);
+                sessions = g_wsSessions;
+            }
+            if (sessions.empty()) return;
+
+            uint8_t tmp[512];
+            for (WsSession* sess : sessions)
+            {
+                bool dead = false;
+
+                // Drain whatever is available right now — fully non-blocking.
+                for (;;)
+                {
+                    int n = recv(sess->fd, tmp, sizeof(tmp), MSG_DONTWAIT);
+                    if (n > 0)
+                    {
+                        sess->rx.insert(sess->rx.end(), tmp, tmp + n);
+                        if (sess->rx.size() > OPENKNX_WEBSOCKET_RX_CAP)
+                        {
+                            dead = true;
+                            break;
+                        }
+                        continue;
+                    }
+                    if (n == 0)
+                    {
+                        dead = true; // peer closed
+                        break;
+                    }
+                    if (errno == EAGAIN || errno == EWOULDBLOCK)
+                        break; // nothing more pending
+                    dead = true; // real socket error
+                    break;
+                }
+
+                if (!dead && wsParseFrames(sess)) dead = true;
+
+                if (dead)
+                {
+                    // Sole owner: drop from client list, return the socket to httpd (which
+                    // closes it), remove from the registry and free.
+                    notifySocketConnect(sess->uri, sess->fd, false);
+                    httpd_req_async_handler_complete(sess->async);
+                    {
+                        WsStateGuard guard(this);
+                        auto it = std::find(g_wsSessions.begin(), g_wsSessions.end(), sess);
+                        if (it != g_wsSessions.end()) g_wsSessions.erase(it);
+                    }
+                    delete sess;
+                }
+            }
         }
 
         bool Webserver::isRunning()
@@ -478,33 +586,43 @@ namespace OpenKNX
             return ok;
         }
 
+        // ── Shared WS state lock (recursive; also used from Webserver.cpp) ───
+
+        void Webserver::wsStateLock() const
+        {
+            if (_wsLock) xSemaphoreTakeRecursive((SemaphoreHandle_t)_wsLock, portMAX_DELAY);
+        }
+
+        void Webserver::wsStateUnlock() const
+        {
+            if (_wsLock) xSemaphoreGiveRecursive((SemaphoreHandle_t)_wsLock);
+        }
+
         // ── Socket dispatch ─────────────────────────────────────────────────
 
+        // Maintains only the _socketClients list. The WsSession itself is owned
+        // exclusively by Webserver::loop() and freed there — never here — so this is safe
+        // to call from any task and is idempotent for removals (e.g. on a failed send).
         void Webserver::notifySocketConnect(const std::string& uri, int fd, bool connected)
         {
-            if (connected)
             {
-                _socketClients[uri].push_back(fd);
-            }
-            else
-            {
-                // Remove from client list FIRST — uri may be a reference into the session
-                // object that gets deleted below (use-after-free otherwise)
-                auto it = _socketClients.find(uri);
-                if (it != _socketClients.end())
+                WsStateGuard guard(this);
+                if (connected)
                 {
-                    auto& v = it->second;
-                    v.erase(std::remove(v.begin(), v.end(), fd), v.end());
+                    _socketClients[uri].push_back(fd);
                 }
-
-                auto sit = g_wsSessions.find(fd);
-                if (sit != g_wsSessions.end())
+                else
                 {
-                    delete sit->second;
-                    g_wsSessions.erase(sit);
+                    auto it = _socketClients.find(uri);
+                    if (it != _socketClients.end())
+                    {
+                        auto& v = it->second;
+                        v.erase(std::remove(v.begin(), v.end(), fd), v.end());
+                    }
                 }
             }
 
+            // Fire the user callback outside the lock (it may call back into the webserver)
             for (auto& sock : _sockets)
             {
                 if (sock.uri == uri && sock.onConnect)
@@ -540,10 +658,14 @@ namespace OpenKNX
                     notifySocketConnect(uri, fd, false);
                 return;
             }
-            auto it = _socketClients.find(uri);
-            if (it == _socketClients.end() || it->second.empty()) return;
+            std::vector<int> clients;
+            {
+                WsStateGuard guard(this);
+                auto it = _socketClients.find(uri);
+                if (it == _socketClients.end() || it->second.empty()) return;
+                clients = it->second; // snapshot under lock
+            }
 
-            std::vector<int> clients = it->second;
             size_t len = strlen(message);
             for (int cfd : clients)
             {

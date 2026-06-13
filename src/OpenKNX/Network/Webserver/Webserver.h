@@ -118,11 +118,16 @@ namespace OpenKNX
 #endif
 
 #ifdef ARDUINO_ARCH_ESP32
-            void* _server = nullptr; // httpd_handle_t — opaque, kein esp_http_server.h im Header
+            void* _server = nullptr;          // httpd_handle_t — opaque, kein esp_http_server.h im Header
+            mutable void* _wsLock = nullptr;  // recursive mutex guarding _socketClients + the WS session registry
             std::map<std::string, std::vector<int>> _socketClients;
 
           public:
             void* serverHandle() const { return _server; }
+            // Guards the shared WebSocket state across the httpd task and the loop task.
+            // Recursive; a no-op until setupEsp32() created the mutex.
+            void wsStateLock() const;
+            void wsStateUnlock() const;
 #elif defined(ARDUINO_ARCH_RP2040)
             void* _listenPcb = nullptr;
             std::map<std::string, std::vector<int>> _socketClients;

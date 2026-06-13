@@ -110,6 +110,8 @@ OPENKNX_WEBCONSOLE           – enable /console page + WS logger (requires WEBS
 OPENKNX_WEBCONSOLE_BUFFER    – logger ring buffer size bytes (default 4096, max 65535)
 OPENKNX_WEBFS                – enable FileManager (requires WEBSERVER)
 OPENKNX_WEBSERVER_MAX_BODY   – max POST body: 4 KB (RP2040), 32 KB (ESP32)
+OPENKNX_WEBSOCKET_MAX        – max concurrent WebSocket connections (ESP32, default 3; excess → HTTP 503)
+OPENKNX_WEBSOCKET_RX_CAP     – per-WebSocket RX accumulation cap bytes (ESP32, default 2048)
 HAS_USB                      – enable USB-Exchange support (RP2040)
 OPENKNX_MQTT                 – enable MQTT client/broker
 OPENKNX_MQTT_STATUS_TIME     – status publish interval ms (default 10000)
@@ -208,7 +210,7 @@ Lives in `OpenKNX::Log::Logger` (OGM-Common). Fills regardless of WS clients con
 Callbacks (`onAccept`, `onRecv`, `onSent`, `onPoll`, `onErr`) must not block. 3 connection slots (`MAX_CONN = 3`), each with 1536 B RX buffer. WS state machine: `WR_HDR → WR_EXTLEN2/WR_EXTLEN8 → WR_MASK → WR_PAYLOAD`. WS payload max 512 B (truncated on overflow). Commands dequeued in `loop()` (not in `onRecv`). Only 1 pending command slot (`_pendingCmd[256]`).
 
 ### ESP32 Webserver
-`httpd` in its own FreeRTOS task. `processCommand()` called directly in `wsFrameRecv`. `wsSendText()` uses `MSG_DONTWAIT`. `Webserver::loop()` is a no-op. TCP keepalive: 3 s idle, 2 s interval, 3 probes.
+`httpd` in its own FreeRTOS task. **WebSockets use no extra tasks**: on upgrade the socket is detached from httpd via `httpd_req_async_handler_begin()`, then serviced non-blocking from `Webserver::loop()` (`recv(MSG_DONTWAIT)` → per-session `rx` accumulation buffer → `wsParseFrames()`), mirroring the RP2040 design. `onMessage` runs in the loop task; for the console it only buffers the command, `Webconsole::loop()` runs `processCommand()`. Concurrency capped at `OPENKNX_WEBSOCKET_MAX` (default 3, excess → HTTP 503); `lru_purge_enable` frees idle HTTP sockets. Shared state (`_socketClients` + session registry) guarded by recursive mutex (`wsStateLock/Unlock`); sends serialized by a TX mutex (`wsRawSend`/`wsSendText`, `MSG_DONTWAIT`). TCP keepalive: 3 s idle, 2 s interval, 3 probes.
 
 ### Web UI Console
 No automatic reconnect — on disconnect shows `[Connection lost — reload page]`. ANSI colors → CSS classes via `ansiToHtml()`. Commands as WS text frames (opcode 0x01).

@@ -402,9 +402,20 @@ namespace OpenKNX
 
         std::vector<int> Webserver::connectedClientFds(const std::string& uri) const
         {
+#ifdef ARDUINO_ARCH_ESP32
+            // Snapshot under the WS state lock — the list is mutated from the httpd task
+            // (upgrade) and the loop task (disconnect) while it is read here.
+            wsStateLock();
+            std::vector<int> result;
+            auto it = _socketClients.find(uri);
+            if (it != _socketClients.end()) result = it->second;
+            wsStateUnlock();
+            return result;
+#else
             auto it = _socketClients.find(uri);
             if (it == _socketClients.end()) return {};
             return it->second;
+#endif
         }
 
         bool Webserver::handleRequest(WebRequest& req, WebResponse& res)
