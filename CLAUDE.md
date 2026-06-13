@@ -110,8 +110,9 @@ OPENKNX_WEBCONSOLE           – enable /console page + WS logger (requires WEBS
 OPENKNX_WEBCONSOLE_BUFFER    – logger ring buffer size bytes (default 4096, max 65535)
 OPENKNX_WEBFS                – enable FileManager (requires WEBSERVER)
 OPENKNX_WEBSERVER_MAX_BODY   – max POST body: 4 KB (RP2040), 32 KB (ESP32)
-OPENKNX_WEBSOCKET_MAX        – max concurrent WebSocket connections (ESP32, default 3; excess → HTTP 503)
-OPENKNX_WEBSOCKET_RX_CAP     – per-WebSocket RX accumulation cap bytes (ESP32, default 2048)
+OPENKNX_WEBSOCKET_MAX        – ESP32 only: max concurrent WebSocket connections (default 3, excess → HTTP 503)
+OPENKNX_WEBSERVER_MAX_CONN   – RP2040 only: total webserver connection slots, shared HTTP+WS (default 3); raising requires more lwIP PCBs
+OPENKNX_WEBSOCKET_RX_CAP     – per-WebSocket RX cap bytes (ESP32 accumulation buffer default 2048, overflow → disconnect; RP2040 payload buffer default 512, overflow → truncate)
 HAS_USB                      – enable USB-Exchange support (RP2040)
 OPENKNX_MQTT                 – enable MQTT client/broker
 OPENKNX_MQTT_STATUS_TIME     – status publish interval ms (default 10000)
@@ -207,7 +208,7 @@ Lives in `OpenKNX::Log::Logger` (OGM-Common). Fills regardless of WS clients con
 - API: `openknx.logger.getLogEntryAfter(lastSeq, buf, size, &outSeq)`
 
 ### RP2040 Webserver (lwIP `NO_SYS=1`)
-Callbacks (`onAccept`, `onRecv`, `onSent`, `onPoll`, `onErr`) must not block. 3 connection slots (`MAX_CONN = 3`), each with 1536 B RX buffer. WS state machine: `WR_HDR → WR_EXTLEN2/WR_EXTLEN8 → WR_MASK → WR_PAYLOAD`. WS payload max 512 B (truncated on overflow). Commands dequeued in `loop()` (not in `onRecv`). Only 1 pending command slot (`_pendingCmd[256]`).
+Callbacks (`onAccept`, `onRecv`, `onSent`, `onPoll`, `onErr`) must not block. `MAX_CONN = OPENKNX_WEBSERVER_MAX_CONN` connection slots (default 3, shared HTTP+WS), each with 1536 B RX buffer. WS state machine: `WR_HDR → WR_EXTLEN2/WR_EXTLEN8 → WR_MASK → WR_PAYLOAD`. WS payload buffer `OPENKNX_WEBSOCKET_RX_CAP` (default 512 B, truncated on overflow). Commands dequeued in `loop()` (not in `onRecv`). Only 1 pending command slot (`_pendingCmd[256]`).
 
 ### ESP32 Webserver
 `httpd` in its own FreeRTOS task. **WebSockets use no extra tasks**: on upgrade the socket is detached from httpd via `httpd_req_async_handler_begin()`, then serviced non-blocking from `Webserver::loop()` (`recv(MSG_DONTWAIT)` → per-session `rx` accumulation buffer → `wsParseFrames()`), mirroring the RP2040 design. `onMessage` runs in the loop task; for the console it only buffers the command, `Webconsole::loop()` runs `processCommand()`. Concurrency capped at `OPENKNX_WEBSOCKET_MAX` (default 3, excess → HTTP 503); `lru_purge_enable` frees idle HTTP sockets. Shared state (`_socketClients` + session registry) guarded by recursive mutex (`wsStateLock/Unlock`); sends serialized by a TX mutex (`wsRawSend`/`wsSendText`, `MSG_DONTWAIT`). TCP keepalive: 3 s idle, 2 s interval, 3 probes.

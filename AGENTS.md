@@ -228,11 +228,13 @@ Critical characteristic: lwIP runs single-threaded. Callbacks (`onAccept`, `onRe
 
 **Connection slots:**
 ```
-static constexpr int MAX_CONN = 3;
+static constexpr int MAX_CONN = OPENKNX_WEBSERVER_MAX_CONN; // default 3, shared HTTP + WS pool
 static ConnSlot g_slots[MAX_CONN];
 ```
 
-Each `ConnSlot` holds: HTTP RX buffer (1536 B), HTTP TX pointer, WS state machine state, `wsSentSeq` (when `OPENKNX_WEBCONSOLE`).
+`OPENKNX_WEBSERVER_MAX_CONN` (RP2040, default 3) is **not** the same flag as ESP32's `OPENKNX_WEBSOCKET_MAX`: on RP2040 the slot pool is shared between HTTP and WebSocket, so the name reflects that. Raising it also needs more lwIP PCBs (`MEMP_NUM_TCP_PCB`). `OPENKNX_WEBSOCKET_RX_CAP` is shared with ESP32 (per-WS RX limit), but overflow behaviour differs: RP2040 truncates, ESP32 disconnects.
+
+Each `ConnSlot` holds: HTTP RX buffer (1536 B), HTTP TX pointer, WS state machine state, WS payload buffer (`OPENKNX_WEBSOCKET_RX_CAP` B), `wsSentSeq` (when `OPENKNX_WEBCONSOLE`).
 
 **Important:** `onAccept` calls `memset(s, 0, sizeof(*s))`, which clears `s->idx`. Therefore `idx` is set **after** the memset via pointer arithmetic:
 ```cpp

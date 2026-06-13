@@ -12,6 +12,18 @@
 #include <string>
 #include <vector>
 
+// OPENKNX_WEBSERVER_MAX_CONN: total lwIP TCP-PCB slots for the webserver (HTTP + WS shared).
+// Raising it also requires more lwIP PCBs (MEMP_NUM_TCP_PCB) in the parent project.
+// Different from ESP32's OPENKNX_WEBSOCKET_MAX which is WS-only.
+#ifndef OPENKNX_WEBSERVER_MAX_CONN
+#define OPENKNX_WEBSERVER_MAX_CONN 3
+#endif
+// OPENKNX_WEBSOCKET_RX_CAP: per-WS payload buffer in bytes. Larger inbound payloads are
+// truncated (not dropped), unlike ESP32 which disconnects on overflow.
+#ifndef OPENKNX_WEBSOCKET_RX_CAP
+#define OPENKNX_WEBSOCKET_RX_CAP 512
+#endif
+
 namespace OpenKNX
 {
     namespace Network
@@ -80,7 +92,7 @@ namespace OpenKNX
             uint32_t wsPayRcvd;
             uint8_t wsMask[4];
             bool wsMasked;
-            uint8_t wsPayBuf[512];
+            uint8_t wsPayBuf[OPENKNX_WEBSOCKET_RX_CAP];
             uint8_t wsHdrBuf[10]; // accumulate header bytes
             uint8_t wsHdrRcvd;
 
@@ -102,7 +114,7 @@ namespace OpenKNX
             bool streaming = false;
         };
 
-        static constexpr int MAX_CONN = 3;
+        static constexpr int MAX_CONN = OPENKNX_WEBSERVER_MAX_CONN; // shared HTTP + WS slot pool
         static ConnSlot g_slots[MAX_CONN];
 
         // ── Slot management ───────────────────────────────────────────────────

@@ -10,8 +10,9 @@ Built-in HTTP/WebSocket server for OpenKNX devices.
 OPENKNX_WEBSERVER           – HTTP server, routing, overview page (/), logo
 OPENKNX_WEBCONSOLE          – /console page, WS /console, logger streaming
 OPENKNX_WEBCONSOLE_BUFFER   – Total size of the log ring buffer in bytes (default: 4096)
-OPENKNX_WEBSOCKET_MAX       – ESP32: max concurrent WebSocket connections (default: 3; excess → HTTP 503)
-OPENKNX_WEBSOCKET_RX_CAP    – ESP32: per-WebSocket RX accumulation cap in bytes (default: 2048)
+OPENKNX_WEBSOCKET_MAX       – ESP32 only: max concurrent WebSocket connections (default 3, excess → HTTP 503)
+OPENKNX_WEBSERVER_MAX_CONN  – RP2040 only: total webserver connection slots, shared HTTP+WS (default 3); raising requires more lwIP PCBs
+OPENKNX_WEBSOCKET_RX_CAP    – Per-WS RX cap in bytes (ESP32 accumulation buffer default 2048, overflow → disconnect; RP2040 payload buffer default 512, overflow → truncate)
 ```
 
 `OPENKNX_WEBCONSOLE` requires `OPENKNX_WEBSERVER`.  
