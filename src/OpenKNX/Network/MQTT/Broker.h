@@ -3,6 +3,7 @@
 #ifdef OPENKNX_MQTT
 
 #include "Packet.h"
+#include "OpenKNX/Helper.h" // PsramAllocator
 #include <functional>
 #include <map>
 #include <string>
@@ -113,8 +114,12 @@ namespace OpenKNX
                 bool _authRequired = false;
 
                 Conn _conns[OPENKNX_MQTT_BROKER_MAX_CLIENTS];
-                std::map<std::string, RetainedMessage> _retained;
-                std::vector<std::pair<std::string, MessageCallback>> _observers;
+                // Retained-Map-Knoten und Observer-Liste in PSRAM (loop-/task-Kontext,
+                // kein lwIP-Callback-Zugriff). Keys/Payloads (std::string) bleiben im internen RAM.
+                std::map<std::string, RetainedMessage, std::less<std::string>,
+                         PsramAllocator<std::pair<const std::string, RetainedMessage>>> _retained;
+                std::vector<std::pair<std::string, MessageCallback>,
+                            PsramAllocator<std::pair<std::string, MessageCallback>>> _observers;
 
                 // Shared transmit scratch buffer — avoids 512-byte stack allocations
                 uint8_t _txBuf[512];

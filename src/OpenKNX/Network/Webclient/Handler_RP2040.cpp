@@ -262,7 +262,7 @@ namespace OpenKNX
 
             bool Handler::platformSslInit(Slot &s)
             {
-                s.brState = new BrState();
+                s.brState = psram_new(BrState)();
                 if (!s.brState) return false;
 
                 br_ssl_client_context &cl = s.brState->client;
@@ -277,7 +277,7 @@ namespace OpenKNX
 
                 if (!br_ssl_client_reset(&cl, s.host, 0))
                 {
-                    delete s.brState;
+                    psram_delete(s.brState);
                     s.brState = nullptr;
                     return false;
                 }
@@ -462,7 +462,7 @@ namespace OpenKNX
                 if (s.ssl && s.brState)
                 {
                     br_ssl_engine_close(&s.brState->client.eng);
-                    delete s.brState;
+                    psram_delete(s.brState);
                     s.brState = nullptr;
                 }
 

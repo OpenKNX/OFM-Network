@@ -138,13 +138,13 @@ namespace OpenKNX
             if (!s) return;
             if (s->txFree)
             {
-                delete[] s->txData;
+                free(s->txData); // PSRAM_MALLOC in doHttpDispatch
                 s->txFree = false;
             }
             s->txData = nullptr;
             if (s->bodyBuf)
             {
-                delete[] s->bodyBuf;
+                free(s->bodyBuf); // PSRAM_MALLOC in onRecv
                 s->bodyBuf = nullptr;
             }
             if (s->streaming && s->streamCleanup)
@@ -538,14 +538,19 @@ namespace OpenKNX
             {
                 if (response.useLayout())
                 {
-                    body = new uint8_t[bodyLen];
-                    int pos = 0;
-                    memcpy(body + pos, layoutHeader.c_str(), layoutHeader.length());
-                    pos += layoutHeader.length();
-                    memcpy(body + pos, response.body(), response.bodyLength());
-                    pos += response.bodyLength();
-                    memcpy(body + pos, layoutFooter.c_str(), layoutFooter.length());
-                    bodyFree = true;
+                    body = (uint8_t*)PSRAM_MALLOC(bodyLen);
+                    if (body)
+                    {
+                        int pos = 0;
+                        memcpy(body + pos, layoutHeader.c_str(), layoutHeader.length());
+                        pos += layoutHeader.length();
+                        memcpy(body + pos, response.body(), response.bodyLength());
+                        pos += response.bodyLength();
+                        memcpy(body + pos, layoutFooter.c_str(), layoutFooter.length());
+                        bodyFree = true;
+                    }
+                    else
+                        bodyLen = 0; // Allocation fehlgeschlagen → leerer Body
                 }
                 else if (response.isStatic())
                 {
@@ -554,9 +559,14 @@ namespace OpenKNX
                 }
                 else
                 {
-                    body = new uint8_t[bodyLen];
-                    memcpy(body, response.body(), bodyLen);
-                    bodyFree = true;
+                    body = (uint8_t*)PSRAM_MALLOC(bodyLen);
+                    if (body)
+                    {
+                        memcpy(body, response.body(), bodyLen);
+                        bodyFree = true;
+                    }
+                    else
+                        bodyLen = 0; // Allocation fehlgeschlagen → leerer Body
                 }
             }
 
@@ -884,10 +894,24 @@ namespace OpenKNX
                             else
                             {
                                 // Body-Buffer allozieren und bereits empfangene Bytes kopieren
-                                s->bodyBuf = new uint8_t[s->contentLength];
-                                memcpy(s->bodyBuf, s->rxBuf + s->headerEnd, bodyInBuf);
-                                s->bodyReceived = bodyInBuf;
-                                s->waitingForBody = true;
+                                s->bodyBuf = (uint8_t*)PSRAM_MALLOC(s->contentLength);
+                                if (s->bodyBuf == nullptr)
+                                {
+                                    // Allocation fehlgeschlagen – Verbindung schließen
+                                    tcp_pcb* pcb = s->pcb;
+                                    tcp_arg(pcb, nullptr);
+                                    tcp_recv(pcb, nullptr);
+                                    tcp_sent(pcb, nullptr);
+                                    tcp_poll(pcb, nullptr, 0);
+                                    releaseSlot(s);
+                                    tcp_close(pcb);
+                                }
+                                else
+                                {
+                                    memcpy(s->bodyBuf, s->rxBuf + s->headerEnd, bodyInBuf);
+                                    s->bodyReceived = bodyInBuf;
+                                    s->waitingForBody = true;
+                                }
                             }
                         }
                     }

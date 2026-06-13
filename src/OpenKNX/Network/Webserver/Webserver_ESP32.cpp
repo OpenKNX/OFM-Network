@@ -383,7 +383,7 @@ namespace OpenKNX
             request.setRemotePort(remotePort);
 
             // Body lesen (POST/PUT) – bis OPENKNX_WEBSERVER_MAX_BODY
-            std::vector<uint8_t> bodyData;
+            std::vector<uint8_t, PsramAllocator<uint8_t>> bodyData;
             if (req->content_len > 0 && req->content_len <= OPENKNX_WEBSERVER_MAX_BODY)
             {
                 bodyData.resize(req->content_len);
@@ -446,7 +446,12 @@ namespace OpenKNX
                 std::string footer = ws->buildFooter();
 
                 int totalLen = (int)header.length() + response.bodyLength() + (int)footer.length();
-                uint8_t* buffer = new uint8_t[totalLen];
+                uint8_t* buffer = (uint8_t*)PSRAM_MALLOC(totalLen);
+                if (buffer == nullptr)
+                {
+                    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, nullptr);
+                    return ESP_FAIL;
+                }
 
                 int pos = 0;
                 memcpy(buffer + pos, header.c_str(), header.length());
@@ -456,7 +461,7 @@ namespace OpenKNX
                 memcpy(buffer + pos, footer.c_str(), footer.length());
 
                 httpd_resp_send(req, (char*)buffer, totalLen);
-                delete[] buffer;
+                free(buffer);
             }
             else
             {
