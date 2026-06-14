@@ -1,4 +1,4 @@
-#ifdef OPENKNX_WEBFS
+#if defined(OPENKNX_WEBFS) && (defined(KNX_IP_WIFI) || defined(KNX_IP_LAN))
 
 #include "OpenKNX/Network/Webserver/FileManager.h"
 #include "OpenKNX/Network/Module.h"
