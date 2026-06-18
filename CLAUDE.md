@@ -113,6 +113,7 @@ OPENKNX_WEBSERVER_MAX_BODY   – max POST body: 4 KB (RP2040), 32 KB (ESP32)
 OPENKNX_WEBSOCKET_MAX        – ESP32 only: max concurrent WebSocket connections (default 3, excess → HTTP 503)
 OPENKNX_WEBSERVER_MAX_CONN   – RP2040 only: total webserver connection slots, shared HTTP+WS (default 3); raising requires more lwIP PCBs
 OPENKNX_WEBSOCKET_RX_CAP     – per-WebSocket RX cap bytes (ESP32 accumulation buffer default 2048, overflow → disconnect; RP2040 payload buffer default 512, overflow → truncate)
+OPENKNX_WEBMONITOR         – enable /groupmonitor page + WS telegram stream (requires WEBSERVER; TP only, gated on MASK_VERSION == 0x07B0)
 HAS_USB                      – enable USB-Exchange support (RP2040)
 OPENKNX_MQTT                 – enable MQTT client/broker
 OPENKNX_MQTT_STATUS_TIME     – status publish interval ms (default 10000)
@@ -175,6 +176,8 @@ erase wifi                     Delete WiFi credentials (KNX_IP_WIFI only)
 | POST | `/filemanager/upload` | `WEBFS` | Chunked file upload |
 | POST | `/filemanager/delete` | `WEBFS` | Delete file |
 | POST | `/filemanager/mkdir` | `WEBFS` | Create directory |
+| GET | `/groupmonitor` | `GROUPMONITOR` | KNX group monitor UI (TP only) |
+| WS | `/groupmonitor` | `GROUPMONITOR` | Live telegram stream (read-only) |
 
 Wildcard routing supported: `/path/*` matches all sub-paths.
 
@@ -215,6 +218,16 @@ Callbacks (`onAccept`, `onRecv`, `onSent`, `onPoll`, `onErr`) must not block. `M
 
 ### Web UI Console
 No automatic reconnect — on disconnect shows `[Connection lost — reload page]`. ANSI colors → CSS classes via `ansiToHtml()`. Commands as WS text frames (opcode 0x01).
+
+### Group Monitor (`OPENKNX_WEBMONITOR`, TP only)
+`GroupMonitor` (`src/OpenKNX/Network/Webserver/GroupMonitor.{h,cpp}`) — live KNX telegram viewer, ETS-style. Read-only. Gated on `MASK_VERSION == 0x07B0` (device with TP connection).
+- Taps **all** bus frames in parallel, bypassing the KNX stack, via `knx.bau().getDataLinkLayer()->getTPUart().registerReceivedFrame(...)` (same hook the MQTT raw-frame publish uses). Callback runs in loop context.
+- **No own ring buffer / no `loop()`**: the frame callback decodes the `TPUart::Frame` (source IA, dest GA, group flag, APCI type Read/Write/Response, payload hex, TX/repeat flags) into compact JSON and broadcasts it directly via `webserver.sendWebsocketMessage("/groupmonitor", json)`. Slow-client drop is handled by the WS layer; new clients see telegrams from connect-time on (no backlog).
+- Assets `/assets/groupmonitor.css` + `.js` served via `Static()` and registered with `addStylesheet()`/`addJavaScript()`; client-side timestamp, autoscroll/pause/clear, 1000-row cap.
+- **Name/Value/DPT columns** from optional `/openknx_ga.tsv` (LittleFS, tab-separated: `ga\tdpt\tsubset\thauptgruppe\tmittelgruppe\tname`). Split of concerns:
+  - **Backend** `GATable` (`src/OpenKNX/Network/GATable.{h,cpp}`, member `openknxNetwork.gatable`) loads the TSV once at setup into a compact POD index `addr → (dpt, sub)` (4 B/GA, sorted, binary search; PSRAM via `PsramAllocator` when available). **No strings in the index.** `getDpt(addr, dpt, sub)` is O(log n), no I/O. Same table is reusable by MQTT.
+  - **Value** is decoded in `onFrame()` for Write/Response telegrams via the already-linked knx-stack `KNX_Decode_Value()` (`<knx/dptconvert.h>`) into a stack buffer (no heap), formatted for DPT 1/5/6/7/8/9/12/13/14/16/17/18 (5.001 → `%`). Sent as `val`; `dpt` as `"m.sss"`; numeric GA as `addr`.
+  - **Names** are **not** held in the backend — the browser fetches the TSV itself (`/filemanager/download?path=%2Fopenknx_ga.tsv`) and maps `addr → name` client-side. File absent → Name/Value/DPT show `-`, no crash.
 
 ---
 

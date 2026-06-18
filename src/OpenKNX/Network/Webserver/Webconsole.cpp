@@ -14,7 +14,7 @@ namespace OpenKNX
 
         void Webconsole::setup()
         {
-            openknxNetwork.webserver.addMenuItem("Konsole", "/console", 100);
+            openknxNetwork.webserver.addMenuItem("Gerätekonsole", "/console", 100);
 
             openknxNetwork.webserver.addRoute(WEB_GET, "/console",
                                               [](WebRequest&, WebResponse& res) {
@@ -76,39 +76,43 @@ namespace OpenKNX
             openknxNetwork.webserver.addSocket("/console", [this](int clientId, WebSocketFrame* f) {
                     // Queue command for loop() — avoids running processCommand() inside
                     // a network callback (lwIP on RP2040, httpd task on ESP32).
-                    if (f->length > 0)
+                    // Ein leeres Frame (length == 0) = blankes Enter: wird ebenfalls
+                    // übernommen, damit der Server eine Leerzeile ausgibt.
+                    bool valid = true;
+                    for (int i = 0; i < f->length; i++)
                     {
-                        bool valid = true;
-                        for (int i = 0; i < f->length; i++)
+                        uint8_t c = f->data[i];
+                        if ((c < 0x20 || c > 0x7E) && c != '\r' && c != '\n' && c != '\t')
                         {
-                            uint8_t c = f->data[i];
-                            if ((c < 0x20 || c > 0x7E) && c != '\r' && c != '\n' && c != '\t')
-                            {
-                                valid = false;
-                                break;
-                            }
+                            valid = false;
+                            break;
                         }
-                        if (valid)
-                        {
-                            size_t len = (f->length < (int)sizeof(_pendingCmd) - 1)
-                                             ? (size_t)f->length
-                                             : sizeof(_pendingCmd) - 1;
-                            memcpy(_pendingCmd, f->data, len);
-                            _pendingCmd[len] = '\0';
-                        }
+                    }
+                    if (valid)
+                    {
+                        size_t len = (f->length < (int)sizeof(_pendingCmd) - 1)
+                                         ? (size_t)f->length
+                                         : sizeof(_pendingCmd) - 1;
+                        memcpy(_pendingCmd, f->data, len);
+                        _pendingCmd[len] = '\0';
+                        _hasPendingCmd = true;
                     } }, nullptr);
         }
 
         void Webconsole::loop()
         {
             // Execute queued console command from the safe loop-task context.
-            if (_pendingCmd[0] != '\0')
+            if (_hasPendingCmd)
             {
                 char cmd[sizeof(_pendingCmd)];
                 memcpy(cmd, _pendingCmd, sizeof(cmd));
                 _pendingCmd[0] = '\0';
+                _hasPendingCmd = false;
+                // Echo der Eingabe via Logger → Serial + alle Webconsole-Clients.
+                // Auch ein leerer Befehl wird geloggt und erzeugt so eine Leerzeile.
                 openknx.logger.log(cmd);
-                openknx.console.processCommand(cmd);
+                if (cmd[0] != '\0')
+                    openknx.console.processCommand(cmd);
             }
 
             std::vector<int> clients = openknxNetwork.webserver.connectedClientFds("/console");

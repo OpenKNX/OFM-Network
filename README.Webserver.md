@@ -13,9 +13,11 @@ OPENKNX_WEBCONSOLE_BUFFER   – Total size of the log ring buffer in bytes (defa
 OPENKNX_WEBSOCKET_MAX       – ESP32 only: max concurrent WebSocket connections (default 3, excess → HTTP 503)
 OPENKNX_WEBSERVER_MAX_CONN  – RP2040 only: total webserver connection slots, shared HTTP+WS (default 3); raising requires more lwIP PCBs
 OPENKNX_WEBSOCKET_RX_CAP    – Per-WS RX cap in bytes (ESP32 accumulation buffer default 2048, overflow → disconnect; RP2040 payload buffer default 512, overflow → truncate)
+OPENKNX_WEBMONITOR        – /groupmonitor page, WS /groupmonitor, live KNX telegram stream (TP only, MASK_VERSION == 0x07B0)
 ```
 
 `OPENKNX_WEBCONSOLE` requires `OPENKNX_WEBSERVER`.  
+`OPENKNX_WEBMONITOR` requires `OPENKNX_WEBSERVER` and a device with TP connection (`MASK_VERSION == 0x07B0`); on other masks the feature compiles to nothing.  
 Without `OPENKNX_WEBSERVER` no webserver code is compiled at all.
 
 ---
@@ -225,6 +227,7 @@ The data is not copied into RAM, saving memory — especially on RP2040 with lim
 |-----|------|---------|
 | `/` | `OPENKNX_WEBSERVER` | Overview: device, firmware, network, uptime, versions |
 | `/console` | `OPENKNX_WEBCONSOLE` | WebSocket terminal — mirrors the serial logger |
+| `/groupmonitor` | `OPENKNX_WEBMONITOR` | Live KNX group/telegram monitor (TP only) |
 | `/assets/logo/black.svg` | `OPENKNX_WEBSERVER` | OpenKNX logo (inline SVG) |
 
 ### Console Page (`OPENKNX_WEBCONSOLE`)
@@ -241,3 +244,20 @@ The data is not copied into RAM, saving memory — especially on RP2040 with lim
 
 - New clients receive log lines from the moment of connection onward (no backlog)
 - Commands can be sent as text frames; only printable ASCII (`0x20–0x7E`, `\r\n\t`) is accepted
+
+### Group Monitor Page (`OPENKNX_WEBMONITOR`, TP only)
+
+ETS-style live view of all KNX telegrams on the TP bus. Read-only — no telegrams can be sent.
+
+- Taps **every** received frame in parallel, bypassing the KNX stack, via the TP-UART `registerReceivedFrame` hook (the same mechanism MQTT raw-frame publishing uses). No filtering — group and individual addressed frames, transmitted and repeated frames are all shown.
+- Each telegram is decoded to a table row: arrival time (client-side), flags, source individual address, destination address, APCI type (`Read` / `Write` / `Response` for group telegrams), **name**, **value**, **DPT**, raw payload as hex, and payload length. Flags are the 9-char string from the TP-UART (`T`=transmitted, `D`=addressed, `I`=invalid, `E`=extended, `R`=repeated, `F`=filtered, `B`=busy, `N`=nack, `A`=ack), `_` where not set.
+- The device decodes each `TPUart::Frame` and broadcasts it as compact JSON over the `/groupmonitor` WebSocket; the browser renders the rows. New clients see only telegrams arriving after connect (no backlog). Toolbar offers autoscroll, a Start/Stop recording toggle, clear, and a Busmonitor switch (puts the TP-UART into bus-monitor mode — telegrams are no longer processed; deactivating does a TP reset). The table is capped at 1000 rows.
+
+#### Name, Value and DPT — optional `/openknx_ga.tsv`
+
+Name, value and DPT come from an optional tab-separated file `/openknx_ga.tsv` on LittleFS (columns `ga`, `dpt`, `subset`, `hauptgruppe`, `mittelgruppe`, `name`; first line is a header). It is the same export an ETS group-address dump produces. Upload it via the File Manager. The work is split to keep the device's RAM footprint minimal:
+
+- **Value and DPT (backend):** at startup the device loads the TSV into a compact in-RAM table `GA → (DPT, subtype)` (4 bytes per GA, no strings; `openknxNetwork.gatable`). For each Write/Response telegram it decodes the payload with the KNX stack's own DPT converter and sends the formatted value plus the DPT. Supported value types: DPT 1, 5 (5.001 as `%`), 6, 7, 8, 9, 12, 13, 14, 16, 17, 18; other DPTs show the raw hex only.
+- **Names (browser):** the page loads the TSV itself once and resolves names client-side, so the device never has to hold the (arbitrarily long) name strings in RAM.
+- If the file is missing, Name/Value/DPT simply show `-` and everything else keeps working.
+- Only available on devices with a TP connection (`MASK_VERSION == 0x07B0`); on other masks the page and its WebSocket are not registered.

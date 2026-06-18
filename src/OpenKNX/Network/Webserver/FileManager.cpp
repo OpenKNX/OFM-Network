@@ -1,4 +1,4 @@
-#ifdef OPENKNX_WEBFS
+#if defined(OPENKNX_WEBFS) && (defined(KNX_IP_WIFI) || defined(KNX_IP_LAN))
 
 #include "OpenKNX/Network/Webserver/FileManager.h"
 #include "OpenKNX/Network/Module.h"
@@ -167,7 +167,7 @@ namespace OpenKNX
         {
             ensureFs();
 
-            openknxNetwork.webserver.addMenuItem("Dateien", "/filemanager", 50);
+            openknxNetwork.webserver.addMenuItem("Dateimanager", "/filemanager", 50);
 
             openknxNetwork.webserver.addRoute(WEB_GET, "/assets/filemanager.css",
                                               Webserver::Static("text/css", filemanagerCss));
