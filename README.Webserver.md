@@ -217,7 +217,14 @@ class WebResponse {
 
 **Note:** `sendStatic()` must only be called with pointers to static data that remain valid for the entire
 application lifetime. Ideal for embedded assets (CSS, SVG, HTML templates) declared as `static const char[]`.
-The data is not copied into RAM, saving memory — especially on RP2040 with limited RAM.
+The data is not copied into RAM, saving memory — especially on RP2040 with limited RAM. On RP2040 the static
+body is handed to lwIP **zero-copy** (`tcp_write` without `TCP_WRITE_FLAG_COPY`): lwIP keeps a `PBUF_REF` to the
+flash data until ACK instead of copying it into the pbuf pool — which is why the pointer must stay valid for the
+whole application lifetime.
+
+**Note on `setLayout(true)`:** when layout is active, header, body and footer are concatenated into a single
+heap buffer before sending. For large static pages this means one allocation of the full page size; the
+zero-copy optimisation only applies when layout is disabled.
 
 ---
 

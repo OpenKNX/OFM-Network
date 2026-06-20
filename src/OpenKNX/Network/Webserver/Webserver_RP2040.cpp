@@ -168,9 +168,9 @@ namespace OpenKNX
             int toWrite = remaining < canWrite ? remaining : canWrite;
             if (toWrite <= 0) return;
 
-            tcp_write(s->pcb, s->txData + s->txSent, (u16_t)toWrite, TCP_WRITE_FLAG_COPY);
+            if (tcp_write(s->pcb, s->txData + s->txSent, (u16_t)toWrite, TCP_WRITE_FLAG_COPY) == ERR_OK)
+                s->txSent += toWrite; // only advance on success — ERR_MEM retries from onSent
             tcp_output(s->pcb);
-            s->txSent += toWrite;
         }
 
         // Streaming-Download: liest Chunks aus LittleFS und schreibt sie via TCP.
