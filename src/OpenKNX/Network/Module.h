@@ -97,6 +97,10 @@ namespace OpenKNX
 
 #ifdef HAS_USB
             void fillNetworkFile(UsbExchangeFile *file);
+#ifdef KNX_IP_WIFI
+            void fillWifiFile(UsbExchangeFile *file);
+            bool readWifiFile(UsbExchangeFile *file);
+#endif
 #endif
 
             void registerCallback(NetworkChangeCallback callback);
