@@ -1,4 +1,5 @@
 #if defined(KNX_IP_WIFI) || defined(KNX_IP_LAN)
+#include <algorithm>
 #include <ArduinoOTA.h>
 #include <iostream>
 #include <sstream>
@@ -418,6 +419,56 @@ namespace OpenKNX
                 // writeLineToFile(file, "Mode: %s", phyMode().c_str()); Currently not supported
             }
         }
+
+#ifdef KNX_IP_WIFI
+        void Module::fillWifiFile(UsbExchangeFile *file)
+        {
+            writeLineToFile(file, "SSID");
+            writeLineToFile(file, "Password");
+        }
+
+        static std::string trimString(const std::string &str)
+        {
+            auto start = std::find_if_not(str.begin(), str.end(), ::isspace);
+            auto end = std::find_if_not(str.rbegin(), str.rend(), ::isspace).base();
+            return (start < end ? std::string(start, end) : "");
+        }
+
+        bool Module::readWifiFile(UsbExchangeFile *file)
+        {
+            openknx.watchdog.loop();
+            std::string ssid;
+            std::string password;
+
+            char tmp[100] = {};
+            if (file->fgets(tmp, 99) > 0) ssid = tmp;
+
+            memset(tmp, 0x0, 100);
+            if (file->fgets(tmp, 99) > 0) password = tmp;
+
+            ssid = trimString(ssid);
+            password = trimString(password);
+
+            logInfoP("Read Wifi settings from Wifi.txt");
+            logIndentUp();
+            if (ssid.length() == 0 || ssid.length() > 32 || ssid == "SSID")
+            {
+                logErrorP("SSID is invalid");
+                return false;
+            }
+            if (password.length() == 0 || password.length() > 63)
+            {
+                logErrorP("Password is invalid");
+                return false;
+            }
+
+            logInfoP("SSID: %s", ssid.c_str());
+            logIndentDown();
+
+            saveWifiSettings(ssid.c_str(), password.c_str(), true);
+            return true;
+        }
+#endif
 #endif
 
         void Module::checkIpStatus()
