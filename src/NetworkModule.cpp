@@ -270,6 +270,22 @@ void NetworkModule::initIp()
     else
         KNX_NETIF.begin();
 #else
+    // ETH link mode: auto-negotiation by default. Optional build flags force a FIXED speed (autoneg
+    // OFF) as a workaround for cheap/unmanaged switches that flap on 100M autoneg with the W5500;
+    // not needed on a proper switch. Applied before begin(); half-duplex is the safe default.
+    //   -D OPENKNX_ETH_FORCE_SPEED=10     (10 or 100 Mbit; enables the fixed mode)
+    //   -D OPENKNX_ETH_FORCE_FULLDUPLEX   (optional; default = half-duplex)
+#if defined(KNX_IP_LAN) && defined(OPENKNX_ETH_FORCE_SPEED)
+  #ifdef OPENKNX_ETH_FORCE_FULLDUPLEX
+    const bool _ethForceFull = true;
+  #else
+    const bool _ethForceFull = false;
+  #endif
+    logInfoP("ETH: forcing fixed link %d Mbit %s-duplex (autoneg off)", (int)(OPENKNX_ETH_FORCE_SPEED), _ethForceFull ? "full" : "half");
+    KNX_NETIF.setAutoNegotiation(false);
+    KNX_NETIF.setLinkSpeed(OPENKNX_ETH_FORCE_SPEED);
+    KNX_NETIF.setFullDuplex(_ethForceFull);
+#endif
     KNX_NETIF.begin();
     KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP); // Stupid: Nedd to be after begin an also DHCP!
 #endif

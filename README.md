@@ -19,7 +19,23 @@ This module provides the network functionality for the OpenKNX stack.
 
 | Define         | Default  | Description           | Note                                    |
 |----------------|----------|-----------------------|-----------------------------------------|
-| OPENKNX_LED_IP |          | used LED for IP state | set to info2Led to use IP LED feature   |  
+| OPENKNX_LED_IP |          | used LED for IP state | set to info2Led to use IP LED feature   |
+| OPENKNX_ETH_FORCE_SPEED      | (off) | force fixed ETH link speed (10/100)  | ESP32 + KNX_IP_LAN (W5500), autoneg off; opt-in — see "ETH link speed" |
+| OPENKNX_ETH_FORCE_FULLDUPLEX | half  | full-duplex when forcing speed       | optional; only with OPENKNX_ETH_FORCE_SPEED                            |  
+
+## ETH link speed (opt-in, ESP32 + W5500 LAN)
+
+By default the ETH PHY uses auto-negotiation. Two optional build flags force a fixed link
+speed with auto-negotiation off — a workaround for cheap/unmanaged switches that don't hold
+100 Mbit auto-negotiation with the W5500 (link flapping). Not needed on a proper switch.
+Applied before `begin()`; half-duplex is the safe default (an autoneg switch picks HALF via
+parallel detection, so forcing FULL would cause a duplex mismatch). 10 Mbit is plenty for KNX-IP.
+
+```ini
+build_flags =
+  -D OPENKNX_ETH_FORCE_SPEED=10      ; 10 or 100 Mbit; enables the fixed mode (autoneg off)
+  -D OPENKNX_ETH_FORCE_FULLDUPLEX    ; optional; without it = half-duplex
+```
 
 ## IP LED
 
