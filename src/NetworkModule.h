@@ -119,6 +119,7 @@ class NetworkModule : public OpenKNX::Module
     IPAddress _staticSubnetMask;
     IPAddress _staticGatewayIP;
     IPAddress _staticNameServerIP;
+    IPAddress _boundIp; // last IP the KNX multicast socket was bound to (rebind only on change)
 
 #ifdef ARDUINO_ARCH_ESP32
     bool espConnected = false;

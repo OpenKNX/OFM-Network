@@ -169,6 +169,9 @@ void NetworkModule::loadSettings()
             length = 0; // will update by write
             knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, elements, 1, friendlyNameWrite, 0);
         }
+        // propertyValueRead() allocated friendlyNameRead via new[] -> free it.
+        if (friendlyNameRead != nullptr)
+            delete[] friendlyNameRead;
     }
 
     if (_useStaticIP)
@@ -236,8 +239,22 @@ void NetworkModule::esp32NetworkEvent(CALLBACK_EVENT event)
             break;
         case ARDUINO_EVENT_ETH_GOT_IP:
         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+        {
+            IPAddress ip = localIP();
             logDebugP("Event: Got IP");
-            controlKnxIp(true);
+            // Rebind multicast only on real IP change (avoid heap churn on lease renew).
+            if (ip != _boundIp)
+            {
+                controlKnxIp(false);
+                controlKnxIp(true);
+                _boundIp = ip;
+            }
+            break;
+        }
+        case ARDUINO_EVENT_ETH_LOST_IP:
+        case ARDUINO_EVENT_WIFI_STA_LOST_IP:
+            logDebugP("Event: Lost IP");
+            controlKnxIp(false);
             break;
         case ARDUINO_EVENT_ETH_DISCONNECTED:
         case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
@@ -443,6 +460,11 @@ void NetworkModule::checkLinkStatus()
 
     // Get current network state
     bool establishedState = established();
+
+    // Keep KNX-IP datalink in lockstep with link/IP (idempotent). Recovers the
+    // case where GOT_IP doesn't re-fire after a link flap -> datalink stuck off.
+    controlKnxIp(establishedState);
+
     bool newLinkState;
     if (establishedState)
         newLinkState = true;
