@@ -1,7 +1,6 @@
 #if defined(KNX_IP_WIFI) || defined(KNX_IP_LAN)
 #include <ArduinoOTA.h>
-#include <iostream>
-#include <sstream>
+#include <string>
 
 #include "ModuleVersionCheck.h"
 #include "NetworkModule.h"
@@ -69,6 +68,16 @@ void NetworkModule::resetNetwork()
     logIndentUp();
     controlKnxIp(false);
 
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+    _ethLink.resetLink(); // bounce the W5500 PHY (like a cable re-plug): no reboot, no driver end()/begin()
+    logIndentDown();
+    return;
+#endif
+
+#if defined(ARDUINO_ARCH_ESP32) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_AUTO_FALLBACK)
+    _ethLink.resetLadder(); // restart the auto-fallback search (the re-init below re-links at autoneg)
+#endif
+
 #if defined(KNX_IP_WIFI) && defined(ARDUINO_ARCH_ESP32)
     KNX_NETIF.disconnect(true, true);
     KNX_NETIF.mode(WIFI_OFF);
@@ -97,7 +106,7 @@ void NetworkModule::initPhy()
 #endif
 
 #if defined(ETH_SPI_INTERFACE)
-    // initalize SPI
+    // initialize SPI
     ETH_SPI_INTERFACE.setRX(PIN_ETH_MISO);
     ETH_SPI_INTERFACE.setTX(PIN_ETH_MOSI);
     ETH_SPI_INTERFACE.setSCK(PIN_ETH_SCK);
@@ -270,24 +279,15 @@ void NetworkModule::initIp()
     else
         KNX_NETIF.begin();
 #else
-    // ETH link mode: auto-negotiation by default. Optional build flags force a FIXED speed (autoneg
-    // OFF) as a workaround for cheap/unmanaged switches that flap on 100M autoneg with the W5500;
-    // not needed on a proper switch. Applied before begin(); half-duplex is the safe default.
-    //   -D OPENKNX_ETH_FORCE_SPEED=10     (10 or 100 Mbit; enables the fixed mode)
-    //   -D OPENKNX_ETH_FORCE_FULLDUPLEX   (optional; default = half-duplex)
-#if defined(KNX_IP_LAN) && defined(OPENKNX_ETH_FORCE_SPEED)
-  #ifdef OPENKNX_ETH_FORCE_FULLDUPLEX
-    const bool _ethForceFull = true;
-  #else
-    const bool _ethForceFull = false;
-  #endif
-    logInfoP("ETH: forcing fixed link %d Mbit %s-duplex (autoneg off)", (int)(OPENKNX_ETH_FORCE_SPEED), _ethForceFull ? "full" : "half");
-    KNX_NETIF.setAutoNegotiation(false);
-    KNX_NETIF.setLinkSpeed(OPENKNX_ETH_FORCE_SPEED);
-    KNX_NETIF.setFullDuplex(_ethForceFull);
+    // ETH link mode: auto-negotiation by default. A fixed speed can be forced (autoneg off) either at
+    // build time (-D OPENKNX_ETH_FORCE_SPEED=10|100 [+ -D OPENKNX_ETH_FORCE_FULLDUPLEX]) or at runtime
+    // via the console (`net eth 10|100 [half|full]`, persisted in NVS). Must run before begin().
+    // Workaround for cheap/unmanaged switches that flap on 100M autoneg with the W5500.
+#if defined(KNX_IP_LAN)
+    _ethLink.applyBeforeBegin();
 #endif
     KNX_NETIF.begin();
-    KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP); // Stupid: Nedd to be after begin an also DHCP!
+    KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP); // must run after begin(): applies to the started interface (a static IP here also disables DHCP)
 #endif
 
 #elif ARDUINO_ARCH_RP2040
@@ -320,8 +320,9 @@ void NetworkModule::setup(bool configured)
 #ifdef HAS_USB
     openknxUsbExchangeModule.onLoad("Network.txt", [this](UsbExchangeFile *file) { this->fillNetworkFile(file); });
 #ifdef KNX_IP_WIFI
-    openknxUsbExchangeModule.onLoad("Wifi.txt", [this](UsbExchangeFile *file) { this->fillWifiFile(file); });
-    openknxUsbExchangeModule.onEject("Wifi.txt", [this](UsbExchangeFile *file) { return this->readWifiFile(file); });
+    // TODO: USB Wifi.txt provisioning not implemented (fillWifiFile/readWifiFile don't exist) -> would break RP2040 WiFi builds
+    // openknxUsbExchangeModule.onLoad("Wifi.txt", [this](UsbExchangeFile *file) { this->fillWifiFile(file); });
+    // openknxUsbExchangeModule.onEject("Wifi.txt", [this](UsbExchangeFile *file) { return this->readWifiFile(file); });
 #endif
 #endif
 
@@ -355,10 +356,10 @@ void NetworkModule::setup(bool configured)
     }
 
 #ifdef ParamNET_NTP
-        if (ParamNET_NTP)
-        {
-            openknx.time.setTimeProvider(new NtpTimeProvider());
-        }
+    if (ParamNET_NTP)
+    {
+        openknx.time.setTimeProvider(new NtpTimeProvider());
+    }
 #endif
 
 #ifdef ARDUINO_ARCH_ESP32
@@ -394,7 +395,7 @@ void NetworkModule::setup(bool configured)
         if (error == OTA_AUTH_ERROR)
             logError("OTA", "Auth error");
         else if (error == OTA_BEGIN_ERROR)
-            logErrorP("OTA", "Begin error");
+            logError("OTA", "Begin error");
         else if (error == OTA_CONNECT_ERROR)
             logError("OTA", "Connect error");
         else if (error == OTA_RECEIVE_ERROR)
@@ -420,14 +421,23 @@ void NetworkModule::fillNetworkFile(UsbExchangeFile *file)
         writeLineToFile(file, "Netmask: %s", subnetMask().toString().c_str());
         writeLineToFile(file, "Gateway: %s", gatewayIP().toString().c_str());
         writeLineToFile(file, "DNS: %s", nameServerIP().toString().c_str());
-        // writeLineToFile(file, "Mode: %s", phyMode().c_str()); Currently not supported
     }
 }
 #endif
 
+// Only announce the connection once it has been stable this long, so a flapping link (e.g. during the
+// ETH auto-fallback search) does not spam "Network established" + IP info on every brief reconnect.
+static constexpr uint32_t NET_INFO_STABLE_MS = 3000;
+
 void NetworkModule::checkIpStatus()
 {
     if (_ipShown || !established()) return;
+
+    // Debounce: wait until the link has genuinely held before printing, instead of on every brief
+    // establish during flapping. Shown a few seconds after a stable connect - not only when locked.
+    if (_ipStableSince == 0) _ipStableSince = millis();
+    if ((uint32_t)(millis() - _ipStableSince) < NET_INFO_STABLE_MS) return;
+
     logBegin();
     logInfoP("Network established");
     logIndentUp();
@@ -498,35 +508,23 @@ void NetworkModule::checkLinkStatus()
     if (newLinkState && !_currentLinkState)
     {
         logInfoP("Link connected");
-        // #if defined(KNX_IP_W5500)
-        // ethernet_arch_lwip_begin();
-        // netif_set_link_up(KNX_NETIF.getNetIf());
-        // if (_useStaticIP)
-        // netif_set_ipaddr(KNX_NETIF.getNetIf(), _staticLocalIP);
-        // else
-        // dhcp_network_changed_link_up(KNX_NETIF.getNetIf());
-        // ethernet_arch_lwip_end();
-        // #elif defined(KNX_IP_GENERIC)
-        //     if (!established()) KNX_NETIF.maintain();
-        // #endif
     }
 
     // lost link
     else if (!newLinkState && _currentLinkState)
     {
         _ipShown = false;
-#if defined(KNX_IP_W5500)
-        // ethernet_arch_lwip_begin();
-        // netif_set_ipaddr(KNX_NETIF.getNetIf(), 0);
-        // netif_set_link_down(KNX_NETIF.getNetIf());
-        // ethernet_arch_lwip_end();
-#endif
+        _ipStableSince = 0; // restart the establish debounce on link loss
         loadCallbacks(false);
         logInfoP("Link disconnected");
     }
 
     _currentLinkState = newLinkState;
     _lastLinkCheck = millis();
+
+#if defined(KNX_IP_LAN) && (defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32)) && defined(OPENKNX_ETH_AUTO_FALLBACK)
+    _ethLink.tick(newLinkState, establishedState);
+#endif
 
     if (_currentLinkState) checkIpStatus();
 
@@ -647,104 +645,8 @@ void NetworkModule::showInformations()
 
 bool NetworkModule::processCommand(const std::string cmd, bool debugKo)
 {
-    if (debugKo) return false;
-
-    if (!debugKo && (cmd == "n" || cmd == "net"))
-    {
-        showNetworkInformations(true);
-        return true;
-    }
-
-#if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
-    else if (cmd == "net mc")
-    {
-        IPAddress address = GetIpProperty(PID_ROUTING_MULTICAST_ADDRESS);
-        openknx.logger.logWithPrefixAndValues("Network", "Multicast address is set to %s", address.toString().c_str());
-        return true;
-    }
-
-    else if (cmd.compare(0, 7, "net mc ") == 0)
-    {
-        IPAddress new_address;
-        std::string new_address_str = cmd.length() >= 7 ? cmd.substr(7) : "reset";
-
-        if (new_address_str == "reset") new_address_str = "0.0.0.0";
-
-        new_address.fromString(new_address_str.c_str());
-
-        setMulticastAddress(new_address, true);
-        return true;
-    }
-#endif
-
-    else if (cmd == "net reset")
-    {
-        resetNetwork();
-        return true;
-    }
-
-#ifdef KNX_IP_WIFI
-    else if (cmd == "erase wifi")
-    {
-        saveWifiSettings("", "", true); // triggers the restart timer
-        logInfoP("Wifi settings erased");
-        return true;
-    }
-    else if (cmd.compare(0, 4, "wifi") == 0 && cmd.length() > 6)
-    {
-        // Command: "wifi<SEP><ssid><SEP><psk>" with <SEP>=" " compatible to previous command
-        char delimiter = cmd[4];
-        std::string ssid_psk = cmd.substr(5);
-        size_t pos = ssid_psk.find(delimiter);
-
-        if (pos != std::string::npos)
-        {
-            std::string ssid = ssid_psk.substr(0, pos);
-            std::string psk = ssid_psk.substr(pos + 1);
-
-            if (ssid.empty())
-                logInfoP("Wifi settings erased");
-            else
-                logInfoP("WLAN SSID: %s", ssid.c_str());
-            saveWifiSettings(ssid.c_str(), psk.c_str(), true); // triggers the restart timer
-
-            return true;
-        }
-        else
-        {
-            logErrorP("Expected format: wifi<Sep><SSID><Sep><PSK> with <Sep> single char not in <SSID>");
-            return false;
-        }
-    }
-
-// else if (cmd == "net recon" && strlen(_wifiSSID) > 0)
-// {
-//     logInfoP("Connecting to WiFi \"%s\"", _wifiSSID);
-//     KNX_NETIF.disconnect();
-//     KNX_NETIF.begin(_wifiSSID, _wifiPassphrase);
-//     return true;
-// }
-// #else
-// else if (!_useStaticIP && cmd == "net renew")
-// {
-//     if (!connected())
-//     {
-//         logErrorP("not connected");
-//         return true;
-//     }
-
-//     #ifdef KNX_IP_GENERIC
-//     KNX_NETIF.maintain();
-//     #elif defined(ARDUINO_ARCH_ESP32)
-//             // TODO
-//     #else
-//     dhcp_renew(KNX_NETIF.getNetIf());
-//     #endif
-//     return true;
-// }
-#endif
-
-    return false;
+    // Console command handling lives in NetworkConsole (see NetworkConsole.{h,cpp}).
+    return _console.processCommand(cmd, debugKo);
 }
 
 #if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
@@ -781,7 +683,9 @@ void NetworkModule::showNetworkInformations(bool console)
         logInfoP("Netmask: %s", subnetMask().toString().c_str());
         logInfoP("Gateway: %s", gatewayIP().toString().c_str());
         logInfoP("DNS: %s", nameServerIP().toString().c_str());
-        // logInfoP("Mode: %s", phyMode().c_str()); currently not supported
+#ifdef KNX_IP_LAN
+        _ethLink.logLinkInfo(); // "ETH link: X Mbit Y-duplex (fixed/auto)"
+#endif
 
 #ifdef KNX_IP_WIFI
         std::string wifiInfo = std::string(_wifiSSID) + " (" + std::to_string(KNX_NETIF.RSSI()) + "dBm)";
@@ -798,22 +702,18 @@ void NetworkModule::showNetworkInformations(bool console)
 
 void NetworkModule::showHelp()
 {
-    openknx.console.printHelpLine("net, n", "Show network informations");
-
-#ifdef KNX_IP_WIFI
-
-    openknx.console.printHelpLine("wifi SSID PSK", "Set SSID and PSK");
-    openknx.console.printHelpLine("erase wifi", "Erase WiFi settings");
-
-// if (strlen(_wifiSSID) > 0) openknx.console.printHelpLine("net recon", "Reconnect to network");
-#else
-// if (!_useStaticIP) openknx.console.printHelpLine("net renew", "Renew DHCP Address");
-#endif
-#if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
-    // openknx.console.printHelpLine("net mc [address|reset]", "Get/Set multicast address");
-#endif
-    openknx.console.printHelpLine("net reset", "Reset network adapter");
+    // Keep the general help compact; the detailed command list is printed by 'net ?'
+    // (see NetworkConsole::showSubHelp()).
+    openknx.console.printHelpLine("net, n", "Network info & commands (see 'net ? / n ?')");
 }
+
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+// OpenKNX::Module hooks - forwarded to the EthLinkManager (RP2040 persists the manual fixed mode in flash).
+void NetworkModule::processAfterStartupDelay() { _ethLink.onStartupDelay(); }
+uint16_t NetworkModule::flashSize() { return _ethLink.flashSize(); }
+void NetworkModule::writeFlash() { _ethLink.writeFlash(); }
+void NetworkModule::readFlash(const uint8_t *data, const uint16_t size) { _ethLink.readFlash(data, size); }
+#endif
 
 // Link status
 bool NetworkModule::connected()
