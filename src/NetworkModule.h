@@ -1,9 +1,10 @@
 #if defined(KNX_IP_WIFI) || defined(KNX_IP_LAN)
 #pragma once
+#include "NetworkConsole.h"
 #include "OpenKNX.h"
+#include "OpenKNX//Led/FunctionManager.h"
 #include "strings.h"
 #include <functional>
-#include "OpenKNX//Led/FunctionManager.h"
 
 #if defined(ARDUINO_ARCH_ESP32)
 #include <ESPmDNS.h>
@@ -39,14 +40,25 @@
 #include "UsbExchangeModule.h"
 #endif
 
-namespace OpenKNX::Led {
+#include "driver/EthLinkManager.h" // ETH link mode + auto-fallback ladder (self-guarded: W5500 LAN only)
+
+namespace OpenKNX::Led
+{
     extern uint32_t g_ipLedActivity;
 }
 
 typedef std::function<void(bool)> NetworkChangeCallback;
 
+// NetworkConsole owns the console command parsing/help for this module and needs
+// access to a few private members/methods (see friend declaration below).
+class NetworkConsole;
+
 class NetworkModule : public OpenKNX::Module
 {
+    // Console command handling lives in NetworkConsole; grant it access to the
+    // private ETH-link state/methods and the other members it drives.
+    friend class NetworkConsole;
+
   public:
     const std::string name() override;
     const std::string version() override;
@@ -87,7 +99,6 @@ class NetworkModule : public OpenKNX::Module
     void setMulticastAddress(IPAddress address, bool rebootToTakeEffect);
 #endif
 
-
 #ifdef ARDUINO_ARCH_ESP32
     void esp32NetworkEvent(arduino_event_id_t event);
 #endif
@@ -100,12 +111,12 @@ class NetworkModule : public OpenKNX::Module
 
     bool _powerSave = false;
     bool _ipShown = false;
+    uint32_t _ipStableSince = 0; // link-established timestamp; debounces the "established" + IP-info output
     bool _useStaticIP = false;
-    bool _useMDNS = false;
     bool _otaAllowed = false;
     bool _otaHandle = false;
     uint8_t _ipLedState = 0;
-    OpenKNX::Led::FunctionGroup* _ipLedFunc = nullptr;
+    OpenKNX::Led::FunctionGroup *_ipLedFunc = nullptr;
 
 #ifdef ARDUINO_ARCH_ESP32
     const uint16_t _otaPort = 3232;
@@ -127,11 +138,8 @@ class NetworkModule : public OpenKNX::Module
 
     char _hostName[25] = {};
 
-    char *_mDNSHttpServiceName = nullptr;
-    char *_mDNSDeviceServiceName = nullptr;
-    char *_mDNSDeviceServiceNameTXT = nullptr;
     bool _currentLinkState = false;
-    uint32_t _lastLinkCheck = false;
+    uint32_t _lastLinkCheck = 0;
     uint32_t _restartTimer = 0;
 
     void initPhy();
@@ -140,10 +148,23 @@ class NetworkModule : public OpenKNX::Module
     void checkLinkStatus();
     void checkIpStatus();
     void loadCallbacks(bool state);
-    void handleMDNS();
     void handleOTA();
     void controlKnxIp(bool state);
 
+    // ---- ETH link mode control ----
+    // Owned by EthLinkManager (fixed-speed override + auto-fallback ladder), which drives the raw link
+    // drivers in driver/. NetworkModule just forwards its Module hooks + the ~2 Hz link tick to it;
+    // NetworkConsole reaches it as a friend. See driver/EthLinkManager.{h,cpp}.
+#if defined(KNX_IP_LAN) && (defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32))
+    EthLinkManager _ethLink{*this};
+#if defined(ARDUINO_ARCH_RP2040)
+    // OpenKNX::Module persistence + startup-delay hooks (forwarded to _ethLink; RP2040 uses module flash).
+    uint16_t flashSize() override;
+    void writeFlash() override;
+    void readFlash(const uint8_t *data, const uint16_t size) override;
+    void processAfterStartupDelay() override;
+#endif
+#endif
 
 #ifdef KNX_IP_WIFI
     char _wifiSSID[33] = {};
@@ -151,6 +172,9 @@ class NetworkModule : public OpenKNX::Module
 #endif
 
     std::vector<NetworkChangeCallback> _callback;
+
+    // Console command handling is delegated to NetworkConsole (see NetworkConsole.{h,cpp}).
+    NetworkConsole _console{*this};
 };
 
 extern NetworkModule openknxNetwork;
