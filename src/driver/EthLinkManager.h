@@ -36,6 +36,9 @@ class EthLinkManager
 
 #if defined(ARDUINO_ARCH_RP2040)
     void resetLink();      // `net reset`: bounce the W5500 PHY (like a cable re-plug), no reboot
+    // Raw VERSIONR read (0x04 = a present W5500). Used by NetworkModule's W5500 self-heal to classify a
+    // failed begin(): 0x04 => chip present, only socket OPEN not ready (transient); else => no SPI comms.
+    uint8_t chipVersion() { return _phy.chipVersion(); }
     void onStartupDelay(); // Module hook: flash has loaded -> re-apply a persisted fixed mode
     uint16_t flashSize();  // OpenKNX module-flash persistence (manual fixed mode only)
     void writeFlash();
@@ -75,6 +78,9 @@ class EthLinkManager
     uint32_t _settleUntil = 0;                              // ignore flaps until this time (just after a mode change)
     uint32_t _stageDeadline = 0;                            // carrier-up-but-no-IP escalation deadline (0 = arm on first tick)
     uint32_t _lostSince = 0;                                // when a LOCKED link first lost established (0 = not lost); debounces unlock
+    uint8_t _wrapCount = 0;                                 // fruitless full ladder passes (no IP) -> park after the cap
+    bool _resting = false;                                  // parked at the safe fallback speed, waiting for a real cable (quiet)
+    static constexpr uint8_t ETH_MAX_WRAPS = 1;             // after this many fruitless full passes -> rest at 10 Mbit half
 #endif
 };
 #endif

@@ -11,7 +11,7 @@
 // applies LIVE (OPMD + OPMDC + PHY reset), so an auto-fallback can escalate without a reboot.
 //
 // NEEDS HARDWARE VALIDATION (raw SPI to a live driver).
-#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
 #include <Arduino.h>
 #include <SPI.h>
 
@@ -56,4 +56,4 @@ class W5500Phy
     SPIClass *_spi;
     int _cs;
 };
-#endif // ARDUINO_ARCH_RP2040 && KNX_IP_LAN
+#endif // ARDUINO_ARCH_RP2040 && OPENKNX_ETH_W5500

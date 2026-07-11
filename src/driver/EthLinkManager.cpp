@@ -234,6 +234,8 @@ void EthLinkManager::resetLadder()
     _flapCount = 0;
     _lastStableStart = 0;
     _lostSince = 0;
+    _wrapCount = 0;
+    _resting = false;
     _settleUntil = nowMs + ETH_SETTLE_MS;
     _stageDeadline = nowMs + ETH_STAGE_TIMEOUT_MS;
 }
@@ -278,6 +280,9 @@ void EthLinkManager::tick(bool carrierUp, bool established)
 
     if (established)
     {
+        // A real IP link is present -> drop any "no cable" rest state so the ladder fully re-searches.
+        _wrapCount = 0;
+        _resting = false;
         // Real IP connectivity - the only thing that makes a stage "good". A carrier-only stage never gets here.
         if (_lastStableStart == 0) _lastStableStart = now;
         else if ((now - _lastStableStart) >= ETH_STABLE_MS)
@@ -299,14 +304,19 @@ void EthLinkManager::tick(bool carrierUp, bool established)
     else // no working (IP) connection at this stage yet
     {
         _lastStableStart = 0;
+        // Carrier just came up (cable plugged / link back): give this stage a fresh IP window instead of a
+        // stale _stageDeadline (from boot/no-cable) that would escalate the instant the link returns.
+        if (carrierUp && !_prevUp) _stageDeadline = now + ETH_STAGE_TIMEOUT_MS;
         bool escalate = false;
-        if (!carrierUp && _prevUp) // carrier down edge = one flap
+        // While resting (a full ladder pass found no IP -> almost certainly no cable) we stop reacting to the
+        // W5500's spurious carrier flaps, so a cable-less port stays quiet instead of cycling 0->4 forever.
+        if (!_resting && !carrierUp && _prevUp) // carrier down edge = one flap
         {
             ++_flapCount;
             logDebugP("ETH link unstable (%u/%u) at %s", _flapCount, ETH_FLAP_THRESHOLD, ethStageName(_stage));
             if (_flapCount >= ETH_FLAP_THRESHOLD) escalate = true;
         }
-        else if (carrierUp && (int32_t)(now - _stageDeadline) >= 0) // carrier up but no IP in time -> dead stage
+        else if (!_resting && carrierUp && (int32_t)(now - _stageDeadline) >= 0) // carrier up but no IP in time
         {
             logWarningP("%s: carrier up but no IP -> trying next speed", ethStageName(_stage));
             escalate = true;
@@ -315,14 +325,28 @@ void EthLinkManager::tick(bool carrierUp, bool established)
         {
             if (_stage < 4)
                 applyStage(_stage + 1); // escalate live to the next stage
-            else
+            else if (++_wrapCount < ETH_MAX_WRAPS)
             {
                 // Nothing worked this pass -> wrap to auto-negotiation and keep trying (never silently offline).
                 logWarningP("No working link speed found this cycle, retrying from auto-negotiation");
                 applyStage(0);
             }
+            else
+            {
+                // A full pass tried every speed with no IP -> almost certainly NO CABLE. Park at the safest
+                // fixed speed (10 Mbit half) and go quiet; a real cable re-asserts carrier + gets an IP, hits
+                // the established branch above, clears _resting and re-searches. Ends the idle log churn.
+                if (!_resting)
+                {
+                    applyStage(4); // 10 Mbit half-duplex = known-safe rest speed (autoneg is what EEE flaps on)
+                    _resting = true;
+                    logInfoP("No link found (no cable?) -> resting at %s, waiting for cable", ethStageName(4));
+                }
+            }
         }
     }
+    // While parked, keep pushing the escalation deadline so the guarded triggers above never re-fire (quiet idle).
+    if (_resting) _stageDeadline = now + ETH_STAGE_TIMEOUT_MS;
     _prevUp = carrierUp;
 }
 #endif // OPENKNX_ETH_AUTO_FALLBACK

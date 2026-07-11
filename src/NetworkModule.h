@@ -49,6 +49,24 @@ namespace OpenKNX::Led
 
 typedef std::function<void(bool)> NetworkChangeCallback;
 
+// Locally-editable config that can override the ETS/property IP settings. Persisted in the
+// NetworkModule module-flash block. No valid block (fresh flash / size==0) -> defaults below:
+// override inactive, ETS/property behaviour unchanged.
+// linkMode: 0=auto-negotiation, 1=10 Mbit, 2=100 Mbit (matches EthLinkManager::setMode()).
+#ifdef DEVICE_DISPLAY_MODULE // on-device IP override is a DeviceDisplay-menu-only feature (set via the network settings menu)
+struct NetworkLocalOverride
+{
+    bool overrideActive = false; // false -> ignore this block, keep ETS/property config
+    bool useStaticIP = false;    // true -> use ip/subnet/gateway/dns below; false -> DHCP
+    uint8_t ip[4] = {0, 0, 0, 0};
+    uint8_t subnet[4] = {0, 0, 0, 0};
+    uint8_t gateway[4] = {0, 0, 0, 0};
+    uint8_t dns[4] = {0, 0, 0, 0};
+    uint8_t linkMode = 0; // 0=auto, 1=10 Mbit, 2=100 Mbit
+    uint8_t version = 1;  // on-flash format version of this block
+};
+#endif
+
 // NetworkConsole owns the console command parsing/help for this module and needs
 // access to a few private members/methods (see friend declaration below).
 class NetworkConsole;
@@ -79,6 +97,21 @@ class NetworkModule : public OpenKNX::Module
 #ifdef KNX_IP_WIFI
     void saveWifiSettings(const char *ssid, const char *passphrase, bool scheduleRebootToTakeEffect);
     void readWifiSettings();
+#endif
+
+#ifdef DEVICE_DISPLAY_MODULE
+    // Setters only mutate the in-RAM _localOverride; call applyLocalNetworkConfig() afterwards to persist +
+    // apply. Enabling static IP activates the override and pre-fills any still-zero quartet from the live lease.
+    void setLocalStaticIpEnabled(bool enabled);        // true -> static IP from the ip/subnet/gateway/dns setters; false -> DHCP
+    void setLocalIp(IPAddress ip);                      // host address for static IP mode
+    void setLocalSubnet(IPAddress subnet);              // subnet mask for static IP mode
+    void setLocalGateway(IPAddress gateway);            // default gateway for static IP mode
+    void setLocalDns(IPAddress dns);                    // DNS server for static IP mode
+    void applyLocalNetworkConfig(bool rebootToTakeEffect); // persist + apply (live re-init or planned reboot)
+    bool localOverrideActive();                         // true while the local override supersedes ETS/property config
+    // Currently intended IP mode: the override's useStaticIP when active, otherwise the mode resolved from
+    // ETS/property config (_useStaticIP). Drives menu field visibility/lock (static -> editable, DHCP -> locked).
+    bool localUsesStaticIp();
 #endif
 
 #ifdef HAS_USB
@@ -151,6 +184,42 @@ class NetworkModule : public OpenKNX::Module
     void handleOTA();
     void controlKnxIp(bool state);
 
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+    // ---- W5500 clean self-heal (no MCU reboot) ----
+    // The W5500 sometimes doesn't answer right after (re)boot, and can wedge after a clean start. At boot we
+    // retry begin() with an RSTn reset between tries; at runtime checkEthHealth() probes VERSIONR and, on a
+    // wedge, recoverEth() re-inits. Never the driver's end() alone (busy-waits forever on a stuck chip ->
+    // brick). Heals as soon as the chip answers; no reboot needed.
+    bool _ethDegraded = false;   // true: W5500 not up yet, loop() is running the self-heal retry
+    uint32_t _lastEthHeal = 0;   // millis() of the last self-heal attempt (throttle)
+    uint32_t _lastEthHealth = 0; // millis() of the last runtime chip-health probe (throttle)
+    uint8_t _ethBadProbes = 0;   // consecutive VERSIONR != 0x04 reads (debounce before recovery)
+    void hwResetPhy();           // pulse PIN_ETH_RES (RSTn low >=500us) + settle before any SPI access
+    bool tryBeginEth();          // one clean bring-up: HW reset + KNX_NETIF.begin(), VERSIONR-classify on fail
+    bool beginEthWithRetry();    // boot: tryBeginEth() up to ETH_BEGIN_TRIES with backoff
+    void ethSelfHeal();          // loop(): throttled tryBeginEth() while _ethDegraded, clears it on success
+    void checkEthHealth();       // loop(): periodic VERSIONR probe; triggers recoverEth() on repeated failure
+    void recoverEth();           // runtime: HW-reset -> safe end() -> hand to ethSelfHeal() (no reboot/brick)
+    static constexpr uint8_t ETH_BEGIN_TRIES = 4;
+    static constexpr uint16_t ETH_BEGIN_BACKOFF_MS = 150;
+    static constexpr uint32_t ETH_HEAL_INTERVAL_MS = 5000;
+    static constexpr uint32_t ETH_HEALTH_INTERVAL_MS = 5000;
+    static constexpr uint8_t ETH_BAD_PROBE_LIMIT = 3;
+#endif
+
+#if defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
+    // W5500-on-ESP hard-wedge recovery (checkEthHealthEsp): link-based, since esp_eth owns the SPI bus and
+    // we cannot raw-read VERSIONR like the RP2040 path. Native-EMAC boards (REG1/LAN8720) do not define it.
+    void checkEthHealthEsp();
+    uint32_t _lastEthDownEsp = 0;       // millis() the link first went down (0 = up/established)
+    uint32_t _lastEthHealEsp = 0;       // throttle between recovery attempts
+    bool _ethWasEstablishedEsp = false; // sticky: a real link+IP came up at least once this session
+    uint8_t _ethHealBackoffStep = 0;    // exponential backoff index for recovery attempts
+    static constexpr uint32_t ETH_ESP_WEDGE_MS = 30000;              // established-then-lost this long -> recover
+    static constexpr uint32_t ETH_ESP_HEAL_INTERVAL_MS = 30000;      // base gap; backed off 30->60->120s (capped)
+    static constexpr uint32_t ETH_ESP_HEAL_INTERVAL_MAX_MS = 120000; // backoff cap
+#endif
+
     // ---- ETH link mode control ----
     // Owned by EthLinkManager (fixed-speed override + auto-fallback ladder), which drives the raw link
     // drivers in driver/. NetworkModule just forwards its Module hooks + the ~2 Hz link tick to it;
@@ -158,12 +227,26 @@ class NetworkModule : public OpenKNX::Module
 #if defined(KNX_IP_LAN) && (defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32))
     EthLinkManager _ethLink{*this};
 #if defined(ARDUINO_ARCH_RP2040)
-    // OpenKNX::Module persistence + startup-delay hooks (forwarded to _ethLink; RP2040 uses module flash).
+    // Startup-delay hook is forwarded to _ethLink (re-applies a persisted fixed link mode once flash loaded).
+    void processAfterStartupDelay() override;
+#endif
+#endif
+
+    // Module-flash persistence. On RP2040+KNX_IP_LAN this block ALSO carries the EthLinkManager fixed-mode
+    // bytes: writeFlash()/readFlash() chain _ethLink first, then the override block. size==0 -> defaults.
     uint16_t flashSize() override;
     void writeFlash() override;
     void readFlash(const uint8_t *data, const uint16_t size) override;
-    void processAfterStartupDelay() override;
-#endif
+
+#ifdef DEVICE_DISPLAY_MODULE
+    // Held in RAM; loaded from / stored to module flash by the callbacks above.
+    NetworkLocalOverride _localOverride;
+    static constexpr uint16_t NET_OVERRIDE_FLASH_SIZE = 20; // version + 2 flags + 4*4 addr bytes + linkMode
+    void writeLocalOverrideFlash();                         // append the override block to the module-flash stream
+    void readLocalOverrideFlash(const uint8_t *data, const uint16_t size); // parse it back (defaults if absent/short)
+    // Copy the given live value into a still-all-zero override quartet (leaves an already-edited quartet
+    // untouched), so DHCP->static pre-fills from the acquired lease without clobbering user input.
+    static void prefillZeroQuartet(uint8_t (&quartet)[4], IPAddress live);
 #endif
 
 #ifdef KNX_IP_WIFI
