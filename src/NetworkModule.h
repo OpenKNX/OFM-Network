@@ -112,6 +112,10 @@ class NetworkModule : public OpenKNX::Module
     // Currently intended IP mode: the override's useStaticIP when active, otherwise the mode resolved from
     // ETS/property config (_useStaticIP). Drives menu field visibility/lock (static -> editable, DHCP -> locked).
     bool localUsesStaticIp();
+
+    // OTA status for the display's system-priority OTA overlay.
+    bool otaActive() const { return _otaActive; }       // true between OTA onStart and onEnd/onError
+    uint8_t otaProgress() const { return _otaPercent; } // fine OTA progress 0..100 (every chunk)
 #endif
 
 #ifdef HAS_USB
@@ -158,7 +162,9 @@ class NetworkModule : public OpenKNX::Module
     const uint16_t _otaPort = 2040;
     const char *_otaPortString = "2040";
 #endif
-    uint8_t _otaProgress = 0;
+    uint8_t _otaProgress = 0; // last %-step logged (gates 10% heartbeat log)
+    bool _otaActive = false;  // true while an OTA update runs (onStart..onEnd/onError)
+    uint8_t _otaPercent = 0;  // fine OTA progress 0..100, updated on every onProgress
     IPAddress _staticLocalIP;
     IPAddress _staticSubnetMask;
     IPAddress _staticGatewayIP;

@@ -583,19 +583,24 @@ void NetworkModule::setup(bool configured)
     ArduinoOTA.setPort(_otaPort);
     ArduinoOTA.setRebootOnSuccess(false);
     ArduinoOTA.onStart([&]() {
+        _otaActive = true; // display OTA overlay takes over (SYSTEM priority)
+        _otaPercent = 0;
         if (ArduinoOTA.getCommand() == U_FLASH)
             logInfo("OTA", "Start updating firmware");
         else // U_SPIFFS
             logInfo("OTA", "Start updating filesystem");
     });
     ArduinoOTA.onEnd([&]() {
+        _otaActive = false;
+        _otaPercent = 100;
         logIndentUp();
         logInfo("OTA", "Update complete");
         logIndentDown();
         openknx.restart();
     });
     ArduinoOTA.onProgress([&](unsigned int progress, unsigned int total) {
-        int percent = (int)progress / (total / 100.0);
+        int percent = (total > 0) ? (int)((uint64_t)progress * 100u / total) : 0; // guard div-by-zero + overflow
+        _otaPercent = (percent < 0) ? 0 : (percent > 100 ? 100 : percent);        // fine bar (every chunk)
         if (percent % 10 == 0 && _otaProgress != percent)
         {
             logIndentUp();
@@ -606,6 +611,7 @@ void NetworkModule::setup(bool configured)
         openknx.loop();
     });
     ArduinoOTA.onError([&](ota_error_t error) {
+        _otaActive = false; // release the display overlay so normal operation resumes
         logIndentUp();
         if (error == OTA_AUTH_ERROR)
             logError("OTA", "Auth error");
@@ -781,9 +787,16 @@ void NetworkModule::loop(bool configured)
 
 void NetworkModule::handleOTA()
 {
+    // An unconfigured device has no ETS parameters -- ParamNET_OTAUpdate reads erased param memory,
+    // so honouring it here can lock OTA out permanently: you would need ETS to enable the very
+    // mechanism you want to flash with. A device without a config also has nothing to protect,
+    // so OTA stays open until ETS says otherwise.
     bool allowed = true;
-    if (ParamNET_OTAUpdate == 2) allowed = false;
-    if (ParamNET_OTAUpdate == 0) allowed = knx.progMode();
+    if (knx.configured())
+    {
+        if (ParamNET_OTAUpdate == 2) allowed = false;
+        if (ParamNET_OTAUpdate == 0) allowed = knx.progMode();
+    }
 
     if (_otaAllowed != allowed) // allowed changed
     {
