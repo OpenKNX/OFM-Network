@@ -454,14 +454,21 @@ void NetworkModule::checkEthHealth()
     if (!delayCheckMillis(_lastEthHealth, ETH_HEALTH_INTERVAL_MS)) return;
     _lastEthHealth = millis();
 
-    if (_ethLink.chipVersion() == 0x04)
+    // Serialize the raw VERSIONR read against the Wiznet5500lwIP async SPI pump. The driver wraps its own
+    // SPI transactions in this same lock (LwipIntfDev.h), so acquiring it here makes the two mutually
+    // exclusive -- without it the reads interleave on the shared bus, VERSIONR comes back garbage, and a
+    // perfectly healthy chip is mis-classified "dead" -> KNX-IP teardown (the reason this was disabled).
+    ethernet_arch_lwip_begin();
+    const uint8_t ver = _ethLink.chipVersion();
+    ethernet_arch_lwip_end();
+    if (ver == 0x04)
     {
         _ethBadProbes = 0;
         return;
     }
     if (++_ethBadProbes < ETH_BAD_PROBE_LIMIT) return;
 
-    logErrorP("W5500 stopped responding at runtime (VERSIONR != 0x04) after %u probes -> clean recovery", _ethBadProbes);
+    logErrorP("W5500 stopped responding at runtime (VERSIONR=0x%02X != 0x04) after %u probes -> clean recovery", ver, _ethBadProbes);
     recoverEth();
 }
 
@@ -763,7 +770,7 @@ void NetworkModule::loop(bool configured)
         ethSelfHeal(); // W5500 not up yet: keep trying a clean bring-up; skip normal link handling
         return;
     }
-    checkEthHealth(); // watch for a wedged chip after a good start -> clean recovery (no reboot)
+    checkEthHealth(); // runtime W5500 wedge watchdog -> clean recovery (VERSIONR probe serialized vs. the lwIP SPI pump)
 #elif defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
     checkEthHealthEsp(); // W5500-on-ESP hard-wedge recovery (link-based); native-EMAC boards (REG1) excluded
 #endif
