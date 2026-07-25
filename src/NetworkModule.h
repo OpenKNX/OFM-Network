@@ -203,6 +203,10 @@ class NetworkModule : public OpenKNX::Module
     void hwResetPhy();           // pulse PIN_ETH_RES (RSTn low >=500us) + settle before any SPI access
     bool tryBeginEth();          // one clean bring-up: HW reset + KNX_NETIF.begin(), VERSIONR-classify on fail
     bool beginEthWithRetry();    // boot: tryBeginEth() up to ETH_BEGIN_TRIES with backoff
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+    void registerOpenknxMdns();  // (re)register the _openknx mDNS service+TXT via lwIP; idempotent
+    bool _mdnsWasEstablished = false; // rising-edge tracking for the re-registration in checkLinkStatus()
+#endif
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
     void pumpEthernet();         // drive W5500 RX + lwIP timers from the main loop (INT off), called from loop()
 #endif

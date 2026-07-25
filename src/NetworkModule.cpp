@@ -38,6 +38,11 @@
 #include <lwip/timeouts.h>
 #endif
 
+// mDNS TXT: SimpleMDNS.addServiceTxt() is broken on arduino-pico (handle lookup misses -> TXT silently
+// dropped), so we register the service + TXT via the lwIP mDNS API directly. See registerOpenknxMdns().
+#include <lwip/apps/mdns.h>
+#include <lwip/netif.h>
+
 // The RP2040 wired interface IS a Wiznet W5500 (instantiated below), so the env must define the W5500
 // capability flag; the W5500-specific bring-up / self-heal (all guarded by OPENKNX_ETH_W5500) then compiles
 // in lockstep with it.
@@ -58,9 +63,36 @@ Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE);
 #endif
 
 WiFiUDP Udp;
+
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+// _openknx mDNS service state. TXT strings are file-scope because the lwIP callback reads them on every
+// announce; slot+netif let us remove before re-adding (idempotent re-registration).
+static char _openknxMdnsTxt[7][48]; // "key=value", <= 255 B per DNS TXT item
+static uint8_t _openknxMdnsTxtCount = 0;
+static s8_t _openknxMdnsSlot = -1;
+static struct netif *_openknxMdnsNetif = nullptr;
+// lwIP mDNS TXT provider: emit each stored item.
+static void _openknxMdnsTxtCb(struct mdns_service *service, void *txt_userdata)
+{
+    (void)txt_userdata;
+    for (uint8_t i = 0; i < _openknxMdnsTxtCount; i++)
+        mdns_resp_add_service_txtitem(service, _openknxMdnsTxt[i], (u8_t)strlen(_openknxMdnsTxt[i]));
+}
+#endif
 #else
 #pragma warn "Unsupported platform"
-#endif
+#endif // ARDUINO_ARCH_ESP32 / ARDUINO_ARCH_RP2040
+
+// mDNS "otamode" TXT value from the ETS OTA-Update setting (ParamNET_OTAUpdate): prog | always | off.
+// Mirrors handleOTA(): an unconfigured device has no ETS params, so it reports "always". File scope so both
+// the ESP (ESPmDNS) and RP2040 (lwIP) mDNS paths can read it.
+static const char *otaModeStr()
+{
+    if (!knx.configured()) return "always";
+    if (ParamNET_OTAUpdate == 2) return "off";
+    if (ParamNET_OTAUpdate == 0) return "prog";
+    return "always";
+}
 
 const std::string NetworkModule::name()
 {
@@ -572,14 +604,9 @@ void NetworkModule::setup(bool configured)
         MDNS.addServiceTxt("openknx", "tcp", "address", openknx.info.humanIndividualAddress().c_str());
         MDNS.addServiceTxt("openknx", "tcp", "ota", _otaPortString);
         MDNS.addServiceTxt("openknx", "tcp", "configured", knx.configured() ? "1" : "0");
+        MDNS.addServiceTxt("openknx", "tcp", "otamode", otaModeStr());
 #else
-        hMDNSService service = MDNS.addService("openknx", "tcp", -1);
-        MDNS.addServiceTxt(service, "serial", openknx.info.humanSerialNumber().c_str());
-        MDNS.addServiceTxt(service, "version", openknx.info.humanFirmwareVersion().c_str());
-        MDNS.addServiceTxt(service, "firmware", openknx.info.humanFirmwareNumber().c_str());
-        MDNS.addServiceTxt(service, "address", openknx.info.humanIndividualAddress().c_str());
-        MDNS.addServiceTxt(service, "ota", _otaPortString);
-        MDNS.addServiceTxt(service, "configured", (uint8_t)knx.configured());
+        registerOpenknxMdns(); // RP2040: register via lwIP (SimpleMDNS TXT is broken); helper is reused by checkLinkStatus()
 #endif
         MDNS.enableArduino(_otaPort /* default port for ota */, false /* AUTH true / false */);
     }
@@ -693,6 +720,12 @@ void NetworkModule::checkLinkStatus()
     // case where GOT_IP doesn't re-fire after a link flap -> datalink stuck off.
     controlKnxIp(establishedState);
 
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+    // re-register our mDNS service on the link-up edge (it's lost with the old netif on a W5500 recovery)
+    if (establishedState && !_mdnsWasEstablished) registerOpenknxMdns();
+    _mdnsWasEstablished = establishedState;
+#endif
+
     bool newLinkState;
     if (establishedState)
         newLinkState = true;
@@ -774,6 +807,50 @@ void NetworkModule::checkLinkStatus()
     else
         openknx.common.extendedHeartbeatValue &= 0b01111111;
 }
+
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+// (Re)register the _openknx mDNS service + TXT via lwIP. Idempotent (del-before-add) so a link flap or W5500
+// recovery re-registers cleanly. Called from setup() and the link-up edge in checkLinkStatus().
+void NetworkModule::registerOpenknxMdns()
+{
+    if (!(!knx.configured() || ParamNET_mDNS)) return; // mDNS disabled
+
+    // remove the previous registration if its netif still exists (skip after a recovery -> old netif gone)
+    if (_openknxMdnsNetif != nullptr && _openknxMdnsSlot >= 0)
+        for (struct netif *n = netif_list; n != nullptr; n = n->next)
+            if (n == _openknxMdnsNetif)
+            {
+                mdns_resp_del_service(_openknxMdnsNetif, (u8_t)_openknxMdnsSlot);
+                break;
+            }
+    _openknxMdnsSlot = -1;
+    _openknxMdnsNetif = nullptr;
+
+    // rebuild TXT each time -- address/configured can change across a reprogram
+    snprintf(_openknxMdnsTxt[0], sizeof(_openknxMdnsTxt[0]), "serial=%s", openknx.info.humanSerialNumber().c_str());
+    snprintf(_openknxMdnsTxt[1], sizeof(_openknxMdnsTxt[1]), "version=%s", openknx.info.humanFirmwareVersion().c_str());
+    snprintf(_openknxMdnsTxt[2], sizeof(_openknxMdnsTxt[2]), "firmware=%s", openknx.info.humanFirmwareNumber().c_str());
+    snprintf(_openknxMdnsTxt[3], sizeof(_openknxMdnsTxt[3]), "address=%s", openknx.info.humanIndividualAddress().c_str());
+    snprintf(_openknxMdnsTxt[4], sizeof(_openknxMdnsTxt[4]), "ota=%s", _otaPortString);
+    snprintf(_openknxMdnsTxt[5], sizeof(_openknxMdnsTxt[5]), "configured=%u", knx.configured() ? 1u : 0u);
+    snprintf(_openknxMdnsTxt[6], sizeof(_openknxMdnsTxt[6]), "otamode=%s", otaModeStr());
+    _openknxMdnsTxtCount = 7;
+
+    struct netif *n = netif_default ? netif_default : netif_list; // active iface (DHCP default; first at boot)
+    if (n != nullptr)
+    {
+        s8_t slot = mdns_resp_add_service(n, _hostName, "_openknx", DNSSD_PROTO_TCP, 65535, _openknxMdnsTxtCb, nullptr);
+        if (slot >= 0)
+        {
+            _openknxMdnsSlot = slot;
+            _openknxMdnsNetif = n;
+            mdns_resp_announce(n);
+        }
+        else
+            logErrorP("mDNS: _openknx add_service failed (%d)", (int)slot);
+    }
+}
+#endif
 
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
 // Pump W5500 RX + lwIP timers from the main loop (not the framework IRQ). handlePackets() doesn't take the
@@ -978,6 +1055,11 @@ void NetworkModule::showNetworkInformations(bool console)
 #ifdef KNX_IP_LAN
         _ethLink.logLinkInfo(); // "ETH link: X Mbit Y-duplex (fixed/auto)"
 #endif
+        // on when unconfigured (default) or enabled in ETS; order matters (ParamNET_mDNS needs a valid config)
+        if (!knx.configured() || ParamNET_mDNS)
+            logInfoP("mDNS: %s (%s)", _hostName, knx.configured() ? "ETS config" : "default");
+        else
+            logInfoP("mDNS: disabled (ETS config)");
 
 #ifdef KNX_IP_WIFI
         std::string wifiInfo = std::string(_wifiSSID) + " (" + std::to_string(KNX_NETIF.RSSI()) + "dBm)";
