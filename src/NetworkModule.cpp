@@ -79,6 +79,17 @@ static void _openknxMdnsTxtCb(struct mdns_service *service, void *txt_userdata)
         mdns_resp_add_service_txtitem(service, _openknxMdnsTxt[i], (u8_t)strlen(_openknxMdnsTxt[i]));
 }
 #endif
+
+#if defined(DEVICE_DISPLAY_MODULE) && defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+// Total LAN packet counters for the DeviceDisplay net-speed widget (its only consumer). Bytes aren't
+// available (lwIP MIB2 is off in the prebuilt core lib), so packets are the honest whole-interface figure.
+// Gated by DEVICE_DISPLAY_MODULE so products without the display widgets don't compile it in.
+void openknxLanTraffic(uint32_t &rxPackets, uint32_t &txPackets)
+{
+    rxPackets = KNX_NETIF.packetsReceived();
+    txPackets = KNX_NETIF.packetsSent();
+}
+#endif
 #else
 #pragma warn "Unsupported platform"
 #endif // ARDUINO_ARCH_ESP32 / ARDUINO_ARCH_RP2040
