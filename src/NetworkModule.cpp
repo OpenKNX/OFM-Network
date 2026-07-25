@@ -32,13 +32,22 @@
 
 #if defined(KNX_IP_LAN)
 #include "W5500lwIP.h"
+
+#if defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+#include <LwipEthernet.h>
+#include <lwip/timeouts.h>
+#endif
+
 // The RP2040 wired interface IS a Wiznet W5500 (instantiated below), so the env must define the W5500
 // capability flag; the W5500-specific bring-up / self-heal (all guarded by OPENKNX_ETH_W5500) then compiles
 // in lockstep with it.
 #if !defined(OPENKNX_ETH_W5500)
-    #error "RP2040 wired LAN uses the Wiznet5500lwIP (W5500) driver -> add -D OPENKNX_ETH_W5500 to the env build_flags (platformio.custom.ini, next to -D KNX_IP_LAN)"
+#error "RP2040 wired LAN uses the Wiznet5500lwIP (W5500) driver -> add -D OPENKNX_ETH_W5500 to the env build_flags (platformio.custom.ini, next to -D KNX_IP_LAN)"
 #endif
-#ifdef PIN_ETH_INT
+// OPENKNX_ETH_W5500_MAINLOOP_RX: build the driver without the INT pin, so RX is not IRQ-driven; we pump the chip
+// from the main loop (pumpEthernet) instead. Fixes two W5500+lwIP bugs with one root -- RX/timers running in
+// a preemptive IRQ under a non-fair lock: the tunnel-flood watchdog reboot and the 30 s mDNS loop stall.
+#if defined(PIN_ETH_INT) && !defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
 Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE, PIN_ETH_INT);
 #else
 Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE);
@@ -543,6 +552,11 @@ void NetworkModule::setup(bool configured)
 
     registerCallback([this](bool state) { if (state) this->showNetworkInformations(false); });
 
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+    // async timer is idled lazily in pumpEthernet(), not here -- it must drive boot DHCP until the loop runs
+    logDebugP("W5500 RX: main-loop pump active (no INT(interrupt) pin)");
+#endif
+
     _ipLedFunc = openknx.ledFunctions.get(OPENKNX_LEDFUNC_NET_STATE);
 
     if (!configured || ParamNET_mDNS)
@@ -761,6 +775,36 @@ void NetworkModule::checkLinkStatus()
         openknx.common.extendedHeartbeatValue &= 0b01111111;
 }
 
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+// Pump W5500 RX + lwIP timers from the main loop (not the framework IRQ). handlePackets() doesn't take the
+// lwIP lock itself here, so we hold it (also serializes vs. checkEthHealth's SPI probe). One pump per loop;
+// RX latency ~1-2 ms -- that's the W5500-SPI/lwIP floor, not the pump rate (3x pumping didn't help; see doc).
+void NetworkModule::pumpEthernet()
+{
+    if (_ethDegraded) return;
+
+    // Idle the framework async timer on the first pass, not in setup() -- doing it before the loop is live
+    // would strand boot-time DHCP. From here this pump is the sole RX/timer driver.
+    static bool asyncTimerIdled = false;
+    if (!asyncTimerIdled)
+    {
+        lwipPollingPeriod(3600000); // effectively never
+        asyncTimerIdled = true;
+    }
+    ethernet_arch_lwip_begin();
+    KNX_NETIF.handlePackets(); // RX
+    // lwIP timers are ms-granularity; throttle to ~1 ms so we don't burn TP-hot-path cycles at the kHz loop rate
+    static uint32_t lastTimeoutMs = 0;
+    uint32_t nowMs = millis();
+    if (nowMs != lastTimeoutMs)
+    {
+        lastTimeoutMs = nowMs;
+        sys_check_timeouts();
+    }
+    ethernet_arch_lwip_end();
+}
+#endif
+
 void NetworkModule::loop(bool configured)
 {
     if (_restartTimer > 0 && delayCheck(_restartTimer, 2000))
@@ -769,6 +813,10 @@ void NetworkModule::loop(bool configured)
     }
 
     if (_powerSave) return;
+
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+    pumpEthernet(); // drive W5500 RX + lwIP timers from the main loop (INT off) -- the reboot/mDNS fix
+#endif
 
 #if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
     if (_ethDegraded)
