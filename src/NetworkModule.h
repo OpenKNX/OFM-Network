@@ -209,6 +209,7 @@ class NetworkModule : public OpenKNX::Module
 #endif
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
     void pumpEthernet();         // drive W5500 RX + lwIP timers from the main loop (INT off), called from loop()
+    void setEthOtaPump(bool on); // OTA on/off: hand RX to the async IRQ pump so the blocking OTA read isn't loop-starved
 #endif
     void ethSelfHeal();          // loop(): throttled tryBeginEth() while _ethDegraded, clears it on success
     void checkEthHealth();       // loop(): periodic VERSIONR probe; triggers recoverEth() on repeated failure

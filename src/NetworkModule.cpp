@@ -636,6 +636,9 @@ void NetworkModule::setup(bool configured)
     ArduinoOTA.setRebootOnSuccess(false);
     ArduinoOTA.onStart([&]() {
         _otaActive = true; // display OTA overlay takes over (SYSTEM priority)
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+        setEthOtaPump(true); // hand W5500 RX to the async IRQ pump so the blocking OTA read isn't loop-starved
+#endif
         _otaPercent = 0;
         if (ArduinoOTA.getCommand() == U_FLASH)
             logInfo("OTA", "Start updating firmware");
@@ -644,6 +647,9 @@ void NetworkModule::setup(bool configured)
     });
     ArduinoOTA.onEnd([&]() {
         _otaActive = false;
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+        setEthOtaPump(false); // restore main-loop RX pump (defensive: restart below may be deferred)
+#endif
         _otaPercent = 100;
         logIndentUp();
         logInfo("OTA", "Update complete");
@@ -664,6 +670,9 @@ void NetworkModule::setup(bool configured)
     });
     ArduinoOTA.onError([&](ota_error_t error) {
         _otaActive = false; // release the display overlay so normal operation resumes
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+        setEthOtaPump(false); // restore main-loop RX pump -- device keeps running after an OTA error
+#endif
         logIndentUp();
         if (error == OTA_AUTH_ERROR)
             logError("OTA", "Auth error");
@@ -891,6 +900,25 @@ void NetworkModule::pumpEthernet()
     }
     ethernet_arch_lwip_end();
 }
+
+// OTA RX handover. The framework OTA read (_runUpdate) is fully blocking -- it spins in
+// `while (!client.available()) delay(1)` and never returns to loop() mid-transfer, so the once-per-loop
+// pumpEthernet() above cannot feed it and the socket RX buffer stalls (glacial/failing OTA). For the
+// duration of the transfer we hand RX back to the framework async pump (HW-alarm IRQ), which fires the
+// W5500 RX drain even inside that blocking read; loop() then skips pumpEthernet() while _otaActive.
+// on=false restores main-loop-only. lwipPollingPeriod() alone doesn't take effect until the next pending
+// fire (idled = ~1 h out), so we force a reschedule: leaving the lwip context runs the framework's
+// when-pending worker, which re-arms the timeout worker at the new period (see LwipEthernet.cpp).
+// The 30 s mDNS loop-hiccup this reintroduces is irrelevant while flashing (display is on the OTA overlay).
+// We poll at 2 ms (not the 20 ms default): the device is dedicated during OTA, and the faster RX drain both
+// lifts throughput (RX no longer waits ~20 ms per socket-buffer fill) and lets _runUpdate's onProgress ->
+// openknx.loop() fire often enough that the display actually renders its OTA widget.
+void NetworkModule::setEthOtaPump(bool on)
+{
+    lwipPollingPeriod(on ? 2 : 3600000); // 2 ms = aggressive OTA RX; 3.6M ms = effectively never (idle)
+    ethernet_arch_lwip_begin();
+    ethernet_arch_lwip_end(); // context-leave -> re-arm the async timeout worker at the new period
+}
 #endif
 
 void NetworkModule::loop(bool configured)
@@ -903,7 +931,8 @@ void NetworkModule::loop(bool configured)
     if (_powerSave) return;
 
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
-    pumpEthernet(); // drive W5500 RX + lwIP timers from the main loop (INT off) -- the reboot/mDNS fix
+    if (!_otaActive) pumpEthernet(); // drive W5500 RX + lwIP timers from the main loop (INT off) -- reboot/mDNS fix
+                                     // while _otaActive the async IRQ pump owns RX (see setEthOtaPump)
 #endif
 
 #if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
