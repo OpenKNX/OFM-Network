@@ -459,6 +459,9 @@ namespace OpenKNX
             });
             ArduinoOTA.onEnd([&]() {
                 _otaActive = false;
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+                setEthOtaPump(false); // restore the main-loop RX pump (defensive: a restart below could be deferred)
+#endif
                 _otaPercent = 100;
                 logIndentUp();
                 logInfo("OTA", "Update complete");
@@ -568,9 +571,17 @@ namespace OpenKNX
 #endif
 #endif
 
+        // Establish debounce: only print "Network established" + fire the establish callbacks once the link has
+        // genuinely held this long, not on every brief establish during the ETH auto-fallback search / flapping.
+        static constexpr uint32_t NET_INFO_STABLE_MS = 3000;
+
         void Module::checkIpStatus()
         {
             if (_ipShown || !established()) return;
+
+            if (_ipStableSince == 0) _ipStableSince = millis();
+            if ((uint32_t)(millis() - _ipStableSince) < NET_INFO_STABLE_MS) return;
+
             logBegin();
             logInfoP("Network established");
             logIndentUp();
@@ -687,6 +698,7 @@ namespace OpenKNX
             else if (!newLinkState && _currentLinkState)
             {
                 _ipShown = false;
+                _ipStableSince = 0; // restart the establish debounce on link loss
 #if defined(KNX_IP_W5500)
                 // ethernet_arch_lwip_begin();
                 // netif_set_ipaddr(KNX_NETIF.getNetIf(), 0);
@@ -722,6 +734,10 @@ namespace OpenKNX
             if (!_otaActive) pumpEthernet(); // drive W5500 RX + lwIP timers from the main loop (INT off);
                                              // while _otaActive the async IRQ pump owns RX (see setEthOtaPump)
 #endif
+            // During OTA the async IRQ pump owns W5500 RX; skip the SPI health-checks (checkEthHealth/
+            // checkLinkStatus, and the ping/DNS/webclient loops below) so they don't contend for the SPI bus +
+            // lwIP lock in the windows between flash commits. The device is dedicated to the update anyway.
+            if (_otaActive) return;
 #if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
             if (_ethDegraded)
             {
@@ -788,8 +804,14 @@ namespace OpenKNX
         void Module::handleOTA()
         {
             bool allowed = true;
-            if (ParamNET_OTAUpdate == 2) allowed = false;
-            if (ParamNET_OTAUpdate == 0) allowed = knx.progMode();
+            // An unconfigured device has no ETS params -> ParamNET_OTAUpdate reads erased param memory. Honouring
+            // it here can lock OTA out permanently (you would need ETS to enable the very mechanism you want to
+            // flash with). Only apply the ETS gate once configured; an unconfigured device keeps OTA open.
+            if (knx.configured())
+            {
+                if (ParamNET_OTAUpdate == 2) allowed = false;
+                if (ParamNET_OTAUpdate == 0) allowed = knx.progMode();
+            }
 
             if (_otaAllowed != allowed) // allowed changed
             {
@@ -1418,12 +1440,12 @@ namespace OpenKNX
             if (_knxIpLedFunc == nullptr || !_knxIpLedFunc->active()) return;
 
             uint8_t newState; // 1 = green, 2 = orange, 3 = red
-            if (knxIpEnabled())
-                newState = 1; // KNXnet/IP running
+            if (knxIpEnabled() && established())
+                newState = 1; // KNXnet/IP running AND link/IP up
             else if (established())
-                newState = 2; // network up, but KNX-IP not running
+                newState = 2; // link/IP up, but KNX-IP not running (router; on 0x07B0 knxIpEnabled is always true -> never here)
             else
-                newState = 3; // no link / no IP
+                newState = 3; // no link / no IP (on 0x07B0: the honest "network down" state, was unreachable before)
 
             if (_knxIpLedState == newState) return;
             _knxIpLedState = newState;

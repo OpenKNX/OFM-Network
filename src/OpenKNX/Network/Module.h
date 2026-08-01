@@ -201,6 +201,7 @@ namespace OpenKNX
 
             bool _powerSave = false;
             bool _ipShown = false;
+            uint32_t _ipStableSince = 0; // link-established timestamp; debounces the "established" + IP-info output
             bool _useStaticIP = false;
             bool _useMDNS = false;
             bool _otaAllowed = false;
