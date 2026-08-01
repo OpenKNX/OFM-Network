@@ -606,6 +606,25 @@ namespace OpenKNX
             checkLinkStatus();
             handleOTA();
 
+#ifdef OPENKNX_WEBSERVER
+            if (ParamNET_HTTP || !knx.configured())
+            {
+                if (!webserver.isRunning() && established())
+                {
+                    webserver.setup();
+#ifdef OPENKNX_WEBCONSOLE
+                    webconsole.setup();
+#endif
+                }
+                if (webserver.isRunning())
+                {
+                    webserver.loop();
+#ifdef OPENKNX_WEBCONSOLE
+                    webconsole.loop();
+#endif
+                }
+            }
+#endif
 #ifdef OPENKNX_MQTT
             if (established())
             {

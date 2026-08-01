@@ -3,6 +3,12 @@
 #include "OpenKNX.h"
 #include "OpenKNX/Led/FunctionManager.h"
 #include "OpenKNX/Network/Ping/Handler.h"
+#ifdef OPENKNX_WEBSERVER
+#include "OpenKNX/Network/Webserver/Webserver.h"
+#endif
+#ifdef OPENKNX_WEBCONSOLE
+#include "OpenKNX/Network/Webserver/Webconsole.h"
+#endif
 #ifdef OPENKNX_MQTT
 #include "OpenKNX/Network/MQTT/Module.h"
 #endif
@@ -116,6 +122,12 @@ namespace OpenKNX
                       uint8_t retries = 2, uint32_t timeoutMs = OPENKNX_PING_TIMEOUT);
 #endif
 
+#ifdef OPENKNX_WEBSERVER
+            OpenKNX::Network::Webserver webserver;
+#endif
+#ifdef OPENKNX_WEBCONSOLE
+            OpenKNX::Network::Webconsole webconsole;
+#endif
 #ifdef OPENKNX_MQTT
             OpenKNX::Network::MQTT::Module mqtt;
 #endif
