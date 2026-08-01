@@ -6,6 +6,12 @@
 #include "strings.h"
 #include <functional>
 
+// KNX-IP-Status LED function id (value 11 in the SLEDFunc dropdown). Guarded so a future
+// central definition in OGM-Common/Led/FunctionManager.h takes precedence if added there.
+#ifndef OPENKNX_LEDFUNC_KNXIP_STATE
+#define OPENKNX_LEDFUNC_KNXIP_STATE 11
+#endif
+
 #if defined(ARDUINO_ARCH_ESP32)
 #include <ESPmDNS.h>
 #include <Preferences.h>
@@ -154,6 +160,8 @@ class NetworkModule : public OpenKNX::Module
     bool _otaHandle = false;
     uint8_t _ipLedState = 0;
     OpenKNX::Led::FunctionGroup *_ipLedFunc = nullptr;
+    uint8_t _knxIpLedState = 0;
+    OpenKNX::Led::FunctionGroup *_knxIpLedFunc = nullptr;
 
 #ifdef ARDUINO_ARCH_ESP32
     const uint16_t _otaPort = 3232;
@@ -189,6 +197,8 @@ class NetworkModule : public OpenKNX::Module
     void loadCallbacks(bool state);
     void handleOTA();
     void controlKnxIp(bool state);
+    void checkKnxIpStatus(); // drives the KNX-IP-Status LED (func 11): green=KNXnet/IP running, orange=link up but KNX-IP down, red=no link
+    bool knxIpEnabled();     // is the KNXnet/IP datalink layer currently enabled?
 
 #if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
     // ---- W5500 clean self-heal (no MCU reboot) ----

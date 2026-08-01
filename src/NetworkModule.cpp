@@ -601,6 +601,7 @@ void NetworkModule::setup(bool configured)
 #endif
 
     _ipLedFunc = openknx.ledFunctions.get(OPENKNX_LEDFUNC_NET_STATE);
+    _knxIpLedFunc = openknx.ledFunctions.get(OPENKNX_LEDFUNC_KNXIP_STATE);
 
     if (!configured || ParamNET_mDNS)
     {
@@ -739,6 +740,9 @@ void NetworkModule::checkLinkStatus()
     // Keep KNX-IP datalink in lockstep with link/IP (idempotent). Recovers the
     // case where GOT_IP doesn't re-fire after a link flap -> datalink stuck off.
     controlKnxIp(establishedState);
+
+    // Honest KNX-IP-Status LED (separate from the physical-link LED handled below).
+    checkKnxIpStatus();
 
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
     // re-register our mDNS service on the link-up edge (it's lost with the old netif on a W5500 recovery)
@@ -1525,6 +1529,57 @@ void NetworkModule::controlKnxIp(bool enable)
 #elif MASK_VERSION == 0x57B0
     knx.bau().getDataLinkLayer()->enabled(enable);
 #endif
+}
+
+// True while the KNXnet/IP datalink layer is enabled (the honest "KNX-IP is running" signal,
+// distinct from the physical Ethernet/IP link). Counterpart to controlKnxIp().
+bool NetworkModule::knxIpEnabled()
+{
+#if MASK_VERSION == 0x091A
+    return knx.bau().getPrimaryDataLinkLayer()->enabled();
+#elif MASK_VERSION == 0x57B0
+    return knx.bau().getDataLinkLayer()->enabled();
+#else
+    return false;
+#endif
+}
+
+// KNX-IP-Status LED (func 11): reflects the KNXnet/IP datalink, not just the physical link.
+//   GREEN  = KNXnet/IP datalink really running
+//   ORANGE = link + IP up, but KNXnet/IP NOT running ("looks connected, KNX-IP dead")
+//   RED    = no link / no IP
+void NetworkModule::checkKnxIpStatus()
+{
+    if (_knxIpLedFunc == nullptr || !_knxIpLedFunc->active()) return;
+
+    uint8_t newState; // 1 = green, 2 = orange, 3 = red
+    if (knxIpEnabled())
+        newState = 1; // KNXnet/IP running
+    else if (established())
+        newState = 2; // network up, but KNX-IP not running
+    else
+        newState = 3; // no link / no IP
+
+    if (_knxIpLedState == newState) return;
+    _knxIpLedState = newState;
+
+    switch (newState)
+    {
+        case 1: // KNXnet/IP running
+            _knxIpLedFunc->color(OpenKNX::Led::Color::Green);
+            _knxIpLedFunc->activity(OpenKNX::Led::g_ipLedActivity, true);
+            break;
+        case 2: // network up, KNX-IP not running
+            _knxIpLedFunc->color(OpenKNX::Led::Color::Orange);
+            _knxIpLedFunc->on(OpenKNX::Led::Capability::COLOR);
+            _knxIpLedFunc->blinking(1000, OpenKNX::Led::Capability::MONOCHROME);
+            break;
+        default: // 3: no link / no IP
+            _knxIpLedFunc->color(OpenKNX::Led::Color::Red);
+            _knxIpLedFunc->on(OpenKNX::Led::Capability::COLOR);
+            _knxIpLedFunc->off(OpenKNX::Led::Capability::MONOCHROME);
+            break;
+    }
 }
 
 NetworkModule openknxNetwork;

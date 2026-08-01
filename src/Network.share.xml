@@ -66,6 +66,7 @@
               <ParameterType Id="%AID%_PT-SLEDFunc" Name="SLEDFunc">
                 <TypeRestriction Base="Value" SizeInBit="16" UIHint="DropDown">
                   <Enumeration Text="Netzwerkstatus" Value="10" Id="%ENID%" />
+                  <Enumeration Text="KNX-IP-Status" Value="11" Id="%ENID%" />
                 </TypeRestriction>
               </ParameterType>
             </ParameterTypes>
