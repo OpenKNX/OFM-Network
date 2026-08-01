@@ -599,6 +599,9 @@ namespace OpenKNX
 #if defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32)
             OpenKNX::Network::DNS::loop();
 #endif
+#ifdef OPENKNX_WEBCLIENT
+            if (established()) webclient.loop();
+#endif
 
             checkLinkStatus();
             handleOTA();

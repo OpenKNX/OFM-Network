@@ -3,6 +3,9 @@
 #include "OpenKNX.h"
 #include "OpenKNX/Led/FunctionManager.h"
 #include "OpenKNX/Network/Ping/Handler.h"
+#ifdef OPENKNX_WEBCLIENT
+#include "OpenKNX/Network/Webclient/Handler.h"
+#endif
 #include "strings.h"
 #include <functional>
 
@@ -108,6 +111,10 @@ namespace OpenKNX
                       uint32_t timeoutMs = OPENKNX_PING_TIMEOUT);
             void ping(const std::string &host, std::function<void(IPAddress, bool)> callback,
                       uint8_t retries = 2, uint32_t timeoutMs = OPENKNX_PING_TIMEOUT);
+#endif
+
+#ifdef OPENKNX_WEBCLIENT
+            OpenKNX::Network::Webclient::Handler webclient;
 #endif
 
 #ifdef ARDUINO_ARCH_ESP32
