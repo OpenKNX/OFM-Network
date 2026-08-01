@@ -1,0 +1,349 @@
+# OFM-Network – Agent Instructions
+
+## Project Context
+
+**OFM-Network** is a network function module in the **OpenKNX** ecosystem — an open-source framework for KNX building automation on embedded hardware. The module provides IP connectivity (WiFi & Ethernet), OTA updates, mDNS, NTP time sync, and ICMP ping for OpenKNX devices.
+
+- **Branch convention**:
+  - `v1` – public release branch (stable)
+  - `v1dev` – active development branch
+  - Additional branches (e.g. `v1dev-ping`) are feature or fix branches merged into `v1dev`
+- **Language**: C++17, Arduino framework
+- **Developer expertise**: Advanced level in Arduino, RP2040 (arduino-pico by Earle Philhower), ESP32, and networking — do not explain the basics of these platforms, get straight to the point.
+
+Full documentation: [`doc/Applikationsbeschreibung-Netzwerk.md`](doc/Applikationsbeschreibung-Netzwerk.md)
+
+> **Not self-contained:** OFM-Network cannot be compiled or run on its
+> own. The majority of the base infrastructure (module system, KNX
+> stack integration, logging, flash storage, time API) lives in
+> **OGM-Common**, at `../OGM-Common/AGENTS.md` (one directory up) —
+> conventions and Claude skills documented there apply here too. When
+> tracing types like `OpenKNX::Module`, `OpenKNX::Log::Logger`, or
+> `OpenKNX::Time::TimeProvider`, look there first.
+
+---
+
+## Hardware Platforms
+
+| Platform | Connectivity | Stack | Compile Define |
+|----------|-------------|-------|----------------|
+| **ESP32** | WiFi | `WiFi.h` (Arduino IDF) | `KNX_IP_WIFI` |
+| **ESP32** | Ethernet | `ETH.h` (Arduino IDF) | `KNX_IP_LAN` |
+| **RP2040** (PicoW) | WiFi | arduino-pico by Earle Philhower | `KNX_IP_WIFI` |
+| **RP2040** | Ethernet | W5500lwIP (`W5500lwIP.h`) via SPI | `KNX_IP_LAN` |
+
+**Important platform notes:**
+- RP2040 uses **arduino-pico** by Earle Philhower (not the official Arduino Mbed Core) — lwIP in single-thread mode (`NO_SYS=1`), no FreeRTOS
+- ESP32 has FreeRTOS; DNS must be called via the TCPIP task callback (see `PingHandler_ESP32.cpp`)
+- W5500 SPI speed: `OPENKNX_NET_SPI_SPEED` (default 28 MHz), credentials in LittleFS (`/WIFI.TXT`)
+- ESP32 WiFi credentials via `Preferences` API
+
+---
+
+## Architecture & Key Classes
+
+### `NetworkModule` (`src/NetworkModule.h/.cpp`)
+Main module, inherits from `OpenKNX::Module`. Manages:
+- PHY init (`initPhy`) → IP init (`initIp`) → mDNS → OTA → NTP
+- DHCP vs. static IP (from KNX parameters)
+- WiFi credential management (save/read/erase)
+- Network state LED via `OpenKNX::Led::FunctionGroup` (when `OPENKNX_LED_IP` is defined)
+- Console commands: `net`, `net reset`, `ping`, `wifi SSID PSK`, `erase wifi`, `net mc`
+- Callback registration for network changes (`registerCallback`)
+
+### `PingHandler` (`src/OpenKNX/Network/PingHandler.*`)
+Non-blocking ICMP ping with queue + parallel slots:
+- **Pending queue**: unlimited, FIFO
+- **Active slots**: `OPENKNX_PING_PARALLEL` (default 5) concurrent pings
+- DNS resolution transparently before ping
+- Callback signature: `void(IPAddress target, bool reachable, uint32_t rttMs)`
+- `loop()` must be called from the Arduino loop
+- Platform implementations:
+  - **ESP32**: BSD socket API (`SOCK_RAW`, `IPPROTO_ICMP`), non-blocking via `fcntl(O_NONBLOCK)`, FreeRTOS queue for thread-safe DNS. All slots share **one** socket, so `platformCheckReply()` drains it completely and files every echo reply under its own slot (the ICMP `id` carries the slot index) instead of discarding whatever doesn't match the slot being polled — otherwise parallel pings lose each other's replies and run into false timeouts.
+  - **RP2040**: lwIP raw API (`raw_pcb`, `raw_sendto_if_src`), interrupt callback `icmpRecvCallback`
+
+### `NtpTimeProvider` (`src/NtpTimeProvider.h/.cpp`)
+- Inherits from `OpenKNX::Time::TimeProvider`
+- ESP32: `esp_sntp_*` API (non-blocking, smooth mode)
+- RP2040: Arduino NTP library, sync every 3600 s
+- NTP server via KNX parameter `ParamNET_NTPServer` (default: `pool.ntp.org`)
+
+### `OpenKNX::Network::MQTT::Module` (`src/OpenKNX/Network/MQTT/`)
+MQTT 3.1.1 client + broker, no external dependencies. Guard: `#ifdef OPENKNX_MQTT`. Accessed as `openknxNetwork.mqtt`.
+
+**Files:**
+- `Packet.h/.cpp` — MQTT 3.1.1 packet serialization/deserialization, level-based topic matching (`+`/`#` per §4.7)
+- `Client.h/.cpp` — connects to an external MQTT broker
+- `Broker.h/.cpp` — embedded MQTT broker (auth, retained messages, QoS 0+1, keep-alive)
+- `Module.h/.cpp` — OpenKNX::Module subclass with public publish/subscribe API
+
+**Platform behaviour:**
+- **ESP32**: Broker/Client loop in FreeRTOS task (Core 0). `publish()` and `subscribe()` are mutex-protected.
+- **RP2040**: Broker/Client loop in main `loop()` (NO_SYS=1). lwIP callbacks (`tcp_accept/recv/err/poll`) only buffer data — all protocol processing in `loop()`.
+
+**Setup lifecycle:** Deferred — `mqtt.setup()` is called from `Network::Module::loop()` only when `established()` is true.
+
+**API:**
+```cpp
+openknxNetwork.mqtt.publish("abs/topic", payload, len, qos, retain);
+openknxNetwork.mqtt.publishP("rel/topic", payload);  // prepends devicePrefix()
+openknxNetwork.mqtt.subscribe("openknx/+/cmd", callback, qos);
+openknxNetwork.mqtt.connected();
+openknxNetwork.mqtt.devicePrefix();  // e.g. "openknx/abc12345/"
+```
+
+Full reference: [`README.MQTT.md`](README.MQTT.md)
+
+Full reference: [`README.MQTT.md`](README.MQTT.md)
+
+---
+
+## KNX Concepts & Integration
+
+**OpenKNX modules** implement an interface with: `init()`, `setup()`, `loop()`, `processCommand()`, `readFlash()`, `writeFlash()`.
+
+**KNX parameters** are read from the generated `knxprod.h` via macros like `ParamNET_*`. Parameter definitions are in [`src/Network.share.xml`](src/Network.share.xml).
+
+**KNX IP properties** (BAU interface):
+- `PID_IP_ADDRESS`, `PID_SUBNET_MASK`, `PID_DEFAULT_GATEWAY`, `PID_IP_ASSIGNMENT_METHOD`
+- `PID_IP_CAPABILITIES` → advertise DHCP+AutoIP (value: 6)
+- Routing multicast: `PID_ROUTING_MULTICAST_ADDRESS` (mask 0x091A / 0x57B0)
+
+**Function property** (object 160, property 5): transfers WiFi credentials from ETS via `Network.script.js`.
+
+**Compile defines (important):**
+```
+OPENKNX_LED_IP          – LED for network status (optional)
+OPENKNX_PING_TIMEOUT    – Ping timeout in ms (default 1000)
+OPENKNX_PING_PARALLEL   – Max concurrent pings (default 5)
+OPENKNX_NET_SPI_SPEED   – W5500 SPI speed Hz (default 28000000)
+OPENKNX_MQTT            – Enable MQTT client/broker
+OPENKNX_MQTT_STATUS_TIME     – Status publish interval ms (default 10000)
+OPENKNX_MQTT_TASK_STACK      – ESP32 task stack bytes (default 4096)
+OPENKNX_MQTT_BROKER_MAX_CLIENTS – Max broker clients (default 5/3)
+OPENKNX_MQTT_BROKER_MAX_RETAINED – Max retained messages in broker (default 32)
+OPENKNX_MQTT_BROKER_MAX_SUBS – Max subscriptions per broker client (default 16)
+```
+
+---
+
+## Coding Conventions
+
+- **No `delay()`** — everything non-blocking, state machines with `millis()` checks
+- **Platform guards**: `#ifdef ARDUINO_ARCH_ESP32` / `#ifdef ARDUINO_ARCH_RP2040`
+- **Connectivity guards**: `#ifdef KNX_IP_WIFI` / `#ifdef KNX_IP_LAN`
+- No external libraries in `library.json` — only Arduino framework builtins and OpenKNX core
+- Comments in German or English (mixed is OK, but consistent per file)
+- Comment sparingly and briefly — one line for the non-obvious *why*, nothing more. Long rationale blocks go stale faster than the code they sit next to; put them in the commit message or a README instead
+- OTA port: ESP32 = 3232, RP2040 = 2040 (both platforms support OTA, implementation is identical)
+- mDNS hostname: auto-generated as `OpenKNX-XXXXXXXX` (8 hex chars from serial number)
+
+### Formatting (`.clang-format`)
+
+Based on **LLVM style** with the following deviations — strictly follow when generating code:
+
+- **Curly braces** always on their **own line** (Allman style) — applies to classes, functions, `if`, `else`, `for`, `while`, `case`, `enum`, `struct`, `namespace`, `extern`
+- **No column limit** (`ColumnLimit: 0`) — no artificial line breaks
+- **4 spaces** indentation, **no tabs** (`UseTab: Never`)
+- `namespace` content is indented (`NamespaceIndentation: All`)
+- `case` labels are indented (`IndentCaseLabels: true`)
+- Short `case` labels, enums, lambdas, and functions may remain single-line
+- `if` without braces only allowed for a **single** statement (`OnlyFirstIf`) — no single-line `else`
+- Pointer alignment derived from existing code (`DerivePointerAlignment: true`)
+- Preprocessor directives **not** indented (`IndentPPDirectives: None`)
+
+---
+
+## Build & Test
+
+No standalone `platformio.ini` — the module is included as a library in parent OpenKNX device projects. `platformio.network.ini` is empty (template for projects).
+
+For testing: integrate into an OpenKNX device project that references this module.
+
+### Web Assets (`web/assets/`, generated `webassets.h`)
+
+All CSS/JS/SVG served under `/assets/*` are **not** hand-minified C++ string literals — they live as clean, readable source files in `web/assets/` at the repo root. `OGM-Common/scripts/pio/prepare.py` runs on every OAM (device project) build, collects a `web/assets/` folder from every included module **and the project itself**, minifies + gzip-compresses each file, and writes `include/webassets.h`. This module is documented here in depth as the first consumer of that generator; `OGM-Common/AGENTS.md` only notes that it exists.
+
+- **Files**: `web/assets/base.css`, `base.js`, `favicon.svg`, `logo.svg`, `console.css`, `console.js`, `groupmonitor.css`, `groupmonitor.js`, `filemanager.css`, `filemanager.js` — flat, no subfolder. The module's own repo root is already the namespace; a per-module prefix inside `web/assets/` would be redundant.
+- **Processing**: `.css`/`.js`/`.svg` are minified (whitespace/comments stripped, conservatively per format — JS deliberately does **not** strip `//` comments via regex, since a comment can't be reliably told apart from one inside a string/regex literal that way) and then gzip-compressed (`compresslevel=9`, `mtime=0` for reproducible bytes). `.jpg`/`.jpeg`/`.png` are gzip-compressed **only** — minifying an already-compressed binary format is meaningless, and the real-world gzip gain there is ~0%.
+- **Identifiers**: flat, **no** module prefix — derived from the relative path under `web/assets/` (`/` and `.` → `_`, e.g. `base.css` → `base_css`). The module itself is already the namespace (one repo = one `web/assets/` root); an extra prefix would be redundant.
+- **No duplicates, no exception**: if an identifier collides between two sources — including between a module and the project itself — the build aborts with an error (`raise SystemExit(1)`). No override, not even for the project.
+- **No file without assets**: if no `web/assets/` folder exists anywhere in a build, `include/webassets.h` is neither generated nor left over from a previous build (removed if stale) — code referencing `WebAssets::*` then fails to compile, same as any other missing generated header (`versions.h`, `knxprod.h`).
+- **Generated symbols** per file, in `namespace WebAssets`:
+  ```cpp
+  inline const uint8_t base_css_gz[] = { /* gzip bytes */ };
+  inline const char* const base_css_mime = "text/css"; // from the generator's one MIME table
+  ```
+  **Deliberately no separate `_gz_len` constant** — the size is already known at the call site via `sizeof(WebAssets::base_css_gz)` (fixed-bound array), a manually-tracked extra number would be redundant. Important: the data is **not** NUL-terminated — `strlen()` must never be used here, gzip bytes are binary and virtually always contain a `0x00` somewhere in the stream; a `strlen()`-based length would truncate the content at a random position.
+- **Every asset is global**: `addStylesheet()`/`addJavaScript()` put the tag on *every* page, there is no per-page registration. A page-specific stylesheet must therefore scope any `body`/`main`/element-selector rule to its own page (`main:has(#gm-table) { … }`), and a page-specific script must bail out early when its root element is missing (`if (!body) return;`) — otherwise it runs on the overview page too and, in the case of the monitor/console scripts, opens a WebSocket there and burns a connection slot.
+- **Registration**: `addRoute(WEB_GET, "/assets/base.css", Asset(WebAssets::base_css_mime, WebAssets::base_css_gz, sizeof(WebAssets::base_css_gz)));` — `Webserver::Asset()` builds the route handler, delegating to `WebResponse::sendAsset()` for the actual header/body logic (`Content-Type`, `Cache-Control`, `Content-Encoding: gzip`, static body — no copy).
+- **Always gzip, no negotiation**: the server never checks `Accept-Encoding` — every client gets the gzip response. Not a concern for a browser-only audience; `curl /assets/base.css` without `--compressed` shows binary, not CSS.
+- **`/assets/logo.svg`**, not `/assets/logo/black.svg` — flattened together with the rest of the migration.
+
+---
+
+## Webserver
+
+Full API reference: [`README.Webserver.md`](README.Webserver.md)
+
+### Compile Flags
+
+| Flag | Effect |
+|------|--------|
+| `OPENKNX_WEBSERVER` | Enables HTTP server, routing, overview page, logo asset, all routes |
+| `OPENKNX_WEBCONSOLE` | Enables `/console` page, WS endpoint `/console`, **and** the logger ring buffer in OGM-Common |
+| `OPENKNX_WEBCONSOLE_BUFFER` | Total ring buffer size in bytes (optional, default: 4096, max: 65535) |
+| `OPENKNX_WEBMONITOR` | Enables `/groupmonitor` page + WS endpoint, live KNX telegram stream. Requires `OPENKNX_WEBSERVER`; **TP only**, additionally gated on `MASK_VERSION == 0x07B0` |
+
+`OPENKNX_WEBCONSOLE` requires `OPENKNX_WEBSERVER`.
+Without `OPENKNX_WEBSERVER` no webserver code is compiled at all — no class, no stubs, no `webserver` member in the module.
+
+### Platform Support
+
+| Platform | Stack | Implementation |
+|----------|-------|----------------|
+| **ESP32** | FreeRTOS + esp-idf `httpd` | `Webserver_ESP32.cpp` |
+| **RP2040** | lwIP `NO_SYS=1`, single-threaded | `Webserver_RP2040.cpp` |
+
+### Asset Management (`addStylesheet` / `addJavaScript`)
+
+The webserver provides a flexible system for managing CSS and JavaScript assets:
+
+**API:**
+```cpp
+openknxNetwork.webserver.addStylesheet("/assets/custom.css");
+openknxNetwork.webserver.addJavaScript("/assets/custom.js");
+```
+
+**Behavior:**
+- `addStylesheet()` → registers URI, inserted in `<head>` (via `buildHeader()`)
+- `addJavaScript()` → registers URI, inserted before `</body>` (via `buildFooter()`)
+- **Cache buster**: automatic query parameter `YYYYMMDDHHII` (e.g. `?202605231435`) from build time
+- **Defer attribute**: JavaScript tags receive `defer` for non-blocking execution
+- `base.css` and `base.js` are registered via these functions during `setup()`
+
+**Implementation:**
+- `Webserver._stylesheets` → `std::vector<std::string>` iterated in `buildHeader`
+- `Webserver._scripts` → `std::vector<std::string>` iterated in `buildFooter`
+
+### Response Assembly (Segments)
+
+The platform transport code knows nothing about layout. `Webserver::handleRequest()` routes the request and then, unless the response is streaming, applies the layout and flattens everything into a segment list on the `WebResponse`:
+
+- `setLayoutChrome()` moves the `buildHeader()`/`buildFooter()` strings into the response (no copy)
+- `finalizeSegments()` builds `ResponseSegment[]` = header + body + footer (max 3, empty parts skipped)
+- Segments are plain `{data, len}` views — **the memory always belongs to the `WebResponse`**, so no ownership flag and nothing to free per segment
+
+Platform code then only iterates `response.segments()`:
+
+- **ESP32**: one segment → `httpd_resp_send()` (keeps `Content-Length`); several → `httpd_resp_send_chunk()` each
+- **RP2040**: `ConnSlot` holds only the send position (`txSegIdx`/`txSent`); `tcpSendChunk()` walks the segments across `onSent()` ticks
+
+Nothing is copied to assemble a page — no merged header+body+footer buffer on either platform. Because RP2040 sends asynchronously, the response must outlive `doHttpDispatch()`: it lives in `static WebResponse g_response[MAX_CONN]`, indexed by slot. Deliberately **not** inside `ConnSlot` — `onAccept()` clears that with `memset`, which would wreck the `std::string`/`std::vector` members. `releaseSlot()` calls `reset()` on it.
+
+### Layout Convention: `.container`
+
+`buildHeader()` emits only `<nav>` + `<main>` — no wrapping `<div class='container'>`.
+Each page decides independently whether to use the container div.
+
+- **With container** (`max-width: 960px`): wrap page content in `<div class='container'>...</div>`
+- **Without container** (fullscreen): emit content directly into `main`; `main` is a flex-column (`flex:1`), so direct children with `flex:1` fill the full height. No C++ flag needed — controlled purely via CSS.
+
+### Logger Ring Buffer (`OPENKNX_WEBCONSOLE`)
+
+The ring buffer lives in `OpenKNX::Log::Logger` (OGM-Common), **not** in the webserver. It fills regardless of whether WebSocket clients are connected.
+
+- **Type**: plain byte ring, no entries/framing — `char _ringBuf[RING_SIZE]`, written one character at a time via `appendWebconsoleBuffer()` (`_ringBuf[_ringWritePos++ % RING_SIZE] = c`)
+- **Size**: `RING_SIZE = OPENKNX_WEBCONSOLE_BUFSIZE` bytes
+- **API**: `ringBuf()` (raw buffer pointer) and `ringWritePos()` (monotonically increasing write cursor, never wraps itself — callers index with `% RING_SIZE`)
+- No sequence numbers, no sentinels, no line framing on the logger side — `Webconsole::loop()` (below) is the one that walks the buffer and splits it into lines
+
+### RP2040 Architecture (lwIP `NO_SYS=1`)
+
+Critical characteristic: lwIP runs single-threaded. Callbacks (`onAccept`, `onRecv`, `onSent`, `onPoll`, `onErr`) must **not block** and must not perform long operations.
+
+**Connection slots:**
+```
+static constexpr int MAX_CONN = OPENKNX_WEBSERVER_MAX_CONN; // default 3, shared HTTP + WS pool
+static ConnSlot g_slots[MAX_CONN];
+```
+
+`OPENKNX_WEBSERVER_MAX_CONN` (RP2040, default 3) is **not** the same flag as ESP32's `OPENKNX_WEBSOCKET_MAX`: on RP2040 the slot pool is shared between HTTP and WebSocket, so the name reflects that. Raising it also needs more lwIP PCBs (`MEMP_NUM_TCP_PCB`). `OPENKNX_WEBSOCKET_RX_CAP` is shared with ESP32 (per-WS RX limit), but overflow behaviour differs: RP2040 truncates, ESP32 disconnects.
+
+Each `ConnSlot` holds: HTTP RX buffer (1536 B), HTTP TX pointer, WS state machine state, WS payload buffer (`OPENKNX_WEBSOCKET_RX_CAP` B). Per-client webconsole read position is tracked in `Webconsole::_consoleReadPos` (keyed by fd/slot index), not in `ConnSlot` — see below.
+
+**Important:** `onAccept` calls `memset(s, 0, sizeof(*s))`, which clears `s->idx`. Therefore `idx` is set **after** the memset via pointer arithmetic:
+```cpp
+int slotIdx = (int)(s - g_slots);
+memset(s, 0, sizeof(*s));
+s->idx = slotIdx;
+```
+
+**WS state machine** (`wsProcessData`):
+```
+WR_HDR → WR_EXTLEN2 / WR_EXTLEN8 → WR_MASK → WR_PAYLOAD
+```
+State is fully held in `ConnSlot` — no global parser state.
+
+**TCP send:** `wsTcpSend()` checks `tcp_sndbuf()` — if the buffer is full (slow client) the frame is dropped rather than blocking. The connection remains open.
+
+**Ping/keepalive:** `onPoll` sends a WS ping (opcode 0x09) every ~60 s. If the browser does not respond, lwIP's retransmit timeout detects the dead socket and fires `onErr`.
+
+### Command Processing (Decoupling from Network Callbacks)
+
+Platform-neutral, lives in `Webconsole` (`_pendingCmd[256]` / `_hasPendingCmd`), not per-platform.
+
+**Problem:** `processCommand()` calls many log functions that generate serial TX output. Running it inside a network callback (lwIP `onRecv` on RP2040; the httpd task on ESP32) would block and could truncate output or stall the callback's task.
+
+**Solution:** Queue-and-defer pattern:
+- The WS message handler (`addSocket()` callback in `Webconsole::setup()`) only copies the command into `_pendingCmd` and sets `_hasPendingCmd = true`
+- `Webconsole::loop()` (called from `Network::Module::loop()`, clean stack) picks it up, echoes it via the logger, and calls `openknx.console.processCommand()`
+
+**Limitation:** There is only one `_pendingCmd` slot. With multiple simultaneous WS clients the last received message overwrites the previous one. This is sufficient for a single console session.
+
+**Binary frame filter:** WS frames from the browser containing bytes outside printable ASCII (`0x20–0x7E`, `\r`, `\n`, `\t`) are silently discarded. Protects against garbage from malformed or protocol-internal frames (e.g. browser reconnect artifacts).
+
+### No History for New WebSocket Clients
+
+A new client's read position starts at the logger's *current* `ringWritePos()` (`Webconsole::_consoleReadPos[fd]`), not at the oldest available data — it sees only lines logged after it connected, no backlog. Per-client position is tracked in `Webconsole::_consoleReadPos` (map keyed by fd/slot index), reset on disconnect via the socket's `onConnect` callback so a reconnecting client with a reused fd/slot doesn't inherit a stale position and get dumped a backlog. `loop()` sends as many complete lines per tick as fit in a WS frame (`Webserver::maxWebsocketPayload()`), breaking on a failed `sendToClient()` and retrying next tick.
+
+### ESP32 Architecture
+
+- `httpd` runs in its own FreeRTOS task
+- **WebSockets use no per-connection task.** On upgrade the socket is detached from httpd via `httpd_req_async_handler_begin()` so httpd stops polling it; it is then serviced non-blocking from `Webserver::loop()` (driven by the main loop, just like RP2040). The earlier `httpd_sess_set_recv_override` endless-loop monopolized the single httpd task and limited the device to one working WebSocket (a second tab couldn't connect); the task-per-session variant fixed concurrency but cost ~4.3 KB RAM per connection — both are gone.
+- `Webserver::loop()` per session: `recv(MSG_DONTWAIT)` drains available bytes into the session's `rx` buffer, then `wsParseFrames()` dispatches every complete frame (partial frames wait for the next tick). On EOF/error/oversize → cleanup: `notifySocketConnect(false)` → `httpd_req_async_handler_complete()` (httpd closes the socket) → remove from registry → free.
+- `onMessage` runs in the loop task; for the console it only buffers the command into `_pendingCmd`, which `Webconsole::loop()` then runs via `processCommand()`.
+- Concurrency capped at `OPENKNX_WEBSOCKET_MAX` (default 3); excess upgrades get HTTP 503. `config.lru_purge_enable = true` frees idle HTTP keep-alives so new upgrades find a socket slot.
+- Shared state (`_socketClients` + the WS session registry) guarded by a recursive mutex (`Webserver::wsStateLock/Unlock`), reachable from both `Webserver_ESP32.cpp` and the platform-agnostic `Webserver.cpp` (`connectedClientFds`). `wsSendText()`/`wsRawSend()` use `MSG_DONTWAIT` and are serialized by a TX mutex so frames from different tasks never interleave.
+- TCP keepalive: 3 s idle, 2 s interval, 3 probes → dead connections detected after ~9 s
+- **Streaming downloads (`FileManager::handleDownload`) run synchronously in the httpd task** — `platformHttpHandler()` reads the whole file from LittleFS and calls `httpd_resp_send_chunk()` in a blocking loop. Since httpd has a single task, no other HTTP request (including WS upgrades) is served until the download finishes. Acceptable for the small config/log files WEBFS is meant for; would need reworking (spread across `Webserver::loop()` ticks like RP2040 already does) before serving large files.
+
+### WebSocket Protocol Scope
+
+Both platforms parse only what the bundled browser clients actually send: masked, unfragmented text/binary/ping/pong/close frames. Frames without a mask (disallowed by RFC 6455 for client→server) and fragmented messages (opcode `0x00` continuation, `FIN=0`) are **not validated or reassembled** — not a concern as long as the only clients are this module's own pages, whose `ws.send(string)` calls never produce either. Revisit if the WS endpoints are ever exposed to third-party clients.
+
+### Web UI: Console Page
+
+- **No automatic reconnect** — on connection loss `[Connection lost — reload page]` is shown and the page must be reloaded manually
+- **Reason:** Automatic reconnect caused race conditions in log output and made it harder to debug disconnect causes
+- **The firmware sends raw log lines**, ANSI escapes included — no markup is generated on the device. The browser maps the codes to the CSS classes `red`/`green`/`yellow`/`gray` and inserts every segment via `textContent`, so log text is never parsed as HTML and the WS payload equals the raw line length
+- Chunks are bounded by `Webserver::maxWebsocketPayload()` (RP2040: 1496 B fixed frame buffer, ESP32: unbounded) — a larger payload could never be sent and the drain loop's retry would block the console forever
+- Commands are sent as text frames (WS opcode 0x01), responses come back as ring buffer drain
+
+### Group Monitor (`OPENKNX_WEBMONITOR`, TP only)
+
+`GroupMonitor` (`src/OpenKNX/Network/Webserver/GroupMonitor.{h,cpp}`, member `openknxNetwork.groupmonitor`) — ETS-style live KNX telegram viewer, read-only. Whole feature gated on `#if defined(OPENKNX_WEBMONITOR) && (MASK_VERSION == 0x07B0)` (device with TP connection); class header is `#ifdef OPENKNX_WEBMONITOR` only, the member/setup-call/`.cpp` body add the TP-mask guard.
+
+- **Parallel tap, bypassing the stack:** registers `knx.bau().getDataLinkLayer()->getTPUart().registerReceivedFrame(...)` — the same hook MQTT raw-frame publish uses (`MQTT/Module.cpp`). The callback fires in `processRxFrameBuffer()` (loop task, after repetition filter, before stack processing) for **every** received frame — no filtering.
+- **Read-only on the bus, but not stateless:** the module never sends a telegram. It does accept two WS commands, `busmonitor:on` / `busmonitor:off`, which switch the TPUart between monitoring mode and normal operation (`startMonitoring()` / `reset()`). In monitoring mode the device stops processing KNX telegrams — same as ETS busmonitor. Unauthenticated, like every other webserver endpoint.
+- **Deliberately no ring buffer and no `loop()`** (unlike Webconsole, whose buffer exists because the logger fills independently of clients). `onFrame()` decodes the `TPUart::Frame` and broadcasts compact JSON directly via `webserver.sendWebsocketMessage("/groupmonitor", json)`. Safe from the callback because it shares the loop task with the webserver (ESP32: TX/state mutex; RP2040: single-thread). Slow clients are dropped by the WS layer; new clients see only telegrams arriving after connect.
+- **Decoding:** `humanSource()`/`humanDestination()`, `isGroupAddress()`; APCI from `((d[meta-2]&0x03)<<8)|d[meta-1]` masked to `0x03C0` → Read/Response/Write/other (group only); payload hex = `apduSize()` bytes from `metadataSize()-1`. JSON keys: `src`, `dst`, `ga`, `apci`, `len`, `hex`, `flags` (9 chars `TDIERFBNA`, `_` where not set), plus for group telegrams `addr`, `dpt`, `val`.
+- **Assets** `/assets/groupmonitor.css` + `.js` via `Asset()` (generated `webassets.h`, see [Web Assets](#web-assets-webassets-generated-webassetsh)) + `addStylesheet()`/`addJavaScript()`; client timestamps on arrival; autoscroll/pause/clear; 1000-row cap. `setup()` guarded with `_initialized` so a webserver restart never double-registers the frame callback.
+- **Name/Value/DPT from `/openknx_ga.tsv`** (LittleFS, tab-separated `ga\tdpt\tsubset\thauptgruppe\tmittelgruppe\tname`):
+  - `GATable` (`src/OpenKNX/Network/GATable.{h,cpp}`, member `openknxNetwork.gatable`) — `begin()` loads the TSV once (idempotent) into a sorted POD vector `GAEntry{uint16_t addr; uint8_t dpt; uint8_t sub;}` (4 B/GA, **no strings**, `PsramAllocator` under `OPENKNX_PSRAM`). `getDpt(addr, dpt, sub)` = binary search, no I/O. Parses only fields 0/1/2 on the fly (no large line buffer); skips header + lines without a valid addr. Member/begin-call gated identically to groupmonitor; `gatable.begin()` runs just before `groupmonitor.setup()` in `Module.cpp` and logs the entry count.
+  - **Value decode** in `onFrame()` for Write/Response only, via already-linked knx-stack `KNX_Decode_Value()` (`<knx/dptconvert.h>`, `Dpt`, `KNXValue`) into a stack buffer. Payload prep: `len<=1` → 6-bit value in `d[meta-1]&0x3F`; else `len-1` bytes from `d[meta]`. Formatted (static `decodeValue()`) for DPT 1/5/6/7/8/9/12/13/14/16/17/18; **5.001** is raw 0–255 from the stack → converted to `%`. JSON gains `addr` (numeric GA, group only), `dpt` (`"m.sss"`), `val` (JSON-escaped via `appendJsonEscaped()`).
+  - **Names** stay client-side: browser fetches the TSV (`/filemanager/download?path=%2Fopenknx_ga.tsv`), builds `addr→name` Map, fills the Name column; backend never handles name strings. File absent → columns show `-`, no crash.
+
+---
+
+Changelog: [`CHANGELOG.md`](CHANGELOG.md)
