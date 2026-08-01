@@ -13,12 +13,12 @@
 #include "W5500Phy.h"
 #endif
 
-class NetworkModule;
+namespace OpenKNX { namespace Network { class Module; } } // real type; NetworkModule is a using-alias of this
 
 class EthLinkManager
 {
   public:
-    EthLinkManager(NetworkModule &module) : _module(module) {}
+    EthLinkManager(OpenKNX::Network::Module &module) : _module(module) {}
 
     // Console `net eth`: show current mode (no arg) / set a mode live+persisted (auto|10|100, half|full).
     void logStatus();
@@ -55,7 +55,7 @@ class EthLinkManager
     void applyFixedLive(); // apply the loaded fixed mode live via W5500Phy (boot / reset)
 #endif
 
-    NetworkModule &_module;
+    OpenKNX::Network::Module &_module;
     uint8_t _mode = 0xFF; // 0xFF=unset(auto), 0=auto, 1=10, 2=100
     bool _full = false;   // half-duplex default when forced
 

@@ -31,6 +31,10 @@
 #include "strings.h"
 #include <functional>
 
+#if defined(KNX_IP_LAN) && (defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32))
+#include "driver/EthLinkManager.h" // ETH link mode + auto-fallback ladder (self-guarded: W5500 LAN only)
+#endif
+
 #if defined(ARDUINO_ARCH_ESP32)
 #include <ESPmDNS.h>
 #include <Preferences.h>
@@ -77,6 +81,20 @@ namespace OpenKNX
     namespace Network
     {
 
+#ifdef DEVICE_DISPLAY_MODULE // on-device IP override: a DeviceDisplay network-settings-menu-only feature
+        struct NetworkLocalOverride
+        {
+            bool overrideActive = false; // false -> ignore this block, keep ETS/property config
+            bool useStaticIP = false;    // true -> use ip/subnet/gateway/dns below; false -> DHCP
+            uint8_t ip[4] = {0, 0, 0, 0};
+            uint8_t subnet[4] = {0, 0, 0, 0};
+            uint8_t gateway[4] = {0, 0, 0, 0};
+            uint8_t dns[4] = {0, 0, 0, 0};
+            uint8_t linkMode = 0; // 0=auto, 1=10 Mbit, 2=100 Mbit (matches EthLinkManager::setMode())
+            uint8_t version = 1;  // on-flash format version of this block
+        };
+#endif
+
         class Module : public OpenKNX::Module
         {
           public:
@@ -122,6 +140,22 @@ namespace OpenKNX
             const char *hostName() const { return _hostName; }
 #if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
             void setMulticastAddress(IPAddress address, bool rebootToTakeEffect);
+#endif
+
+#ifdef DEVICE_DISPLAY_MODULE
+            // On-device IP override (DeviceDisplay network-settings menu). Setters only mutate the in-RAM
+            // _localOverride; call applyLocalNetworkConfig() afterwards to persist + apply.
+            void setLocalStaticIpEnabled(bool enabled); // true -> static IP from the setters below; false -> DHCP
+            void setLocalIp(IPAddress ip);
+            void setLocalSubnet(IPAddress subnet);
+            void setLocalGateway(IPAddress gateway);
+            void setLocalDns(IPAddress dns);
+            void applyLocalNetworkConfig(bool rebootToTakeEffect); // persist + apply (live re-init or planned reboot)
+            bool localOverrideActive();                            // true while the local override supersedes ETS config
+            bool localUsesStaticIp();                              // intended mode: override's when active, else _useStaticIP
+            // OTA status for the display's system-priority OTA overlay.
+            bool otaActive() const { return _otaActive; }       // true between OTA onStart and onEnd/onError
+            uint8_t otaProgress() const { return _otaPercent; } // fine OTA progress 0..100 (every chunk)
 #endif
 
 #ifdef OPENKNX_PING
@@ -183,7 +217,9 @@ namespace OpenKNX
             const uint16_t _otaPort = 2040;
             const char *_otaPortString = "2040";
 #endif
-            uint8_t _otaProgress = 0;
+            uint8_t _otaProgress = 0; // last %-step logged (gates the 10% heartbeat log)
+            bool _otaActive = false;  // true while an OTA update runs (onStart..onEnd/onError) -> display overlay
+            uint8_t _otaPercent = 0;  // fine OTA progress 0..100, updated on every onProgress
             IPAddress _staticLocalIP;
             IPAddress _staticSubnetMask;
             IPAddress _staticGatewayIP;
@@ -201,6 +237,9 @@ namespace OpenKNX
             bool _currentLinkState = false;
             uint32_t _lastLinkCheck = false;
             uint32_t _restartTimer = 0;
+#if defined(KNX_IP_LAN) && (defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32))
+            EthLinkManager _ethLink{*this}; // ETH link-speed override + auto-fallback ladder (W5500 LAN)
+#endif
 
             void initPhy();
             void initIp();
@@ -213,6 +252,21 @@ namespace OpenKNX
             void controlKnxIp(bool state);
             void checkKnxIpStatus(); // drives the KNX-IP-Status LED (func 11): green=KNXnet/IP running, orange=link up but KNX-IP down, red=no link
             bool knxIpEnabled();     // is the KNXnet/IP datalink layer currently enabled?
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+            void processAfterStartupDelay() override; // EthLinkManager re-applies the persisted fixed link mode
+#endif
+            // Module-flash persistence. writeFlash()/readFlash() chain the EthLink fixed-mode bytes first
+            // (RP2040+W5500 only), then the local-override block (DEVICE_DISPLAY only). size==0 -> defaults.
+            uint16_t flashSize() override;
+            void writeFlash() override;
+            void readFlash(const uint8_t *data, const uint16_t size) override;
+#ifdef DEVICE_DISPLAY_MODULE
+            NetworkLocalOverride _localOverride;                    // RAM copy; (de)serialized to module flash
+            static constexpr uint16_t NET_OVERRIDE_FLASH_SIZE = 20; // version + 2 flags + 4*4 addr bytes + linkMode
+            void writeLocalOverrideFlash();
+            void readLocalOverrideFlash(const uint8_t *data, const uint16_t size);
+            static void prefillZeroQuartet(uint8_t (&quartet)[4], IPAddress live);
+#endif
 
 #ifdef OPENKNX_PING
             OpenKNX::Network::Ping::Handler _pingHandler;

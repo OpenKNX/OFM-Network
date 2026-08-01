@@ -1,6 +1,6 @@
 #include "EthLinkManager.h"
 #if defined(KNX_IP_LAN) && (defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32))
-#include "NetworkModule.h" // for _module.name() (log prefix)
+#include "OpenKNX/Network/Module.h" // for _module.name() (log prefix)
 #if defined(ARDUINO_ARCH_ESP32)
 #include "Esp32EthLink.h"
 #include <ETH.h>
