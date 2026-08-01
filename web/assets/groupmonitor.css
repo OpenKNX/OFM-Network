@@ -1,0 +1,96 @@
+/* Das Stylesheet wird global eingebunden — body/main nur auf dieser Seite anfassen */
+body:has(#gm-table) {
+    overflow: hidden;
+}
+
+main:has(#gm-table) {
+    height: 100vh;
+    padding: 1em;
+    gap: .5em;
+}
+
+.gm-bar {
+    display: flex;
+    align-items: center;
+    gap: 1em;
+    flex: none;
+}
+
+.gm-bar label {
+    display: flex;
+    align-items: center;
+    gap: .3em;
+    cursor: pointer;
+}
+
+.gm-spacer { flex: 1; }
+
+.gm-status { font-weight: bold; }
+.gm-status-sm { font-size: .55em; font-weight: normal; vertical-align: middle; }
+.gm-status.ok { color: #449841; }
+.gm-status.err { color: #c0392b; }
+
+#gm-clear {
+    padding: .4em 1em;
+    background: #888;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+#gm-clear:hover { background: #666; }
+
+/* Heller Scroll-Container; die Tabelle selbst erbt das Standard-Styling aus base.css */
+.gm-tablewrap {
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+#gm-table {
+    margin-bottom: 0;
+    font-family: monospace;
+    font-size: 1em;
+    width: 100%;
+}
+
+#gm-table thead th { position: sticky; top: 0; }
+#gm-table td.gm-data { word-break: break-all; }
+
+.gm-w { color: #1565c0; }
+.gm-r { color: #b8860b; }
+.gm-rsp { color: #2e7d32; }
+.gm-flag { color: #888; font-size: .85em; }
+
+.gm-sysrow td {
+    border-top: 1px solid #ddd;
+    font-family: inherit;
+    font-size: inherit;
+}
+
+.gm-sysmsg { color: #555; }
+.gm-sys-ok { color: #357a31; }
+.gm-sys-err { color: #c0392b; }
+
+#gm-startstop {
+    padding: .4em 1em;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    color: #fff;
+}
+
+#gm-startstop.running { background: #c0392b; }
+#gm-startstop.running:hover { background: #a93226; }
+#gm-startstop.stopped { background: #449841; }
+#gm-startstop.stopped:hover { background: #357a31; }
+
+.gm-busmon-warn {
+    color: #b8860b;
+    font-size: .85em;
+    font-weight: bold;
+}
+
+input[type=checkbox]:disabled + span { color: #aaa; }

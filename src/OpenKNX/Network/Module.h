@@ -12,6 +12,10 @@
 #ifdef OPENKNX_WEBFS
 #include "OpenKNX/Network/Webserver/FileManager.h"
 #endif
+#ifdef OPENKNX_WEBMONITOR
+#include "OpenKNX/Network/Webserver/GroupMonitor.h"
+#include "OpenKNX/Network/GATable.h"
+#endif
 #ifdef OPENKNX_MQTT
 #include "OpenKNX/Network/MQTT/Module.h"
 #endif
@@ -133,6 +137,10 @@ namespace OpenKNX
 #endif
 #ifdef OPENKNX_WEBFS
             OpenKNX::Network::FileManager filemanager;
+#endif
+#if defined(OPENKNX_WEBMONITOR) && (MASK_VERSION == 0x07B0)
+            OpenKNX::Network::GroupMonitor groupmonitor;
+            OpenKNX::Network::GATable gatable;
 #endif
 #ifdef OPENKNX_MQTT
             OpenKNX::Network::MQTT::Module mqtt;
