@@ -1,0 +1,69 @@
+async function uploadFile() {
+    const file = document.getElementById('fi').files[0];
+    if (!file) return;
+    const base = currentDir === '/' ? '' : currentDir;
+    const path = base + '/' + file.name;
+    const CHUNK = 2048;
+    const bar = document.getElementById('bar');
+    const st = document.getElementById('st');
+    const picker = document.getElementById('fm-picker');
+    picker.classList.add('fm-hidden');
+    bar.classList.remove('fm-hidden');
+    bar.value = 0;
+    st.textContent = '';
+    try {
+        for (let off = 0; off < file.size || off === 0; off += CHUNK) {
+            const end = Math.min(off + CHUNK, file.size);
+            const r = await fetch('/filemanager/upload?path=' + encodeURIComponent(path) + '&offset=' + off,
+                { method: 'POST', body: file.slice(off, end), headers: { 'Content-Type': 'application/octet-stream' } });
+            if (!r.ok) {
+                const msg = await r.text();
+                throw new Error(r.status === 409 ? 'Datei existiert bereits – zuerst löschen'
+                    : r.status === 413 ? 'Dateisystem voll – Speicherplatz reicht nicht aus'
+                    : msg);
+            }
+            bar.value = Math.round(end / file.size * 100);
+            if (end >= file.size) break;
+        }
+        st.textContent = '✓ Hochgeladen';
+        setTimeout(() => location.reload(), 800);
+    } catch (e) {
+        st.textContent = 'Fehler: ' + e.message;
+        bar.classList.add('fm-hidden');
+        picker.classList.remove('fm-hidden');
+    }
+}
+
+async function delFile(path) {
+    if (!confirm('Datei löschen: ' + path + '?')) return;
+    const r = await fetch('/filemanager/delete?path=' + encodeURIComponent(path), { method: 'POST' });
+    if (r.ok) location.reload(); else alert(await r.text());
+}
+
+async function delDir(path) {
+    if (!confirm('Ordner löschen: ' + path + '?')) return;
+    const r = await fetch('/filemanager/delete?path=' + encodeURIComponent(path), { method: 'POST' });
+    if (r.ok) location.reload(); else alert(await r.text());
+}
+
+async function mkDir() {
+    const name = document.getElementById('nd').value.trim();
+    if (!name) return;
+    const base = currentDir === '/' ? '' : currentDir;
+    const path = base + '/' + name;
+    const r = await fetch('/filemanager/mkdir?path=' + encodeURIComponent(path), { method: 'POST' });
+    if (r.ok) location.reload(); else alert(await r.text());
+}
+
+{
+    const _fi = document.getElementById('fi');
+    const _btn = document.getElementById('fi-btn');
+    const _nm = document.getElementById('fi-name');
+    if (_fi && _btn && _nm) {
+        _btn.addEventListener('click', () => _fi.click());
+        _btn.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') _fi.click(); });
+        _fi.addEventListener('change', function () {
+            _nm.textContent = this.files[0] ? this.files[0].name : 'Keine Datei ausgewählt.';
+        });
+    }
+};

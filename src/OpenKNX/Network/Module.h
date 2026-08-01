@@ -9,6 +9,9 @@
 #ifdef OPENKNX_WEBCONSOLE
 #include "OpenKNX/Network/Webserver/Webconsole.h"
 #endif
+#ifdef OPENKNX_WEBFS
+#include "OpenKNX/Network/Webserver/FileManager.h"
+#endif
 #ifdef OPENKNX_MQTT
 #include "OpenKNX/Network/MQTT/Module.h"
 #endif
@@ -127,6 +130,9 @@ namespace OpenKNX
 #endif
 #ifdef OPENKNX_WEBCONSOLE
             OpenKNX::Network::Webconsole webconsole;
+#endif
+#ifdef OPENKNX_WEBFS
+            OpenKNX::Network::FileManager filemanager;
 #endif
 #ifdef OPENKNX_MQTT
             OpenKNX::Network::MQTT::Module mqtt;

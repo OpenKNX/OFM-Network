@@ -615,12 +615,18 @@ namespace OpenKNX
 #ifdef OPENKNX_WEBCONSOLE
                     webconsole.setup();
 #endif
+#ifdef OPENKNX_WEBFS
+                    filemanager.setup();
+#endif
                 }
                 if (webserver.isRunning())
                 {
                     webserver.loop();
 #ifdef OPENKNX_WEBCONSOLE
                     webconsole.loop();
+#endif
+#ifdef OPENKNX_WEBFS
+                    filemanager.loop();
 #endif
                 }
             }
