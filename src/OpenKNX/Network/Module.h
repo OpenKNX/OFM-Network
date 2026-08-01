@@ -241,6 +241,50 @@ namespace OpenKNX
             EthLinkManager _ethLink{*this}; // ETH link-speed override + auto-fallback ladder (W5500 LAN)
 #endif
 
+            // ---- W5500 clean self-heal (no MCU reboot) ----
+            // The W5500 sometimes doesn't answer right after (re)boot and can wedge after a clean start. At boot
+            // we retry begin() with an RSTn reset between tries; at runtime checkEthHealth() probes VERSIONR and,
+            // on a wedge, recoverEth() re-inits (never the driver's end() alone -> it busy-waits forever on a
+            // stuck chip -> brick). Heals as soon as the chip answers; no reboot needed.
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+            bool _ethDegraded = false;   // true: W5500 not up yet, loop() is running the self-heal retry
+            uint32_t _lastEthHeal = 0;   // millis() of the last self-heal attempt (throttle)
+            uint32_t _lastEthHealth = 0; // millis() of the last runtime chip-health probe (throttle)
+            uint8_t _ethBadProbes = 0;   // consecutive VERSIONR != 0x04 reads (debounce before recovery)
+            void hwResetPhy();           // pulse PIN_ETH_RES (RSTn low >=500us) + settle before any SPI access
+            bool tryBeginEth();          // one clean bring-up: HW reset + KNX_NETIF.begin(), VERSIONR-classify on fail
+            bool beginEthWithRetry();    // boot: tryBeginEth() up to ETH_BEGIN_TRIES with backoff
+            void ethSelfHeal();          // loop(): throttled tryBeginEth() while _ethDegraded, clears it on success
+            void checkEthHealth();       // loop(): periodic VERSIONR probe; recoverEth() on repeated failure
+            void recoverEth();           // runtime: HW-reset -> safe end() -> hand to ethSelfHeal() (no reboot/brick)
+            static constexpr uint8_t ETH_BEGIN_TRIES = 4;
+            static constexpr uint16_t ETH_BEGIN_BACKOFF_MS = 150;
+            static constexpr uint32_t ETH_HEAL_INTERVAL_MS = 5000;
+            static constexpr uint32_t ETH_HEALTH_INTERVAL_MS = 5000;
+            static constexpr uint8_t ETH_BAD_PROBE_LIMIT = 3;
+#endif
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+            // RP2040 mDNS via the lwIP API directly (SimpleMDNS.addServiceTxt is broken on arduino-pico ->
+            // TXT silently dropped). Idempotent so a link flap / W5500 recovery re-registers cleanly.
+            void registerOpenknxMdns();
+            bool _mdnsWasEstablished = false; // rising edge for the re-registration in checkLinkStatus()
+#endif
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+            void pumpEthernet();         // drive W5500 RX + lwIP timers from the main loop (INT off), called from loop()
+            void setEthOtaPump(bool on); // OTA: hand RX to the async IRQ pump so the blocking OTA read isn't loop-starved
+#endif
+#if defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
+            // W5500-on-ESP hard-wedge recovery (link-based: esp_eth owns the SPI bus, we cannot raw-read VERSIONR).
+            void checkEthHealthEsp();
+            uint32_t _lastEthDownEsp = 0;       // millis() the link first went down (0 = up/established)
+            uint32_t _lastEthHealEsp = 0;       // throttle between recovery attempts
+            bool _ethWasEstablishedEsp = false; // sticky: a real link+IP came up at least once this session
+            uint8_t _ethHealBackoffStep = 0;    // exponential backoff index for recovery attempts
+            static constexpr uint32_t ETH_ESP_WEDGE_MS = 30000;
+            static constexpr uint32_t ETH_ESP_HEAL_INTERVAL_MS = 30000;
+            static constexpr uint32_t ETH_ESP_HEAL_INTERVAL_MAX_MS = 120000;
+#endif
+
             void initPhy();
             void initIp();
             void loadSettings();

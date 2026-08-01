@@ -35,11 +35,29 @@
 
 #if defined(KNX_IP_LAN)
 #include "W5500lwIP.h"
-#ifdef PIN_ETH_INT
+#include <lwip/apps/mdns.h> // RP2040 mDNS via the lwIP API directly (SimpleMDNS.addServiceTxt broken on arduino-pico)
+#include <lwip/netif.h>
+// OPENKNX_ETH_W5500_MAINLOOP_RX: build the driver WITHOUT the INT pin so RX is NOT IRQ-driven; we pump the chip
+// from the main loop (pumpEthernet) instead. Fixes two W5500+lwIP bugs with one root -- RX/timers running in a
+// preemptive IRQ under a non-fair lock: the tunnel-flood watchdog reboot and the 30 s mDNS loop stall.
+#if defined(PIN_ETH_INT) && !defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
 Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE, PIN_ETH_INT);
 #else
 Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE);
 #endif
+
+// mDNS TXT state (file scope so the lwIP announce callback can read it). Idempotent re-registration keeps
+// slot+netif to del-before-add. See Module::registerOpenknxMdns().
+static char _openknxMdnsTxt[7][48]; // "key=value", <= 255 B per DNS TXT item
+static uint8_t _openknxMdnsTxtCount = 0;
+static s8_t _openknxMdnsSlot = -1;
+static struct netif *_openknxMdnsNetif = nullptr;
+static void _openknxMdnsTxtCb(struct mdns_service *service, void *txt_userdata)
+{
+    (void)txt_userdata;
+    for (uint8_t i = 0; i < _openknxMdnsTxtCount; i++)
+        mdns_resp_add_service_txtitem(service, _openknxMdnsTxt[i], (u8_t)strlen(_openknxMdnsTxt[i]));
+}
 #elif defined(KNX_IP_WIFI)
 #else
 #pragma warn "Missing KNX_IP_LAN or KNX_IP_WIFI"
@@ -60,6 +78,17 @@ void openknxLanTraffic(uint32_t &rxPackets, uint32_t &txPackets)
     txPackets = KNX_NETIF.packetsSent();
 }
 #endif
+
+// mDNS "otamode" TXT value from the ETS OTA-Update setting (ParamNET_OTAUpdate): prog | always | off.
+// An unconfigured device has no ETS params -> reports "always" (mirrors handleOTA). File scope so both the
+// ESP (ESPmDNS) and RP2040 (lwIP) mDNS paths read it.
+static const char *otaModeStr()
+{
+    if (!knx.configured()) return "always";
+    if (ParamNET_OTAUpdate == 2) return "off";
+    if (ParamNET_OTAUpdate == 0) return "prog";
+    return "always";
+}
 
 namespace OpenKNX
 {
@@ -357,9 +386,15 @@ namespace OpenKNX
                 logIndentDown();
             }
 
-            KNX_NETIF.setSPISpeed(OPENKNX_NET_SPI_SPEED);
-            if (!KNX_NETIF.begin())
-                openknx.hardware.fatalError(FATAL_NETWORK, "Error communicating with W5500 Ethernet chip");
+            // Bounded W5500 bring-up (setSPISpeed + begin live inside tryBeginEth); on failure go degraded and
+            // let loop()->ethSelfHeal() keep retrying a clean bring-up -- no reboot, no fatalError brick.
+            if (!beginEthWithRetry())
+            {
+                _ethDegraded = true;
+                logIndentUp();
+                logErrorP("W5500 unreachable at boot -> self-heal every %lums, no reboot", (unsigned long)ETH_HEAL_INTERVAL_MS);
+                logIndentDown();
+            }
 #endif
 #endif
         }
@@ -392,14 +427,9 @@ namespace OpenKNX
                 MDNS.addServiceTxt("openknx", "tcp", "address", openknx.info.humanIndividualAddress().c_str());
                 MDNS.addServiceTxt("openknx", "tcp", "ota", _otaPortString);
                 MDNS.addServiceTxt("openknx", "tcp", "configured", knx.configured() ? "1" : "0");
+                MDNS.addServiceTxt("openknx", "tcp", "otamode", otaModeStr());
 #else
-                hMDNSService service = MDNS.addService("openknx", "tcp", -1);
-                MDNS.addServiceTxt(service, "serial", openknx.info.humanSerialNumber().c_str());
-                MDNS.addServiceTxt(service, "version", openknx.info.humanFirmwareVersion().c_str());
-                MDNS.addServiceTxt(service, "firmware", openknx.info.humanFirmwareNumber().c_str());
-                MDNS.addServiceTxt(service, "address", openknx.info.humanIndividualAddress().c_str());
-                MDNS.addServiceTxt(service, "ota", _otaPortString);
-                MDNS.addServiceTxt(service, "configured", (uint8_t)knx.configured());
+                registerOpenknxMdns(); // RP2040: register via lwIP (SimpleMDNS.addServiceTxt broken); reused by checkLinkStatus()
 #endif
                 MDNS.enableArduino(_otaPort /* default port for ota */, false /* AUTH true / false */);
             }
@@ -419,6 +449,9 @@ namespace OpenKNX
             ArduinoOTA.onStart([&]() {
                 _otaActive = true; // display OTA overlay takes over (SYSTEM priority)
                 _otaPercent = 0;
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+                setEthOtaPump(true); // hand W5500 RX to the async IRQ pump so the blocking OTA read isn't loop-starved
+#endif
                 if (ArduinoOTA.getCommand() == U_FLASH)
                     logInfo("OTA", "Start updating firmware");
                 else // U_SPIFFS
@@ -446,6 +479,9 @@ namespace OpenKNX
             });
             ArduinoOTA.onError([&](ota_error_t error) {
                 _otaActive = false; // release the display overlay so normal operation resumes
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+                setEthOtaPump(false); // restore the main-loop RX pump -- device keeps running after an OTA error
+#endif
                 logIndentUp();
                 if (error == OTA_AUTH_ERROR)
                     logError("OTA", "Auth error");
@@ -578,6 +614,11 @@ namespace OpenKNX
 #if defined(KNX_IP_LAN) && defined(OPENKNX_ETH_AUTO_FALLBACK)
             _ethLink.tick(newLinkState, establishedState); // ~2 Hz link tick; walks the auto-fallback ladder
 #endif
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+            // re-register mDNS on the link-up edge (the service is lost with the old netif on a W5500 recovery)
+            if (establishedState && !_mdnsWasEstablished) registerOpenknxMdns();
+            _mdnsWasEstablished = establishedState;
+#endif
 
             if (newLinkState && established())
             {
@@ -676,6 +717,21 @@ namespace OpenKNX
             }
 
             if (_powerSave) return;
+
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+            if (!_otaActive) pumpEthernet(); // drive W5500 RX + lwIP timers from the main loop (INT off);
+                                             // while _otaActive the async IRQ pump owns RX (see setEthOtaPump)
+#endif
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+            if (_ethDegraded)
+            {
+                ethSelfHeal(); // W5500 not up yet: keep retrying a clean bring-up; skip normal link handling
+                return;
+            }
+            checkEthHealth(); // runtime W5500 wedge watchdog -> clean recovery
+#elif defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
+            checkEthHealthEsp(); // ESP+W5500 hard-wedge recovery (link-based); native-EMAC (REG1) excluded
+#endif
 
 #ifdef OPENKNX_PING
             _pingHandler.loop();
@@ -1527,6 +1583,242 @@ namespace OpenKNX
             resetNetwork();
         }
 #endif // DEVICE_DISPLAY_MODULE
+
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+        // Hardware-reset the W5500 via RSTn. NOT the driver's end() (busy-waits forever on a stuck chip -> brick).
+        void Module::hwResetPhy()
+        {
+#if defined(PIN_ETH_RES)
+            pinMode(PIN_ETH_RES, OUTPUT);
+            digitalWrite(PIN_ETH_RES, LOW);
+            delay(2); // datasheet: RSTn low >= 500us
+            digitalWrite(PIN_ETH_RES, HIGH);
+            delay(60); // PLL lock + internal reset done before we touch SPI
+#endif
+        }
+
+        // One bring-up attempt; on failure probe VERSIONR to classify: 0x04 = chip present but socket OPEN not
+        // ready (transient, retry helps); anything else = not answering on SPI (wiring/power/dead).
+        bool Module::tryBeginEth()
+        {
+            hwResetPhy();
+
+            KNX_NETIF.setSPISpeed(OPENKNX_NET_SPI_SPEED);
+            if (KNX_NETIF.begin()) return true;
+
+            uint8_t ver = _ethLink.chipVersion();
+            if (ver == 0x04)
+                logErrorP("W5500 present (VERSIONR=0x04) but socket OPEN failed (Sn_SR != 0x42) - transient");
+            else
+                logErrorP("W5500 not answering on SPI (VERSIONR=0x%02X, expected 0x04)", ver);
+            return false;
+        }
+
+        // Boot bring-up: a few attempts with backoff (worst case well within the active 16s watchdog window).
+        bool Module::beginEthWithRetry()
+        {
+            for (uint8_t i = 1; i <= ETH_BEGIN_TRIES; i++)
+            {
+                if (tryBeginEth())
+                {
+                    if (i > 1) logInfoP("W5500 up on attempt %u/%u", i, ETH_BEGIN_TRIES);
+                    return true;
+                }
+                logErrorP("W5500 begin attempt %u/%u failed", i, ETH_BEGIN_TRIES);
+                delay(ETH_BEGIN_BACKOFF_MS);
+            }
+            return false;
+        }
+
+        // loop() hook while degraded: throttled bring-up retry; clears _ethDegraded once the chip answers,
+        // then checkLinkStatus() takes back over. No reboot.
+        void Module::ethSelfHeal()
+        {
+            // Hold the IP LED red while we are down (checkLinkStatus() - the usual LED driver - is skipped here).
+            if (_ipLedFunc != nullptr && _ipLedState != 3)
+            {
+                _ipLedFunc->color(OpenKNX::Led::Color::Red);
+                _ipLedFunc->on(OpenKNX::Led::Capability::COLOR);
+                _ipLedFunc->off(OpenKNX::Led::Capability::MONOCHROME);
+                _ipLedState = 3;
+            }
+
+            if (!delayCheckMillis(_lastEthHeal, ETH_HEAL_INTERVAL_MS)) return;
+            _lastEthHeal = millis();
+
+            logInfoP("W5500 self-heal: retrying bring-up...");
+            if (tryBeginEth())
+            {
+                _ethDegraded = false;
+                _ipLedState = 0; // force checkLinkStatus() to re-evaluate the LED from the real link next cycle
+                logInfoP("W5500 recovered - network back online");
+            }
+        }
+
+        // Runtime watchdog: the W5500 can wedge after a clean start (a link-down misses it). Probe VERSIONR;
+        // recover only after ETH_BAD_PROBE_LIMIT consecutive failures (debounce a single glitched read).
+        void Module::checkEthHealth()
+        {
+            if (!delayCheckMillis(_lastEthHealth, ETH_HEALTH_INTERVAL_MS)) return;
+            _lastEthHealth = millis();
+
+            // Serialize the raw VERSIONR read against the Wiznet5500lwIP async SPI pump (the driver wraps its
+            // own transactions in this same lock). Without it the reads interleave on the shared bus, VERSIONR
+            // comes back garbage, and a healthy chip is mis-classified "dead" -> KNX-IP teardown.
+            ethernet_arch_lwip_begin();
+            const uint8_t ver = _ethLink.chipVersion();
+            ethernet_arch_lwip_end();
+            if (ver == 0x04)
+            {
+                _ethBadProbes = 0;
+                return;
+            }
+            if (++_ethBadProbes < ETH_BAD_PROBE_LIMIT) return;
+
+            logErrorP("W5500 stopped responding at runtime (VERSIONR=0x%02X != 0x04) after %u probes -> clean recovery", ver, _ethBadProbes);
+            recoverEth();
+        }
+
+        // Brick-free runtime recovery (no reboot): detach KNX-IP, HW-reset FIRST so the driver's end() busy-wait
+        // returns immediately (that unbounded wait is the old brick), end(), then hand to ethSelfHeal().
+        void Module::recoverEth()
+        {
+            controlKnxIp(false);
+            hwResetPhy();
+            KNX_NETIF.end();
+            _ethBadProbes = 0;
+            _lastEthHeal = 0;    // let ethSelfHeal() attempt an immediate first re-begin
+            _ethDegraded = true; // loop() -> ethSelfHeal(): bounded re-begin
+        }
+#endif
+
+#if defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
+        // ESP32 + W5500 hard-wedge recovery. esp_eth reacts to normal link up/down itself; this only rescues a
+        // chip that stays down. Detection is link-based (established()) - unlike RP2040 we cannot raw-read
+        // VERSIONR since esp_eth owns the W5500 SPI bus. After a long down: stop, pulse RSTn, re-apply link, begin.
+        void Module::checkEthHealthEsp()
+        {
+            if (established())
+            {
+                _lastEthDownEsp = 0;
+                _ethWasEstablishedEsp = true; // a genuine link+IP existed -> a later long-down IS a real wedge
+                _ethHealBackoffStep = 0;      // healthy again -> reset the backoff ladder
+                return;
+            }
+
+            // No cable / never-up is a normal idle state, not a wedge: only recover a link that was once
+            // established and then died (recovering never-up was the no-cable boot thrash every ~5s).
+            if (!_ethWasEstablishedEsp) return;
+
+            uint32_t now = millis();
+            if (_lastEthDownEsp == 0) _lastEthDownEsp = now;                  // established link just went down -> clock
+            if ((uint32_t)(now - _lastEthDownEsp) < ETH_ESP_WEDGE_MS) return; // let esp_eth's own reconnect try first
+
+            // Exponential backoff between attempts: 30 -> 60 -> 120s (capped) so a stuck link cannot thrash.
+            uint32_t interval = ETH_ESP_HEAL_INTERVAL_MS << _ethHealBackoffStep;
+            if (interval > ETH_ESP_HEAL_INTERVAL_MAX_MS) interval = ETH_ESP_HEAL_INTERVAL_MAX_MS;
+            if (!delayCheckMillis(_lastEthHealEsp, interval)) return;
+            _lastEthHealEsp = now;
+            if (_ethHealBackoffStep < 2) _ethHealBackoffStep++; // 30 -> 60 -> 120, then hold
+
+            openknx.common.skipLooptimeWarning(); // the ETH.end()/begin() below blocks ~100ms by design
+            logErrorP("W5500 wedged (was established, link down > %lus) -> recovery: ETH stop + RSTn + re-begin", (unsigned long)(ETH_ESP_WEDGE_MS / 1000));
+            controlKnxIp(false);
+            KNX_NETIF.end();
+            pinMode(PIN_ETH_RES, OUTPUT);
+            digitalWrite(PIN_ETH_RES, LOW);
+            delay(2);  // RSTn low >= 500us (datasheet)
+            digitalWrite(PIN_ETH_RES, HIGH);
+            delay(60); // PLL lock before SPI access
+            _ethLink.applyBeforeBegin(); // re-apply forced/auto link mode before begin()
+            KNX_NETIF.begin();
+            KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP);
+            _lastEthDownEsp = now; // restart the wedge clock so we wait a full window before the next attempt
+        }
+#endif
+
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+        // (Re)register the _openknx mDNS service + TXT via lwIP. Idempotent (del-before-add) so a link flap or
+        // W5500 recovery re-registers cleanly. Called from setup() and the link-up edge in checkLinkStatus().
+        void Module::registerOpenknxMdns()
+        {
+            if (!(!knx.configured() || ParamNET_mDNS)) return; // mDNS disabled
+
+            // remove the previous registration if its netif still exists (skip after a recovery -> old netif gone)
+            if (_openknxMdnsNetif != nullptr && _openknxMdnsSlot >= 0)
+                for (struct netif *n = netif_list; n != nullptr; n = n->next)
+                    if (n == _openknxMdnsNetif)
+                    {
+                        mdns_resp_del_service(_openknxMdnsNetif, (u8_t)_openknxMdnsSlot);
+                        break;
+                    }
+            _openknxMdnsSlot = -1;
+            _openknxMdnsNetif = nullptr;
+
+            // rebuild TXT each time -- address/configured can change across a reprogram
+            snprintf(_openknxMdnsTxt[0], sizeof(_openknxMdnsTxt[0]), "serial=%s", openknx.info.humanSerialNumber().c_str());
+            snprintf(_openknxMdnsTxt[1], sizeof(_openknxMdnsTxt[1]), "version=%s", openknx.info.humanFirmwareVersion().c_str());
+            snprintf(_openknxMdnsTxt[2], sizeof(_openknxMdnsTxt[2]), "firmware=%s", openknx.info.humanFirmwareNumber().c_str());
+            snprintf(_openknxMdnsTxt[3], sizeof(_openknxMdnsTxt[3]), "address=%s", openknx.info.humanIndividualAddress().c_str());
+            snprintf(_openknxMdnsTxt[4], sizeof(_openknxMdnsTxt[4]), "ota=%s", _otaPortString);
+            snprintf(_openknxMdnsTxt[5], sizeof(_openknxMdnsTxt[5]), "configured=%u", knx.configured() ? 1u : 0u);
+            snprintf(_openknxMdnsTxt[6], sizeof(_openknxMdnsTxt[6]), "otamode=%s", otaModeStr());
+            _openknxMdnsTxtCount = 7;
+
+            struct netif *n = netif_default ? netif_default : netif_list; // active iface (DHCP default; first at boot)
+            if (n != nullptr)
+            {
+                s8_t slot = mdns_resp_add_service(n, _hostName, "_openknx", DNSSD_PROTO_TCP, 65535, _openknxMdnsTxtCb, nullptr);
+                if (slot >= 0)
+                {
+                    _openknxMdnsSlot = slot;
+                    _openknxMdnsNetif = n;
+                    mdns_resp_announce(n);
+                }
+                else
+                    logErrorP("mDNS: _openknx add_service failed (%d)", (int)slot);
+            }
+        }
+#endif
+
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+        // Drive W5500 RX + lwIP timers from the main loop (the driver is built INT-less here). Idle the
+        // framework async timer on the first pass (not in setup(), which would strand boot-time DHCP).
+        void Module::pumpEthernet()
+        {
+            if (_ethDegraded) return;
+
+            static bool asyncTimerIdled = false;
+            if (!asyncTimerIdled)
+            {
+                lwipPollingPeriod(3600000); // effectively never
+                asyncTimerIdled = true;
+            }
+            ethernet_arch_lwip_begin();
+            KNX_NETIF.handlePackets(); // RX
+            // lwIP timers are ms-granularity; throttle to ~1 ms so we don't burn TP-hot-path cycles at the kHz loop rate
+            static uint32_t lastTimeoutMs = 0;
+            uint32_t nowMs = millis();
+            if (nowMs != lastTimeoutMs)
+            {
+                lastTimeoutMs = nowMs;
+                sys_check_timeouts();
+            }
+            ethernet_arch_lwip_end();
+        }
+
+        // OTA RX handover. The framework OTA read (_runUpdate) is fully blocking and never returns to loop()
+        // mid-transfer, so the once-per-loop pumpEthernet() cannot feed it and the socket RX buffer stalls
+        // (glacial/failing OTA + display hitch). For the transfer we hand RX back to the framework async pump
+        // (HW-alarm IRQ) which fires the W5500 RX drain even inside that blocking read; loop() then skips
+        // pumpEthernet() while _otaActive. 2 ms poll = aggressive OTA RX; on=false restores idle.
+        void Module::setEthOtaPump(bool on)
+        {
+            lwipPollingPeriod(on ? 2 : 3600000); // 2 ms = aggressive OTA RX; 3.6M ms = effectively never (idle)
+            ethernet_arch_lwip_begin();
+            ethernet_arch_lwip_end(); // context-leave -> re-arm the async timeout worker at the new period
+        }
+#endif
 
 #ifdef OPENKNX_PING
         void Module::ping(IPAddress target, std::function<void(IPAddress, bool, uint32_t)> callback, uint32_t timeoutMs)
