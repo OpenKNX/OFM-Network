@@ -2,6 +2,7 @@
 #pragma once
 #include "OpenKNX.h"
 #include "OpenKNX/Led/FunctionManager.h"
+#include "OpenKNX/Network/Ping/Handler.h"
 #include "strings.h"
 #include <functional>
 
@@ -98,6 +99,17 @@ namespace OpenKNX
             void setMulticastAddress(IPAddress address, bool rebootToTakeEffect);
 #endif
 
+#ifdef OPENKNX_PING
+            void ping(IPAddress target, std::function<void(IPAddress, bool, uint32_t)> callback = nullptr,
+                      uint32_t timeoutMs = OPENKNX_PING_TIMEOUT);
+            void ping(IPAddress target, std::function<void(IPAddress, bool)> callback,
+                      uint8_t retries = 2, uint32_t timeoutMs = OPENKNX_PING_TIMEOUT);
+            void ping(const std::string &host, std::function<void(IPAddress, bool, uint32_t)> callback = nullptr,
+                      uint32_t timeoutMs = OPENKNX_PING_TIMEOUT);
+            void ping(const std::string &host, std::function<void(IPAddress, bool)> callback,
+                      uint8_t retries = 2, uint32_t timeoutMs = OPENKNX_PING_TIMEOUT);
+#endif
+
 #ifdef ARDUINO_ARCH_ESP32
             void esp32NetworkEvent(arduino_event_id_t event);
 #endif
@@ -152,6 +164,10 @@ namespace OpenKNX
             void handleMDNS();
             void handleOTA();
             void controlKnxIp(bool state);
+
+#ifdef OPENKNX_PING
+            OpenKNX::Network::Ping::Handler _pingHandler;
+#endif
 
 #ifdef KNX_IP_WIFI
             char _wifiSSID[33] = {};

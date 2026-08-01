@@ -4,6 +4,7 @@
 #include <iostream>
 #include <sstream>
 
+#include "DNS.h"
 #include "Module.h"
 #include "ModuleVersionCheck.h"
 #include "NtpTimeProvider.h"
@@ -592,6 +593,13 @@ namespace OpenKNX
 
             if (_powerSave) return;
 
+#ifdef OPENKNX_PING
+            _pingHandler.loop();
+#endif
+#if defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32)
+            OpenKNX::Network::DNS::loop();
+#endif
+
             checkLinkStatus();
             handleOTA();
         }
@@ -796,6 +804,19 @@ namespace OpenKNX
 // }
 #endif
 
+#ifdef OPENKNX_PING
+            else if (cmd.compare(0, 5, "ping ") == 0)
+            {
+                ping(cmd.substr(5), [](IPAddress ip, bool reachable, uint32_t rttMs) {
+                    if (reachable)
+                        openknx.logger.logWithPrefixAndValues("Network", "Reply from %s in %lu ms", ip.toString().c_str(), rttMs);
+                    else
+                        openknx.logger.logWithPrefixAndValues("Network", "No reply from %s", ip.toString().c_str());
+                });
+                return true;
+            }
+#endif
+
             return false;
         }
 
@@ -865,6 +886,9 @@ namespace OpenKNX
             // openknx.console.printHelpLine("net mc [address|reset]", "Get/Set multicast address");
 #endif
             openknx.console.printHelpLine("net reset", "Reset network adapter");
+#ifdef OPENKNX_PING
+            openknx.console.printHelpLine("ping x.x.x.x", "Ping an IP address");
+#endif
         }
 
         // Link status
@@ -1120,6 +1144,28 @@ namespace OpenKNX
             knx.bau().getDataLinkLayer()->enabled(enable);
 #endif
         }
+
+#ifdef OPENKNX_PING
+        void Module::ping(IPAddress target, std::function<void(IPAddress, bool, uint32_t)> callback, uint32_t timeoutMs)
+        {
+            _pingHandler.ping(target, callback, timeoutMs);
+        }
+
+        void Module::ping(IPAddress target, std::function<void(IPAddress, bool)> callback, uint8_t retries, uint32_t timeoutMs)
+        {
+            _pingHandler.ping(target, callback, retries, timeoutMs);
+        }
+
+        void Module::ping(const std::string &host, std::function<void(IPAddress, bool, uint32_t)> callback, uint32_t timeoutMs)
+        {
+            _pingHandler.ping(host, callback, timeoutMs);
+        }
+
+        void Module::ping(const std::string &host, std::function<void(IPAddress, bool)> callback, uint8_t retries, uint32_t timeoutMs)
+        {
+            _pingHandler.ping(host, callback, retries, timeoutMs);
+        }
+#endif
 
     } // namespace Network
 } // namespace OpenKNX
