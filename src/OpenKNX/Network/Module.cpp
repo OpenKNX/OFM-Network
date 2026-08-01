@@ -178,15 +178,22 @@ namespace OpenKNX
                 }
             }
 
+            // PID_IP_CAPABILITIES = which AUTOMATIC assignment methods this IP stack can do (03_08_03 2.5.7: bit0 BootP,
+            // bit1 DHCP, bit2 AutoIP; manual is always implicit and has no bit). Set UNCONDITIONALLY: capabilities are
+            // fixed and do not depend on the current config.
+#ifdef OPENKNX_NETWORK_AUTOIP
+            // AutoIP build: lwIP runs the DHCP<->AutoIP coop, so the stack advertises DHCP (bit1) AND AutoIP (bit2) = 6.
+            SetByteProperty(PID_IP_CAPABILITIES, 6); // DHCP + AutoIP
+#else
+            // This stack does DHCP only (lwIP, no BootP, no AutoIP) -> value 2.
+            SetByteProperty(PID_IP_CAPABILITIES, 2); // DHCP only
+#endif
+
+            // PID_CURRENT_IP_ASSIGNMENT_METHOD reflects the FINAL resolved assignment method actually IN USE (override included).
             if (_useStaticIP)
-            {
-                SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1);
-            }
+                SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1); // manual / static
             else
-            {
-                SetByteProperty(PID_IP_CAPABILITIES, 6);              // AutoIP + DHCP
-                SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 2); // ToDo
-            }
+                SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 4); // DHCP (03_08_03 2.5.5: 1=manual, 2=BootP, 4=DHCP, 8=AutoIP)
 
 #ifdef KNX_IP_WIFI
             if (strlen(_wifiSSID) == 0)
@@ -481,6 +488,22 @@ namespace OpenKNX
             loadCallbacks(true);
             logIndentDown();
             logEnd();
+
+#ifdef OPENKNX_NETWORK_AUTOIP
+            // AutoIP (RFC 3927) coop fallback: when no DHCP server answered, lwIP self-assigns a link-local
+            // 169.254.0.0/16 address after LWIP_DHCP_AUTOIP_COOP_TRIES DISCOVERs. Reflect the method actually IN
+            // USE in PID_CURRENT_IP_ASSIGNMENT_METHOD (03_08_03 2.5.5: 8=AutoIP, 4=DHCP) so ETS/ftc report it right.
+            // Evaluated here (IP is valid + link-stable), not in loadSettings() where the IP is not yet known; re-runs
+            // on each reconnect (_ipShown is cleared on link loss). Only the DHCP case is refined -- a static/manual
+            // config keeps the method already resolved in loadSettings().
+            if (!_useStaticIP)
+            {
+                IPAddress ip = localIP();
+                SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD,
+                                (ip[0] == 169 && ip[1] == 254) ? 8 : 4); // 8 = AutoIP link-local, 4 = DHCP lease
+            }
+#endif
+
             _ipShown = true;
         }
 
