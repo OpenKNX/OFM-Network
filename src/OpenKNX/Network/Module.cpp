@@ -1206,6 +1206,9 @@ namespace OpenKNX
 
         void Module::controlKnxIp(bool enable)
         {
+            // NOTE: deliberately NOT extended to 0x07B0. On the interface controlKnxIp has always been a no-op
+            // (Bau07B0IP owns the IP datalink lifecycle); toggling it with the link state is untested and could
+            // tear down a live tunnel on a link flap. Router masks only.
 #if MASK_VERSION == 0x091A
             knx.bau().getPrimaryDataLinkLayer()->enabled(enable);
 #elif MASK_VERSION == 0x57B0
@@ -1217,7 +1220,7 @@ namespace OpenKNX
         // distinct from the physical Ethernet/IP link). Counterpart to controlKnxIp().
         bool Module::knxIpEnabled()
         {
-#if MASK_VERSION == 0x091A
+#if MASK_VERSION == 0x091A || MASK_VERSION == 0x07B0 // primary datalink = KNXnet/IP (091A router, 07B0 interface Bau07B0IP)
             return knx.bau().getPrimaryDataLinkLayer()->enabled();
 #elif MASK_VERSION == 0x57B0
             return knx.bau().getDataLinkLayer()->enabled();
