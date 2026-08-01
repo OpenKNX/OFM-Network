@@ -605,6 +605,14 @@ namespace OpenKNX
 
             checkLinkStatus();
             handleOTA();
+
+#ifdef OPENKNX_MQTT
+            if (established())
+            {
+                mqtt.setup(configured);
+                mqtt.loop(configured);
+            }
+#endif
         }
 
         void Module::handleOTA()
