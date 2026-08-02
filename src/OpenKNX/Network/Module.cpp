@@ -225,6 +225,8 @@ namespace OpenKNX
                     length = 0; // will update by write
                     knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, elements, 1, friendlyNameWrite, 0);
                 }
+
+                delete[] friendlyNameRead; // propertyValueRead() allocates the buffer, we have to free it
             }
 
 #ifdef DEVICE_DISPLAY_MODULE
