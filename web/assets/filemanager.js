@@ -14,7 +14,7 @@ async function uploadFile() {
     try {
         for (let off = 0; off < file.size || off === 0; off += CHUNK) {
             const end = Math.min(off + CHUNK, file.size);
-            const r = await fetch('/filemanager/upload?path=' + encodeURIComponent(path) + '&offset=' + off,
+            const r = await fetch('/filemanager/upload?path=' + encodeURIComponent(path) + '&offset=' + off + '&fs=' + currentFs,
                 { method: 'POST', body: file.slice(off, end), headers: { 'Content-Type': 'application/octet-stream' } });
             if (!r.ok) {
                 const msg = await r.text();
@@ -36,13 +36,13 @@ async function uploadFile() {
 
 async function delFile(path) {
     if (!confirm('Datei löschen: ' + path + '?')) return;
-    const r = await fetch('/filemanager/delete?path=' + encodeURIComponent(path), { method: 'POST' });
+    const r = await fetch('/filemanager/delete?path=' + encodeURIComponent(path) + '&fs=' + currentFs, { method: 'POST' });
     if (r.ok) location.reload(); else alert(await r.text());
 }
 
 async function delDir(path) {
     if (!confirm('Ordner löschen: ' + path + '?')) return;
-    const r = await fetch('/filemanager/delete?path=' + encodeURIComponent(path), { method: 'POST' });
+    const r = await fetch('/filemanager/delete?path=' + encodeURIComponent(path) + '&dir=1&fs=' + currentFs, { method: 'POST' });
     if (r.ok) location.reload(); else alert(await r.text());
 }
 
@@ -51,7 +51,7 @@ async function mkDir() {
     if (!name) return;
     const base = currentDir === '/' ? '' : currentDir;
     const path = base + '/' + name;
-    const r = await fetch('/filemanager/mkdir?path=' + encodeURIComponent(path), { method: 'POST' });
+    const r = await fetch('/filemanager/mkdir?path=' + encodeURIComponent(path) + '&fs=' + currentFs, { method: 'POST' });
     if (r.ok) location.reload(); else alert(await r.text());
 }
 
