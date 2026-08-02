@@ -24,6 +24,7 @@ namespace OpenKNX
             uint32_t num[3] = {0, 0, 0};
             bool digit[3] = {false, false, false};
             bool firstLine = true; // Header überspringen
+            _index.reserve(file.size() / 16);              // grobe Schätzung: ~16 Byte/Zeile
 
             auto flushLine = [&]() {
                 // Header (firstLine) und Zeilen ohne gültige Adresse ignorieren.
@@ -41,10 +42,19 @@ namespace OpenKNX
                 digit[0] = digit[1] = digit[2] = false;
             };
 
-            while (file.available())
+            uint8_t buf[128];
+            int bufLen = 0;
+            int bufPos = 0;
+
+            while (true)
             {
-                uint8_t c = 0;
-                file.read(&c, 1);
+                if (bufPos >= bufLen)
+                {
+                    bufLen = file.read(buf, sizeof(buf));
+                    bufPos = 0;
+                    if (bufLen <= 0) break;
+                }
+                uint8_t c = buf[bufPos++];
 
                 if (c == '\n')
                 {
