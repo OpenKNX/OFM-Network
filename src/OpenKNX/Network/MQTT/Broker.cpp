@@ -540,7 +540,7 @@ namespace OpenKNX
                     if (len == 0)
                         _retained.erase(topic);
                     else if (_retained.count(topic) || _retained.size() < OPENKNX_MQTT_BROKER_MAX_RETAINED)
-                        _retained[topic] = {std::string((const char *)payload, len), qos};
+                        _retained.insert_or_assign(topic, RetainedMessage{std::string((const char *)payload, len), qos});
                     else
                         logError("MQTT", "broker: retained limit (%u) reached, dropping '%s'",
                                  (unsigned)OPENKNX_MQTT_BROKER_MAX_RETAINED, topic);
