@@ -10,7 +10,9 @@ async function uploadFile() {
     picker.classList.add('fm-hidden');
     bar.classList.remove('fm-hidden');
     bar.value = 0;
-    st.textContent = '';
+    st.textContent = '⚠︎ Upload läuft – Seite nicht verlassen';
+    // Warn on navigation/link-click while upload is in flight (leaving aborts it)
+    window.onbeforeunload = () => '';
     try {
         for (let off = 0; off < file.size || off === 0; off += CHUNK) {
             const end = Math.min(off + CHUNK, file.size);
@@ -31,6 +33,8 @@ async function uploadFile() {
         st.textContent = 'Fehler: ' + e.message;
         bar.classList.add('fm-hidden');
         picker.classList.remove('fm-hidden');
+    } finally {
+        window.onbeforeunload = null;
     }
 }
 
