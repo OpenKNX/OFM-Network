@@ -23,6 +23,12 @@ namespace OpenKNX
             if (!mimeType) return;
             strncpy(_contentType, mimeType, sizeof(_contentType) - 1);
             _contentType[sizeof(_contentType) - 1] = '\0';
+            if (strncmp(_contentType, "text/", 5) == 0 && strstr(_contentType, "charset") == nullptr)
+            {
+                const char* suffix = "; charset=utf-8";
+                if (strlen(_contentType) + strlen(suffix) < sizeof(_contentType))
+                    strcat(_contentType, suffix);
+            }
         }
 
         void WebResponse::setHeader(const char* name, const char* value)
@@ -176,7 +182,7 @@ namespace OpenKNX
             _bodyOwned = true;
 
             _statusCode = 200;
-            strncpy(_contentType, "text/html", sizeof(_contentType) - 1);
+            strncpy(_contentType, "text/html; charset=utf-8", sizeof(_contentType) - 1);
             _contentType[sizeof(_contentType) - 1] = '\0';
             _useLayout = false;
             _activeMenuUri.clear();
