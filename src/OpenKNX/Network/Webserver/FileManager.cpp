@@ -174,6 +174,31 @@ namespace OpenKNX
             return false;
         }
 
+        static bool drvIsDir(int d, const char* p)
+        {
+#ifdef OPENKNX_SDCARD
+            if (d == DSD) return sd::fileStore.isDir(p);
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (d == DEFC) return efc::fileStore.isDir(p);
+#endif
+            (void)d;
+            (void)p;
+            return false;
+        }
+
+        static bool drvBusy(int d)
+        {
+#ifdef OPENKNX_SDCARD
+            if (d == DSD) return sd::fileStore.busy();
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (d == DEFC) return efc::fileStore.busy();
+#endif
+            (void)d;
+            return false;
+        }
+
         static uint32_t drvSize(int d, const char* p)
         {
             if (d == DINT)
@@ -653,6 +678,12 @@ namespace OpenKNX
                 res.send("Laufwerk nicht verfügbar");
                 return;
             }
+            if (drvBusy(d))
+            {
+                res.setStatus(503);
+                res.send("Laufwerk beschäftigt");
+                return;
+            }
 
             FmCtx* ctx = new FmCtx{d, File(), 0};
             int32_t size = -1;
@@ -700,6 +731,12 @@ namespace OpenKNX
             {
                 res.setStatus(404);
                 res.send("Laufwerk nicht verfügbar");
+                return;
+            }
+            if (drvBusy(d))
+            {
+                res.setStatus(503);
+                res.send("Laufwerk beschäftigt");
                 return;
             }
 
@@ -754,9 +791,9 @@ namespace OpenKNX
                 return;
             }
 
-            // Die Stores kennen kein isDirectory() — dort ist der Client die einzige
-            // Quelle. Bei LittleFS liefert dasselbe open() Existenz und Typ.
-            bool isDir = req.getQueryParam("dir") == "1";
+            // Typ wird serverseitig bestimmt: LittleFS über open(), die SD/EFC-Stores über ihr isDir().
+            // Der dir=-Hinweis des Clients wird nicht mehr benutzt.
+            bool isDir = false;
             if (d == DINT)
             {
                 File f = LittleFS.open(path.c_str(), "r");
@@ -769,11 +806,15 @@ namespace OpenKNX
                 isDir = f.isDirectory();
                 f.close();
             }
-            else if (!drvExists(d, path.c_str()))
+            else
             {
-                res.setStatus(404);
-                res.send("Nicht gefunden");
-                return;
+                if (!drvExists(d, path.c_str()))
+                {
+                    res.setStatus(404);
+                    res.send("Nicht gefunden");
+                    return;
+                }
+                isDir = drvIsDir(d, path.c_str());
             }
 
             res.setContentType("text/plain");
