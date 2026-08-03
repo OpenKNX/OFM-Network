@@ -6,7 +6,6 @@
 #include "webassets.h" // generiert von OGM-Common/scripts/pio/prepare.py aus web/assets/
 #include <LittleFS.h>
 #include <string>
-#include <vector>
 #ifdef OPENKNX_SDCARD
 #include "SdFileStore.h"
 #endif
@@ -175,6 +174,31 @@ namespace OpenKNX
             return false;
         }
 
+        static bool drvIsDir(int d, const char* p)
+        {
+#ifdef OPENKNX_SDCARD
+            if (d == DSD) return sd::fileStore.isDir(p);
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (d == DEFC) return efc::fileStore.isDir(p);
+#endif
+            (void)d;
+            (void)p;
+            return false;
+        }
+
+        static bool drvBusy(int d)
+        {
+#ifdef OPENKNX_SDCARD
+            if (d == DSD) return sd::fileStore.busy();
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (d == DEFC) return efc::fileStore.busy();
+#endif
+            (void)d;
+            return false;
+        }
+
         static uint32_t drvSize(int d, const char* p)
         {
             if (d == DINT)
@@ -298,31 +322,31 @@ namespace OpenKNX
 #endif
         }
 
-        struct Ent
-        {
-            std::string name;
-            uint32_t size;
-            bool dir;
-        };
-
         static const size_t FM_MAX_ENTRIES = 250;
 
-        static bool drvList(int d, const std::string& dir, std::vector<Ent>& out)
+        // Callback statt Ergebnisliste: das Listing wird direkt ins HTML gestreamt.
+        // Ein Container mit 250 Einträgen wären ~10 KB Heap plus Realloc-Peak —
+        // auf RP2040 neben lwIP und den Webserver-Slots zu viel. Dafür wird das
+        // Verzeichnis zweimal durchlaufen (Ordner-Pass, Datei-Pass).
+        // Rückgabe: true, wenn bei FM_MAX_ENTRIES abgebrochen wurde.
+        template <typename Fn>
+        static bool drvForEach(int d, const std::string& dir, Fn fn)
         {
+            size_t seen = 0;
             if (d == DINT)
             {
                 File root = LittleFS.open(dir.c_str(), "r");
                 if (!root) return false;
                 for (File e = root.openNextFile(); e; e = root.openNextFile())
                 {
-                    if (out.size() >= FM_MAX_ENTRIES)
+                    if (seen++ >= FM_MAX_ENTRIES)
                     {
                         e.close();
                         root.close();
                         return true;
                     }
                     std::string p = absPath(dir, e.name());
-                    out.push_back({p.substr(p.rfind('/') + 1), (uint32_t)e.size(), e.isDirectory()});
+                    fn(p.substr(p.rfind('/') + 1), (uint32_t)e.size(), e.isDirectory());
                     e.close();
                 }
                 root.close();
@@ -336,13 +360,13 @@ namespace OpenKNX
                 uint32_t sz = 0;
                 for (uint8_t t; (t = sd::fileStore.dirNext(nm, sizeof(nm), &sz)) != 0;)
                 {
-                    if (out.size() >= FM_MAX_ENTRIES)
+                    if (seen++ >= FM_MAX_ENTRIES)
                     {
                         sd::fileStore.dirClose();
                         return true;
                     }
                     std::string p = absPath(dir, nm);
-                    out.push_back({p.substr(p.rfind('/') + 1), sz, t == 2});
+                    fn(p.substr(p.rfind('/') + 1), sz, t == 2);
                 }
                 sd::fileStore.dirClose();
                 return false;
@@ -356,13 +380,13 @@ namespace OpenKNX
                 uint32_t sz = 0;
                 for (uint8_t t; (t = efc::fileStore.dirNext(nm, sizeof(nm), &sz)) != 0;)
                 {
-                    if (out.size() >= FM_MAX_ENTRIES)
+                    if (seen++ >= FM_MAX_ENTRIES)
                     {
                         efc::fileStore.dirClose();
                         return true;
                     }
                     std::string p = absPath(dir, nm);
-                    out.push_back({p.substr(p.rfind('/') + 1), sz, t == 2});
+                    fn(p.substr(p.rfind('/') + 1), sz, t == 2);
                 }
                 efc::fileStore.dirClose();
                 return false;
@@ -370,6 +394,8 @@ namespace OpenKNX
 #endif
             return false;
         }
+
+        // ── Streaming-Kontext für Download ───────────────────────────
 
         struct FmCtx
         {
@@ -424,6 +450,8 @@ namespace OpenKNX
             delete x;
         }
 
+        // ── setup ────────────────────────────────────────────────────
+
         void FileManager::setup()
         {
             ensureFs();
@@ -454,16 +482,12 @@ namespace OpenKNX
                                               [this](WebRequest& req, WebResponse& res) { handleMkdir(req, res); });
         }
 
+        // ── Verzeichnis-Listing ──────────────────────────────────────
+
         void FileManager::handleList(WebRequest& req, WebResponse& res)
         {
             int d = drvParse(req);
-            if (d == DINT && !ensureFs())
-            {
-                res.setStatus(500);
-                res.send("LittleFS nicht verfügbar");
-                return;
-            }
-            if (!drvAvail(d))
+            if (!drvAvail(d) || (d == DINT && !ensureFs()))
             {
                 res.setStatus(404);
                 res.send("Laufwerk nicht verfügbar");
@@ -478,14 +502,18 @@ namespace OpenKNX
             std::string html;
             html.reserve(2048);
 
+            // Unter der GB-Grenze wird auf 32 Bit gerechnet — die u64-Division
+            // zieht sonst auf RP2040 unnötig Laufzeit-Hilfsroutinen ins Flash.
             auto fmtBytes = [](uint64_t b) -> std::string {
                 char buf[24];
-                if (b >= 1024 * 1024)
-                    snprintf(buf, sizeof(buf), "%.1f MB", b / 1048576.0f);
+                if (b >= 1024ULL * 1024 * 1024)
+                    snprintf(buf, sizeof(buf), "%.1f GB", (double)b / 1073741824.0);
+                else if (b >= 1024 * 1024)
+                    snprintf(buf, sizeof(buf), "%.1f MB", (uint32_t)b / 1048576.0f);
                 else if (b >= 1024)
-                    snprintf(buf, sizeof(buf), "%.1f KB", b / 1024.0f);
+                    snprintf(buf, sizeof(buf), "%.1f KB", (uint32_t)b / 1024.0f);
                 else
-                    snprintf(buf, sizeof(buf), "%llu B", (unsigned long long)b);
+                    snprintf(buf, sizeof(buf), "%lu B", (unsigned long)b);
                 return buf;
             };
 
@@ -542,37 +570,32 @@ namespace OpenKNX
                 html += "'>..</a></td></tr>";
             }
 
-            std::vector<Ent> entries;
-            bool truncated = drvList(d, dir, entries);
             bool hasEntries = false;
+            bool wantDirs = true;
 
-            for (const Ent& e : entries)
-            {
-                if (!e.dir) continue;
+            auto emit = [&](const std::string& name, uint32_t size, bool isDir) {
+                if (isDir != wantDirs) return;
                 hasEntries = true;
-                std::string path = absPath(dir, e.name);
-                html += "<tr><td><a href='/filemanager?";
-                html += q;
-                html += "&dir=";
-                html += urlEncode(path);
-                html += "'>";
-                html += htmlEscape(e.name);
-                html += "/</a></td><td class='right'></td><td class='right'>";
-                html += "<a href='#' onclick=\"delDir('";
-                html += htmlEscape(jsStr(path));
-                html += "'); return false;\">L&ouml;schen</a>";
-                html += "</td></tr>";
-            }
-
-            for (const Ent& e : entries)
-            {
-                if (e.dir) continue;
-                hasEntries = true;
-                std::string path = absPath(dir, e.name);
+                std::string path = absPath(dir, name);
+                if (isDir)
+                {
+                    html += "<tr><td><a href='/filemanager?";
+                    html += q;
+                    html += "&dir=";
+                    html += urlEncode(path);
+                    html += "'>";
+                    html += htmlEscape(name);
+                    html += "/</a></td><td class='right'></td><td class='right'>";
+                    html += "<a href='#' onclick=\"delDir('";
+                    html += htmlEscape(jsStr(path));
+                    html += "'); return false;\">L&ouml;schen</a>";
+                    html += "</td></tr>";
+                    return;
+                }
                 html += "<tr><td>";
-                html += htmlEscape(e.name);
+                html += htmlEscape(name);
                 html += "</td><td class='right'>";
-                html += fmtBytes(e.size);
+                html += fmtBytes(size);
                 html += "</td><td class='right'><a href='/filemanager/download?";
                 html += q;
                 html += "&path=";
@@ -581,7 +604,11 @@ namespace OpenKNX
                 html += htmlEscape(jsStr(path));
                 html += "'); return false;\">L&ouml;schen</a>";
                 html += "</td></tr>";
-            }
+            };
+
+            bool truncated = drvForEach(d, dir, emit);
+            wantDirs = false;
+            truncated |= drvForEach(d, dir, emit);
 
             if (!hasEntries)
                 html += "<tr><td colspan='3'><em>Leer</em></td></tr>";
@@ -601,19 +628,13 @@ namespace OpenKNX
             {
                 uint64_t total = 0, freeBytes = 0;
                 drvSpace(d, freeBytes, total);
-                if (freeBytes > 0 && total > 0)
+                if (total > 0)
                 {
                     html += "<p class='fm-storage'>Speicher: <strong>";
                     html += fmtBytes(freeBytes);
                     html += "</strong> frei von ";
                     html += fmtBytes(total);
                     html += "</p>";
-                }
-                else if (total > 0)
-                {
-                    html += "<p class='fm-storage'>Speicher: <strong>";
-                    html += fmtBytes(total);
-                    html += "</strong> gesamt</p>";
                 }
             }
 
@@ -639,6 +660,8 @@ namespace OpenKNX
             res.send(html.c_str());
         }
 
+        // ── Download (Streaming) ─────────────────────────────────────
+
         void FileManager::handleDownload(WebRequest& req, WebResponse& res)
         {
             int d = drvParse(req);
@@ -652,7 +675,13 @@ namespace OpenKNX
             if (!drvAvail(d) || (d == DINT && !ensureFs()))
             {
                 res.setStatus(404);
-                res.send("Not found");
+                res.send("Laufwerk nicht verfügbar");
+                return;
+            }
+            if (drvBusy(d))
+            {
+                res.setStatus(503);
+                res.send("Laufwerk beschäftigt");
                 return;
             }
 
@@ -675,7 +704,7 @@ namespace OpenKNX
             {
                 delete ctx;
                 res.setStatus(404);
-                res.send("Not found");
+                res.send("Datei nicht gefunden");
                 return;
             }
 
@@ -685,6 +714,8 @@ namespace OpenKNX
             res.setHeader("Content-Disposition", cd.c_str());
             res.sendStream((size_t)size, fmRead, fmCleanup, ctx);
         }
+
+        // ── Upload (chunked: jeder Chunk ist ein separater POST) ─────
 
         void FileManager::handleUpload(WebRequest& req, WebResponse& res)
         {
@@ -698,8 +729,14 @@ namespace OpenKNX
             }
             if (!drvAvail(d) || (d == DINT && !ensureFs()))
             {
-                res.setStatus(500);
+                res.setStatus(404);
                 res.send("Laufwerk nicht verfügbar");
+                return;
+            }
+            if (drvBusy(d))
+            {
+                res.setStatus(503);
+                res.send("Laufwerk beschäftigt");
                 return;
             }
 
@@ -721,6 +758,8 @@ namespace OpenKNX
                 return;
             }
 
+            // LittleFS schreibt erst beim close() auf Flash, write() meldet immer die
+            // Puffergröße. Nur die Dateigröße danach erkennt ein volles Dateisystem.
             if (drvSize(d, path.c_str()) != offset + needed)
             {
                 drvRemove(d, path.c_str(), false);
@@ -732,6 +771,8 @@ namespace OpenKNX
             res.setContentType("text/plain");
             res.send("OK");
         }
+
+        // ── Delete (Datei oder Ordner) ───────────────────────────────
 
         void FileManager::handleDelete(WebRequest& req, WebResponse& res)
         {
@@ -745,12 +786,37 @@ namespace OpenKNX
             }
             if (!drvAvail(d) || (d == DINT && !ensureFs()))
             {
-                res.setStatus(500);
+                res.setStatus(404);
                 res.send("Laufwerk nicht verfügbar");
                 return;
             }
 
-            bool isDir = req.getQueryParam("dir") == "1";
+            // Typ wird serverseitig bestimmt: LittleFS über open(), die SD/EFC-Stores über ihr isDir().
+            // Der dir=-Hinweis des Clients wird nicht mehr benutzt.
+            bool isDir = false;
+            if (d == DINT)
+            {
+                File f = LittleFS.open(path.c_str(), "r");
+                if (!f)
+                {
+                    res.setStatus(404);
+                    res.send("Nicht gefunden");
+                    return;
+                }
+                isDir = f.isDirectory();
+                f.close();
+            }
+            else
+            {
+                if (!drvExists(d, path.c_str()))
+                {
+                    res.setStatus(404);
+                    res.send("Nicht gefunden");
+                    return;
+                }
+                isDir = drvIsDir(d, path.c_str());
+            }
+
             res.setContentType("text/plain");
             if (drvRemove(d, path.c_str(), isDir))
                 res.send("OK");
@@ -760,6 +826,8 @@ namespace OpenKNX
                 res.send(isDir ? "Ordner nicht leer oder Fehler" : "Delete failed");
             }
         }
+
+        // ── Mkdir ────────────────────────────────────────────────────
 
         void FileManager::handleMkdir(WebRequest& req, WebResponse& res)
         {
@@ -773,7 +841,7 @@ namespace OpenKNX
             }
             if (!drvAvail(d) || (d == DINT && !ensureFs()))
             {
-                res.setStatus(500);
+                res.setStatus(404);
                 res.send("Laufwerk nicht verfügbar");
                 return;
             }

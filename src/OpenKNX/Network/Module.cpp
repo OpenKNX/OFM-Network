@@ -777,6 +777,7 @@ namespace OpenKNX
                     filemanager.setup();
 #endif
 #if defined(OPENKNX_WEBMONITOR) && (MASK_VERSION == 0x07B0)
+                    openknx.common.skipLooptimeWarning();
                     gatable.begin();
                     logInfoP("GA table: %u entries from /openknx_ga.tsv", (unsigned)gatable.count());
                     groupmonitor.setup();
