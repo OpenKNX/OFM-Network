@@ -42,7 +42,7 @@ async function delFile(path) {
 
 async function delDir(path) {
     if (!confirm('Ordner löschen: ' + path + '?')) return;
-    const r = await fetch('/filemanager/delete?path=' + encodeURIComponent(path) + '&dir=1&fs=' + currentFs, { method: 'POST' });
+    const r = await fetch('/filemanager/delete?path=' + encodeURIComponent(path) + '&fs=' + currentFs, { method: 'POST' });
     if (r.ok) location.reload(); else alert(await r.text());
 }
 
