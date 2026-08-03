@@ -442,10 +442,14 @@ namespace OpenKNX
                 statusText = "Unauthorized";
             else if (statusCode == 403)
                 statusText = "Forbidden";
+            else if (statusCode == 409)
+                statusText = "Conflict";
             else if (statusCode == 413)
                 statusText = "Content Too Large";
             else if (statusCode == 500)
                 statusText = "Internal Server Error";
+            else if (statusCode == 503)
+                statusText = "Service Unavailable";
 
             char statusStr[32];
             snprintf(statusStr, sizeof(statusStr), "%d %s", statusCode, statusText);
