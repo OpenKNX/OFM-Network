@@ -249,8 +249,22 @@ namespace OpenKNX
                     break;
                 case ARDUINO_EVENT_ETH_GOT_IP:
                 case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+                {
                     logDebugP("Event: Got IP");
-                    controlKnxIp(true);
+                    // Rebind kostet Telegramme, daher nur bei echtem IP-Wechsel.
+                    IPAddress ip = localIP();
+                    if (ip != _boundIp)
+                    {
+                        controlKnxIp(false);
+                        controlKnxIp(true);
+                        _boundIp = ip;
+                    }
+                    break;
+                }
+                case ARDUINO_EVENT_ETH_LOST_IP:
+                case ARDUINO_EVENT_WIFI_STA_LOST_IP:
+                    logDebugP("Event: Lost IP");
+                    controlKnxIp(false);
                     break;
                 case ARDUINO_EVENT_ETH_DISCONNECTED:
                 case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
@@ -491,6 +505,13 @@ namespace OpenKNX
 
             // Get current network state
             bool establishedState = established();
+
+#ifdef ARDUINO_ARCH_ESP32
+            // Fängt einen Link-Flap auf, nach dem GOT_IP ausbleibt. Nur ESP32: RP2040 hat
+            // keine Events und damit keine Lücke.
+            controlKnxIp(establishedState);
+#endif
+
             bool newLinkState;
             if (establishedState)
                 newLinkState = true;
@@ -1187,6 +1208,7 @@ namespace OpenKNX
 #elif MASK_VERSION == 0x57B0
             knx.bau().getDataLinkLayer()->enabled(enable);
 #endif
+            if (!enable) _boundIp = IPAddress(); // Socket zu, Bindung ungültig
         }
 
 #ifdef OPENKNX_PING

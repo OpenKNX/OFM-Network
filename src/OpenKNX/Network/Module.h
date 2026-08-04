@@ -180,6 +180,7 @@ namespace OpenKNX
             IPAddress _staticSubnetMask;
             IPAddress _staticGatewayIP;
             IPAddress _staticNameServerIP;
+            IPAddress _boundIp; // IP, auf die der KNX-Multicast-Socket gebunden ist; leer = nicht gebunden
 
 #ifdef ARDUINO_ARCH_ESP32
             bool espConnected = false;
