@@ -75,6 +75,29 @@ The built-in HTTP/WebSocket server is documented in [`README.Webserver.md`](READ
 
 It also offers an optional **group monitor** (`OPENKNX_WEBMONITOR`) — an ETS-style live view of all KNX telegrams at `/groupmonitor`, available on devices with a TP connection (`MASK_VERSION == 0x07B0`). See [`README.Webserver.md`](README.Webserver.md).
 
+## Web assets
+
+CSS/JS/SVG/image files in a `web/assets/` folder are minified, gzip-compressed and embedded into the firmware (`include/webassets.h`) at build time, so the webserver serves them without a filesystem. The generator lives in `OGM-Common/scripts/pio/prepare.py` and runs only when a webserver is present (`OPENKNX_WEBSERVER`); it collects `web/assets/` from **any built module** (the `OFM-*` / `OGM-*` libraries) **and the application** (the OAM) — each opts in just by having the folder.
+
+Supported: `.css .js .svg .jpg .jpeg .png`. `ota.css` becomes `WebAssets::ota_css_gz` + `ota_css_mime`; duplicate file names abort the build.
+
+**Serving = getting it into the `.bin`.** An asset only ships if compiled code references its symbol — the linker (`--gc-sections`) drops unused ones. Register a route, gated by the feature's `#ifdef` so unused assets fall out automatically:
+
+```cpp
+addRoute(WEB_GET, "/assets/ota.css", Asset(WebAssets::ota_css_mime, WebAssets::ota_css_gz, sizeof(WebAssets::ota_css_gz)));
+```
+
+Each build prints what actually shipped, read from the ELF via `nm`:
+
+```
+MODULE_Network: firmware web assets
+  base_css: 1016 B gz -> in firmware
+  ota_css:  dropped (unused, linker-removed)   # embedded but no route references it
+  total in firmware: 8/12 assets, 5668 B gz
+```
+
+`webassets.h` regenerates only when an asset changes — force it with `rm include/webassets.h` (`pio run -t clean` won't).
+
 ## MQTT
 
 The built-in MQTT 3.1.1 client and broker is documented in [`README.MQTT.md`](README.MQTT.md).
