@@ -86,7 +86,7 @@ namespace OpenKNX
 
           private:
             uint16_t _statusCode = 200;
-            char _contentType[40] = "text/html"; // Kopie statt const char* — kein dangling auf Temporäres
+            char _contentType[40] = "text/html; charset=utf-8"; // Kopie statt const char* — kein dangling auf Temporäres
             uint8_t* _body = nullptr;
             int _bodyLength = 0;
             bool _bodyOwned = true;
