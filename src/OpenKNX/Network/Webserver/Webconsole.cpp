@@ -81,7 +81,7 @@ namespace OpenKNX
                 // Auch ein leerer Befehl wird geloggt und erzeugt so eine Leerzeile.
                 openknx.logger.log(cmd);
                 if (cmd[0] != '\0')
-                    openknx.console.processCommand(cmd);
+                    openknx.console.submitLine(cmd); // divert to an active FTC console tunnel, else run locally (lets `ftc <pa> con` work from the web console)
             }
 
             std::vector<int> clients = openknxNetwork.webserver.connectedClientFds("/console");
