@@ -14,6 +14,7 @@
 * fix: the MQTT broker now always grants and delivers QoS 0 outbound (it tracks no message IDs/acks, so a higher QoS would be invalid on the wire); QoS 2 publishes are still accepted from clients but routed at-least-once rather than held for exactly-once delivery
 * fix: MQTT topic wildcard matching (`+`/`#`) now follows MQTT 3.1.1 §4.7 exactly (e.g. `a/+` matches `a/`, `a/#` matches `a`)
 * note: none of the webserver endpoints (overview, console, file manager, group monitor) require authentication yet — treat the device as trusted-network-only until an auth layer is added
+* fix: `Webserver.cpp` now explicitly includes `buildtime.h` for `BUILD_DATETIME`/`BUILD_TIMESTAMP` (moved there from `versions.h` in OGM-Common)
 
 ## 0.6.0: 2026-05-15
 

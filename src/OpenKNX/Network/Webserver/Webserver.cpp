@@ -4,6 +4,7 @@
 
 #include "OpenKNX.h"
 #include "OpenKNX/Network/Module.h"
+#include "buildtime.h"
 #include "webassets.h" // generiert von OGM-Common/scripts/pio/prepare.py aus web/assets/
 #include <algorithm>
 #include <cstdlib>
