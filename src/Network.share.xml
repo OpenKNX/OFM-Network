@@ -238,6 +238,7 @@ Geräte, die ausschließlich per TP angebunden sind, benötigen hier keine Konfi
                   </when>
                 </choose>
 
+                <ParameterSeparator Id="%AID%_PS-nnn" Text="" UIHint="HorizontalRuler" />
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="Services" UIHint="Headline" />
                 <ParameterRefRef RefId="%AID%_UP-%TT%00031_R-%TT%0003101" IndentLevel="1" HelpContext="NET-MDNS" />
                 
@@ -281,6 +282,7 @@ Geräte, die ausschließlich per TP angebunden sind, benötigen hier keine Konfi
                   </when>
                 </choose>
 
+                <ParameterSeparator Id="%AID%_PS-nnn" Text="" UIHint="HorizontalRuler" />
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="Erweiterte Einstellung" UIHint="Headline" />
 
                 <!-- MQTT Custom Prefix / WiFi-Assistent (shared toggle) -->
@@ -331,6 +333,7 @@ Geräte, die ausschließlich per TP angebunden sind, benötigen hier keine Konfi
                     <ParameterRefRef RefId="%AID%_UP-%TT%00072_R-%TT%0007201" IndentLevel="1" HelpContext="NET-MQTT" />
                     <ParameterRefRef RefId="%AID%_UP-%TT%00073_R-%TT%0007301" IndentLevel="1" HelpContext="NET-MQTT" />
 
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="" UIHint="HorizontalRuler" />
                     <ParameterSeparator Id="%AID%_PS-nnn" Text="Erweiterte Funktionen" UIHint="Headline" />
                     <ParameterRefRef RefId="%AID%_P-%TT%01003_R-%TT%0100300" IndentLevel="1" HelpContext="NET-MQTT" />
                     <choose ParamRefId="%AID%_P-%TT%01003_R-%TT%0100300">
