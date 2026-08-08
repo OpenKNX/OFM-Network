@@ -2,6 +2,7 @@
 
 #include "OpenKNX/Network/Webserver/FileManager.h"
 #include "OpenKNX/Network/Module.h"
+#include "OpenKNX/Charset.hpp"
 #include "OpenKNX/Network/Webserver/Webserver.h"
 #include "webassets.h" // generiert von OGM-Common/scripts/pio/prepare.py aus web/assets/
 #include <LittleFS.h>
@@ -33,8 +34,16 @@ namespace OpenKNX
 
         std::string FileManager::sanitizePath(const std::string& raw)
         {
-            if (raw.empty() || raw.find("..") != std::string::npos) return "";
-            return (raw[0] == '/') ? raw : ("/" + raw);
+            if (raw.empty()) return "";
+
+            // Browser sends UTF-8, filesystem is ISO-8859-15; '?' fallback -> '_'.
+            std::string path;
+            OpenKNX::Charset::decodeUtf8(path, raw.data(), raw.size());
+            for (char& c : path)
+                if (c == '?') c = '_';
+
+            if (path.empty() || path.find("..") != std::string::npos) return "";
+            return (path[0] == '/') ? path : ("/" + path);
         }
 
         std::string FileManager::urlEncode(const std::string& s)
@@ -517,11 +526,15 @@ namespace OpenKNX
                 return buf;
             };
 
+            // dir stays ISO-8859-15 for drvForEach below; dirUtf8 for display/links/JS.
+            std::string dirUtf8;
+            OpenKNX::Charset::encodeUtf8(dirUtf8, dir.data(), dir.size());
+
             html += "<div class='container'><h1>Dateiverwaltung";
             if (dir != "/")
             {
                 html += " &ndash; ";
-                html += htmlEscape(dir);
+                html += htmlEscape(dirUtf8);
             }
             html += "</h1>";
 
@@ -563,10 +576,12 @@ namespace OpenKNX
             {
                 std::string parent = dir.substr(0, dir.rfind('/'));
                 if (parent.empty()) parent = "/";
+                std::string parentUtf8;
+                OpenKNX::Charset::encodeUtf8(parentUtf8, parent.data(), parent.size());
                 html += "<tr><td colspan='3'><a href='/filemanager?";
                 html += q;
                 html += "&dir=";
-                html += urlEncode(parent);
+                html += urlEncode(parentUtf8);
                 html += "'>..</a></td></tr>";
             }
 
@@ -576,7 +591,10 @@ namespace OpenKNX
             auto emit = [&](const std::string& name, uint32_t size, bool isDir) {
                 if (isDir != wantDirs) return;
                 hasEntries = true;
-                std::string path = absPath(dir, name);
+                // name is ISO-8859-15 (filesystem); convert for display/links.
+                std::string nameUtf8;
+                OpenKNX::Charset::encodeUtf8(nameUtf8, name.data(), name.size());
+                std::string path = absPath(dirUtf8, nameUtf8);
                 if (isDir)
                 {
                     html += "<tr><td><a href='/filemanager?";
@@ -584,7 +602,7 @@ namespace OpenKNX
                     html += "&dir=";
                     html += urlEncode(path);
                     html += "'>";
-                    html += htmlEscape(name);
+                    html += htmlEscape(nameUtf8);
                     html += "/</a></td><td class='right'></td><td class='right'>";
                     html += "<a href='#' onclick=\"delDir('";
                     html += htmlEscape(jsStr(path));
@@ -593,7 +611,7 @@ namespace OpenKNX
                     return;
                 }
                 html += "<tr><td>";
-                html += htmlEscape(name);
+                html += htmlEscape(nameUtf8);
                 html += "</td><td class='right'>";
                 html += fmtBytes(size);
                 html += "</td><td class='right'><a href='/filemanager/download?";
@@ -650,7 +668,7 @@ namespace OpenKNX
                     "<div class='fm-upload-status'><span id='st'></span></div>";
 
             html += "<script>const currentDir='";
-            html += jsStrScriptBody(dir);
+            html += jsStrScriptBody(dirUtf8);
             html += "';const currentFs='";
             html += fs;
             html += "';</script></div>";

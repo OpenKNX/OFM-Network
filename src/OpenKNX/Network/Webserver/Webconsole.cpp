@@ -3,6 +3,7 @@
 #include "OpenKNX/Network/Webserver/Webconsole.h"
 #include "OpenKNX.h"
 #include "OpenKNX/Network/Module.h"
+#include "OpenKNX/Charset.hpp"
 #include "OpenKNX/Network/Webserver/Webserver.h"
 #include "webassets.h"
 
@@ -136,10 +137,14 @@ namespace OpenKNX
                     }
                     if (!foundNewline && writePos - readPos < maxLine) break;
 
-                    std::string line;
-                    line.reserve(pos - readPos);
+                    // Ring buffer is ISO-8859-15; WS text frame needs UTF-8.
+                    std::string raw;
+                    raw.reserve(pos - readPos);
                     for (uint32_t i = readPos; i < pos; i++)
-                        line += openknx.logger.ringBuf()[i % Log::Logger::RING_SIZE];
+                        raw += openknx.logger.ringBuf()[i % Log::Logger::RING_SIZE];
+                    std::string line;
+                    line.reserve(raw.size());
+                    OpenKNX::Charset::encodeUtf8(line, raw.data(), raw.size());
 
                     if (!openknxNetwork.webserver.sendToClient("/console", fd, line.c_str(), line.size())) break;
                     readPos = pos;

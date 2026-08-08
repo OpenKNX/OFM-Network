@@ -9,6 +9,11 @@
 #define OPENKNX_LEDFUNC_KNXIP_STATE 11
 #endif
 #include "OpenKNX/Network/Ping/Handler.h"
+#if defined(OPENKNX_WEBSERVER)
+    #ifndef OPENKNX_CHARSET
+        #define OPENKNX_CHARSET
+    #endif
+#endif
 #ifdef OPENKNX_WEBSERVER
 #include "OpenKNX/Network/Webserver/Webserver.h"
 #endif
@@ -225,6 +230,7 @@ namespace OpenKNX
             IPAddress _staticSubnetMask;
             IPAddress _staticGatewayIP;
             IPAddress _staticNameServerIP;
+            IPAddress _boundIp; // IP, auf die der KNX-Multicast-Socket gebunden ist; leer = nicht gebunden
 
 #ifdef ARDUINO_ARCH_ESP32
             bool espConnected = false;
