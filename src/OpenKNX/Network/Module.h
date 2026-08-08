@@ -3,6 +3,11 @@
 #include "OpenKNX.h"
 #include "OpenKNX/Led/FunctionManager.h"
 #include "OpenKNX/Network/Ping/Handler.h"
+#if defined(OPENKNX_WEBSERVER)
+    #ifndef OPENKNX_CHARSET
+        #define OPENKNX_CHARSET
+    #endif
+#endif
 #ifdef OPENKNX_WEBSERVER
 #include "OpenKNX/Network/Webserver/Webserver.h"
 #endif

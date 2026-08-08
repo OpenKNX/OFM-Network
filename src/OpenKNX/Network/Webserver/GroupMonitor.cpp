@@ -3,12 +3,14 @@
 #include "OpenKNX/Network/Webserver/GroupMonitor.h"
 #include "OpenKNX.h"
 #include "OpenKNX/Network/Module.h"
+#include "OpenKNX/Charset.hpp"
 #include "OpenKNX/Network/Webserver/Webserver.h"
 #include "webassets.h" // generiert von OGM-Common/scripts/pio/prepare.py aus web/assets/
 
 #include <knx/dptconvert.h> // KNX_Decode_Value, Dpt, KNXValue (bereits gelinkt)
 
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 namespace OpenKNX
@@ -179,7 +181,8 @@ namespace OpenKNX
             const uint8_t len = frame.apduSize();      // Anzahl Payload-Bytes ab meta-1
 
             // APCI-Typ nur für Gruppentelegramme sinnvoll.
-            const char* apci = "\xE2\x80\x94"; // em dash
+            // ASCII placeholder, not an em dash -- avoids clashing with val's Latin-15->UTF-8 conversion below.
+            const char* apci = "-";
             bool hasValue = false;             // Write/Response tragen einen Wert
             if (ga && total >= meta)
             {
@@ -248,7 +251,12 @@ namespace OpenKNX
             json += ",\"dpt\":\"";
             json += dptStr;
             json += "\",\"val\":\"";
-            appendJsonEscaped(json, val);
+            {
+                // val is raw DPT16 bus data (ISO-8859-15); WS text frame needs UTF-8.
+                std::string valUtf8;
+                OpenKNX::Charset::encodeUtf8(valUtf8, val, strlen(val));
+                appendJsonEscaped(json, valUtf8.c_str());
+            }
             json += "\",\"hex\":\"";
             json += hex;
             json += "\",\"flags\":\"";

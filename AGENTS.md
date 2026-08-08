@@ -214,6 +214,10 @@ Without `OPENKNX_WEBSERVER` no webserver code is compiled at all — no class, n
 | **ESP32** | FreeRTOS + esp-idf `httpd` | `Webserver_ESP32.cpp` |
 | **RP2040** | lwIP `NO_SYS=1`, single-threaded | `Webserver_RP2040.cpp` |
 
+### Character Encoding
+
+The webserver is UTF-8 end to end; the KNX bus and the device's storage (filenames) are ISO-8859-15. Mind the boundary — convert with `OpenKNX::Charset::encodeUtf8`/`decodeUtf8` (`OGM-Common/src/OpenKNX/Charset.hpp`) wherever a bus/filesystem string reaches the webserver. See [README.Webserver.md § Character Encoding](README.Webserver.md#character-encoding) for why and the concrete call sites.
+
 ### Asset Management (`addStylesheet` / `addJavaScript`)
 
 The webserver provides a flexible system for managing CSS and JavaScript assets:
