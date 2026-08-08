@@ -2,39 +2,22 @@
 
 #include "OpenKNX/Network/Webserver/FileManager.h"
 #include "OpenKNX/Network/Module.h"
+#include "OpenKNX/Charset.hpp"
 #include "OpenKNX/Network/Webserver/Webserver.h"
 #include "webassets.h" // generiert von OGM-Common/scripts/pio/prepare.py aus web/assets/
 #include <LittleFS.h>
 #include <string>
+#ifdef OPENKNX_SDCARD
+#include "SdFileStore.h"
+#endif
+#ifdef OPENKNX_EXTFLASH
+#include "EfcFileStore.h"
+#endif
 
 namespace OpenKNX
 {
     namespace Network
     {
-
-        // filemanager.css/filemanager.js liegen in web/assets/ und werden dort
-        // minifiziert + gzip-komprimiert in webassets.h eingebettet.
-
-        // ── LittleFS Streaming-Kontext ────────────────────────────────────────
-
-        struct FmFileCtx
-        {
-            File f;
-        };
-
-        static size_t fmFileRead(void* ctx, uint8_t* buf, size_t maxLen)
-        {
-            return static_cast<FmFileCtx*>(ctx)->f.read(buf, maxLen);
-        }
-
-        static void fmFileCleanup(void* ctx)
-        {
-            FmFileCtx* fc = static_cast<FmFileCtx*>(ctx);
-            if (fc->f) fc->f.close();
-            delete fc;
-        }
-
-        // ── Hilfsmethoden ────────────────────────────────────────────────────
 
         bool FileManager::ensureFs()
         {
@@ -51,8 +34,16 @@ namespace OpenKNX
 
         std::string FileManager::sanitizePath(const std::string& raw)
         {
-            if (raw.empty() || raw.find("..") != std::string::npos) return "";
-            return (raw[0] == '/') ? raw : ("/" + raw);
+            if (raw.empty()) return "";
+
+            // Browser sends UTF-8, filesystem is ISO-8859-15; '?' fallback -> '_'.
+            std::string path;
+            OpenKNX::Charset::decodeUtf8(path, raw.data(), raw.size());
+            for (char& c : path)
+                if (c == '?') c = '_';
+
+            if (path.empty() || path.find("..") != std::string::npos) return "";
+            return (path[0] == '/') ? path : ("/" + path);
         }
 
         std::string FileManager::urlEncode(const std::string& s)
@@ -136,7 +127,339 @@ namespace OpenKNX
             return (dir == "/" ? "" : dir) + "/" + entryName;
         }
 
-        // ── setup ─────────────────────────────────────────────────────────────
+        enum
+        {
+            DINT = 0,
+            DSD = 1,
+            DEFC = 2
+        };
+
+        static int drvParse(WebRequest& req)
+        {
+            std::string s = req.getQueryParam("fs");
+#ifdef OPENKNX_SDCARD
+            if (s == "sd") return DSD;
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (s == "efc") return DEFC;
+#endif
+            (void)s;
+            return DINT;
+        }
+
+        static const char* drvId(int d)
+        {
+#ifdef OPENKNX_SDCARD
+            if (d == DSD) return "sd";
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (d == DEFC) return "efc";
+#endif
+            (void)d;
+            return "int";
+        }
+
+        static bool drvAvail(int d)
+        {
+            if (d == DINT) return true;
+#ifdef OPENKNX_SDCARD
+            if (d == DSD) return sd::fileStore.available();
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (d == DEFC) return efc::fileStore.available();
+#endif
+            return false;
+        }
+
+        static bool drvExists(int d, const char* p)
+        {
+            if (d == DINT) return LittleFS.exists(p);
+#ifdef OPENKNX_SDCARD
+            if (d == DSD) return sd::fileStore.exists(p);
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (d == DEFC) return efc::fileStore.exists(p);
+#endif
+            return false;
+        }
+
+        static bool drvIsDir(int d, const char* p)
+        {
+#ifdef OPENKNX_SDCARD
+            if (d == DSD) return sd::fileStore.isDir(p);
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (d == DEFC) return efc::fileStore.isDir(p);
+#endif
+            (void)d;
+            (void)p;
+            return false;
+        }
+
+        static bool drvBusy(int d)
+        {
+#ifdef OPENKNX_SDCARD
+            if (d == DSD) return sd::fileStore.busy();
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (d == DEFC) return efc::fileStore.busy();
+#endif
+            (void)d;
+            return false;
+        }
+
+        static uint32_t drvSize(int d, const char* p)
+        {
+            if (d == DINT)
+            {
+                File f = LittleFS.open(p, "r");
+                uint32_t s = f ? (uint32_t)f.size() : 0;
+                if (f) f.close();
+                return s;
+            }
+#ifdef OPENKNX_SDCARD
+            if (d == DSD)
+            {
+                int32_t s = sd::fileStore.open(p);
+                sd::fileStore.close();
+                return s < 0 ? 0 : (uint32_t)s;
+            }
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (d == DEFC)
+            {
+                int32_t s = efc::fileStore.open(p);
+                efc::fileStore.close();
+                return s < 0 ? 0 : (uint32_t)s;
+            }
+#endif
+            return 0;
+        }
+
+        static bool drvRemove(int d, const char* p, bool isDir)
+        {
+            if (d == DINT) return isDir ? LittleFS.rmdir(p) : LittleFS.remove(p);
+#ifdef OPENKNX_SDCARD
+            if (d == DSD) return isDir ? sd::fileStore.rmdir(p) : sd::fileStore.remove(p);
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (d == DEFC) return isDir ? efc::fileStore.rmdir(p) : efc::fileStore.remove(p);
+#endif
+            return false;
+        }
+
+        static bool drvMkdir(int d, const char* p)
+        {
+            if (d == DINT) return LittleFS.mkdir(p);
+#ifdef OPENKNX_SDCARD
+            if (d == DSD) return sd::fileStore.mkdir(p);
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (d == DEFC) return efc::fileStore.mkdir(p);
+#endif
+            return false;
+        }
+
+        static bool drvWriteChunk(int d, const char* p, uint32_t offset, const uint8_t* data, size_t len)
+        {
+            if (d == DINT)
+            {
+                File f = LittleFS.open(p, offset == 0 ? "w" : "r+");
+                if (!f) return false;
+                if (offset && !f.seek(offset))
+                {
+                    f.close();
+                    return false;
+                }
+                f.write(data, len);
+                f.close();
+                return true;
+            }
+#ifdef OPENKNX_SDCARD
+            if (d == DSD)
+            {
+                if (!sd::fileStore.sinkOpen(p, offset)) return false;
+                int w = sd::fileStore.sinkWrite(data, (uint16_t)len);
+                sd::fileStore.sinkClose();
+                return w == (int)len;
+            }
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (d == DEFC)
+            {
+                if (!efc::fileStore.sinkOpen(p, offset)) return false;
+                int w = efc::fileStore.sinkWrite(data, (uint16_t)len);
+                efc::fileStore.sinkClose();
+                return w == (int)len;
+            }
+#endif
+            return false;
+        }
+
+        static void drvSpace(int d, uint64_t& freeB, uint64_t& totalB)
+        {
+            freeB = 0;
+            totalB = 0;
+            if (d == DINT)
+            {
+#ifdef ARDUINO_ARCH_ESP32
+                totalB = LittleFS.totalBytes();
+                freeB = totalB - LittleFS.usedBytes();
+#else
+                FSInfo fi;
+                LittleFS.info(fi);
+                totalB = fi.totalBytes;
+                freeB = fi.totalBytes - fi.usedBytes;
+#endif
+                return;
+            }
+#ifdef OPENKNX_SDCARD
+            if (d == DSD)
+            {
+                totalB = sd::fileStore.totalBytes();
+                freeB = sd::fileStore.freeBytes();
+                return;
+            }
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (d == DEFC)
+            {
+                totalB = efc::fileStore.totalBytes();
+                freeB = efc::fileStore.freeBytes();
+                return;
+            }
+#endif
+        }
+
+        static const size_t FM_MAX_ENTRIES = 250;
+
+        // Callback statt Ergebnisliste: das Listing wird direkt ins HTML gestreamt.
+        // Ein Container mit 250 Einträgen wären ~10 KB Heap plus Realloc-Peak —
+        // auf RP2040 neben lwIP und den Webserver-Slots zu viel. Dafür wird das
+        // Verzeichnis zweimal durchlaufen (Ordner-Pass, Datei-Pass).
+        // Rückgabe: true, wenn bei FM_MAX_ENTRIES abgebrochen wurde.
+        template <typename Fn>
+        static bool drvForEach(int d, const std::string& dir, Fn fn)
+        {
+            size_t seen = 0;
+            if (d == DINT)
+            {
+                File root = LittleFS.open(dir.c_str(), "r");
+                if (!root) return false;
+                for (File e = root.openNextFile(); e; e = root.openNextFile())
+                {
+                    if (seen++ >= FM_MAX_ENTRIES)
+                    {
+                        e.close();
+                        root.close();
+                        return true;
+                    }
+                    std::string p = absPath(dir, e.name());
+                    fn(p.substr(p.rfind('/') + 1), (uint32_t)e.size(), e.isDirectory());
+                    e.close();
+                }
+                root.close();
+                return false;
+            }
+#ifdef OPENKNX_SDCARD
+            if (d == DSD)
+            {
+                if (!sd::fileStore.dirOpen(dir.c_str())) return false;
+                char nm[64];
+                uint32_t sz = 0;
+                for (uint8_t t; (t = sd::fileStore.dirNext(nm, sizeof(nm), &sz)) != 0;)
+                {
+                    if (seen++ >= FM_MAX_ENTRIES)
+                    {
+                        sd::fileStore.dirClose();
+                        return true;
+                    }
+                    std::string p = absPath(dir, nm);
+                    fn(p.substr(p.rfind('/') + 1), sz, t == 2);
+                }
+                sd::fileStore.dirClose();
+                return false;
+            }
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (d == DEFC)
+            {
+                if (!efc::fileStore.dirOpen(dir.c_str())) return false;
+                char nm[64];
+                uint32_t sz = 0;
+                for (uint8_t t; (t = efc::fileStore.dirNext(nm, sizeof(nm), &sz)) != 0;)
+                {
+                    if (seen++ >= FM_MAX_ENTRIES)
+                    {
+                        efc::fileStore.dirClose();
+                        return true;
+                    }
+                    std::string p = absPath(dir, nm);
+                    fn(p.substr(p.rfind('/') + 1), sz, t == 2);
+                }
+                efc::fileStore.dirClose();
+                return false;
+            }
+#endif
+            return false;
+        }
+
+        // ── Streaming-Kontext für Download ───────────────────────────
+
+        struct FmCtx
+        {
+            int drive;
+            File f;
+            uint32_t off;
+        };
+
+        static size_t fmRead(void* ctx, uint8_t* buf, size_t maxLen)
+        {
+            FmCtx* x = static_cast<FmCtx*>(ctx);
+            if (x->drive == DINT) return x->f.read(buf, maxLen);
+            size_t n = 0;
+#ifdef OPENKNX_SDCARD
+            if (x->drive == DSD)
+                while (n < maxLen)
+                {
+                    uint8_t r = sd::fileStore.read(x->off, buf + n, (uint8_t)(maxLen - n > 255 ? 255 : maxLen - n));
+                    if (!r) break;
+                    n += r;
+                    x->off += r;
+                }
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (x->drive == DEFC)
+                while (n < maxLen)
+                {
+                    uint8_t r = efc::fileStore.read(x->off, buf + n, (uint8_t)(maxLen - n > 255 ? 255 : maxLen - n));
+                    if (!r) break;
+                    n += r;
+                    x->off += r;
+                }
+#endif
+            return n;
+        }
+
+        static void fmCleanup(void* ctx)
+        {
+            FmCtx* x = static_cast<FmCtx*>(ctx);
+            if (x->drive == DINT)
+            {
+                if (x->f) x->f.close();
+            }
+#ifdef OPENKNX_SDCARD
+            else if (x->drive == DSD)
+                sd::fileStore.close();
+#endif
+#ifdef OPENKNX_EXTFLASH
+            else if (x->drive == DEFC)
+                efc::fileStore.close();
+#endif
+            delete x;
+        }
+
+        // ── setup ────────────────────────────────────────────────────
 
         void FileManager::setup()
         {
@@ -168,41 +491,81 @@ namespace OpenKNX
                                               [this](WebRequest& req, WebResponse& res) { handleMkdir(req, res); });
         }
 
-        // ── Verzeichnis-Listing ───────────────────────────────────────────────
+        // ── Verzeichnis-Listing ──────────────────────────────────────
 
         void FileManager::handleList(WebRequest& req, WebResponse& res)
         {
-            if (!ensureFs())
+            int d = drvParse(req);
+            if (!drvAvail(d) || (d == DINT && !ensureFs()))
             {
-                res.setStatus(500);
-                res.send("LittleFS nicht verfügbar");
+                res.setStatus(404);
+                res.send("Laufwerk nicht verfügbar");
                 return;
             }
 
+            const char* fs = drvId(d);
+            std::string q = std::string("fs=") + fs;
             std::string dir = sanitizePath(req.getQueryParam("dir"));
             if (dir.empty()) dir = "/";
 
             std::string html;
             html.reserve(2048);
 
-            auto fmtBytes = [](size_t b) -> std::string {
+            // Unter der GB-Grenze wird auf 32 Bit gerechnet — die u64-Division
+            // zieht sonst auf RP2040 unnötig Laufzeit-Hilfsroutinen ins Flash.
+            auto fmtBytes = [](uint64_t b) -> std::string {
                 char buf[24];
-                if (b >= 1024 * 1024)
-                    snprintf(buf, sizeof(buf), "%.1f MB", b / 1048576.0f);
+                if (b >= 1024ULL * 1024 * 1024)
+                    snprintf(buf, sizeof(buf), "%.1f GB", (double)b / 1073741824.0);
+                else if (b >= 1024 * 1024)
+                    snprintf(buf, sizeof(buf), "%.1f MB", (uint32_t)b / 1048576.0f);
                 else if (b >= 1024)
-                    snprintf(buf, sizeof(buf), "%.1f KB", b / 1024.0f);
+                    snprintf(buf, sizeof(buf), "%.1f KB", (uint32_t)b / 1024.0f);
                 else
-                    snprintf(buf, sizeof(buf), "%zu B", b);
+                    snprintf(buf, sizeof(buf), "%lu B", (unsigned long)b);
                 return buf;
             };
+
+            // dir stays ISO-8859-15 for drvForEach below; dirUtf8 for display/links/JS.
+            std::string dirUtf8;
+            OpenKNX::Charset::encodeUtf8(dirUtf8, dir.data(), dir.size());
 
             html += "<div class='container'><h1>Dateiverwaltung";
             if (dir != "/")
             {
                 html += " &ndash; ";
-                html += htmlEscape(dir);
+                html += htmlEscape(dirUtf8);
             }
             html += "</h1>";
+
+            bool multi = false;
+#ifdef OPENKNX_SDCARD
+            if (sd::fileStore.available()) multi = true;
+#endif
+#ifdef OPENKNX_EXTFLASH
+            if (efc::fileStore.available()) multi = true;
+#endif
+            if (multi)
+            {
+                auto tab = [&](const char* id, const char* label, bool active) {
+                    html += "<a class='fm-tab";
+                    if (active) html += " active";
+                    html += "' href='/filemanager?fs=";
+                    html += id;
+                    html += "&dir=%2F'>";
+                    html += label;
+                    html += "</a>";
+                };
+                html += "<div class='fm-tabs'>";
+                tab("int", "Intern", d == DINT);
+#ifdef OPENKNX_SDCARD
+                if (sd::fileStore.available()) tab("sd", "SD-Karte", d == DSD);
+#endif
+#ifdef OPENKNX_EXTFLASH
+                if (efc::fileStore.available()) tab("efc", "Ext. Flash", d == DEFC);
+#endif
+                html += "</div>";
+            }
 
             html += "<h2>Inhalt</h2>";
             html += "<table><thead><tr>"
@@ -213,79 +576,62 @@ namespace OpenKNX
             {
                 std::string parent = dir.substr(0, dir.rfind('/'));
                 if (parent.empty()) parent = "/";
-                html += "<tr><td colspan='3'><a href='/filemanager?dir=";
-                html += urlEncode(parent);
+                std::string parentUtf8;
+                OpenKNX::Charset::encodeUtf8(parentUtf8, parent.data(), parent.size());
+                html += "<tr><td colspan='3'><a href='/filemanager?";
+                html += q;
+                html += "&dir=";
+                html += urlEncode(parentUtf8);
                 html += "'>..</a></td></tr>";
             }
 
             bool hasEntries = false;
+            bool wantDirs = true;
 
-            // Erster Pass: Ordner
-            {
-                File root = LittleFS.open(dir.c_str(), "r");
-                if (root)
+            auto emit = [&](const std::string& name, uint32_t size, bool isDir) {
+                if (isDir != wantDirs) return;
+                hasEntries = true;
+                // name is ISO-8859-15 (filesystem); convert for display/links.
+                std::string nameUtf8;
+                OpenKNX::Charset::encodeUtf8(nameUtf8, name.data(), name.size());
+                std::string path = absPath(dirUtf8, nameUtf8);
+                if (isDir)
                 {
-                    File entry = root.openNextFile();
-                    while (entry)
-                    {
-                        if (entry.isDirectory())
-                        {
-                            hasEntries = true;
-                            std::string path = absPath(dir, entry.name());
-                            std::string displayName = path.substr(path.rfind('/') + 1);
-
-                            html += "<tr><td><a href='/filemanager?dir=";
-                            html += urlEncode(path);
-                            html += "'>";
-                            html += htmlEscape(displayName);
-                            html += "/</a></td><td class='right'></td><td class='right'>";
-                            html += "<a href='#' onclick=\"delDir('";
-                            html += htmlEscape(jsStr(path));
-                            html += "'); return false;\">L&ouml;schen</a>";
-                            html += "</td></tr>";
-                        }
-                        entry.close();
-                        entry = root.openNextFile();
-                    }
-                    root.close();
+                    html += "<tr><td><a href='/filemanager?";
+                    html += q;
+                    html += "&dir=";
+                    html += urlEncode(path);
+                    html += "'>";
+                    html += htmlEscape(nameUtf8);
+                    html += "/</a></td><td class='right'></td><td class='right'>";
+                    html += "<a href='#' onclick=\"delDir('";
+                    html += htmlEscape(jsStr(path));
+                    html += "'); return false;\">L&ouml;schen</a>";
+                    html += "</td></tr>";
+                    return;
                 }
-            }
+                html += "<tr><td>";
+                html += htmlEscape(nameUtf8);
+                html += "</td><td class='right'>";
+                html += fmtBytes(size);
+                html += "</td><td class='right'><a href='/filemanager/download?";
+                html += q;
+                html += "&path=";
+                html += urlEncode(path);
+                html += "'>Download</a> | <a href='#' onclick=\"delFile('";
+                html += htmlEscape(jsStr(path));
+                html += "'); return false;\">L&ouml;schen</a>";
+                html += "</td></tr>";
+            };
 
-            // Zweiter Pass: Dateien
-            {
-                File root = LittleFS.open(dir.c_str(), "r");
-                if (root)
-                {
-                    File entry = root.openNextFile();
-                    while (entry)
-                    {
-                        if (!entry.isDirectory())
-                        {
-                            hasEntries = true;
-                            std::string path = absPath(dir, entry.name());
-                            std::string displayName = path.substr(path.rfind('/') + 1);
-                            size_t sz = entry.size();
-
-                            html += "<tr><td>";
-                            html += htmlEscape(displayName);
-                            html += "</td><td class='right'>";
-                            html += fmtBytes(sz);
-                            html += "</td><td class='right'><a href='/filemanager/download?path=";
-                            html += urlEncode(path);
-                            html += "'>Download</a> | <a href='#' onclick=\"delFile('";
-                            html += htmlEscape(jsStr(path));
-                            html += "'); return false;\">L&ouml;schen</a>";
-                            html += "</td></tr>";
-                        }
-                        entry.close();
-                        entry = root.openNextFile();
-                    }
-                    root.close();
-                }
-            }
+            bool truncated = drvForEach(d, dir, emit);
+            wantDirs = false;
+            truncated |= drvForEach(d, dir, emit);
 
             if (!hasEntries)
                 html += "<tr><td colspan='3'><em>Leer</em></td></tr>";
+            if (truncated)
+                html += "<tr><td colspan='3'><em>Liste gek&uuml;rzt (max 250 Eintr&auml;ge)</em></td></tr>";
 
             html += "</tbody></table>";
 
@@ -298,20 +644,16 @@ namespace OpenKNX
             html += "<h2>Datei hochladen</h2>";
 
             {
-#ifdef ARDUINO_ARCH_ESP32
-                size_t total = LittleFS.totalBytes();
-                size_t freeBytes = total - LittleFS.usedBytes();
-#else
-                FSInfo fsInfo;
-                LittleFS.info(fsInfo);
-                size_t total = (size_t)fsInfo.totalBytes;
-                size_t freeBytes = (size_t)(fsInfo.totalBytes - fsInfo.usedBytes);
-#endif
-                html += "<p class='fm-storage'>Speicher: <strong>";
-                html += fmtBytes(freeBytes);
-                html += "</strong> frei von ";
-                html += fmtBytes(total);
-                html += "</p>";
+                uint64_t total = 0, freeBytes = 0;
+                drvSpace(d, freeBytes, total);
+                if (total > 0)
+                {
+                    html += "<p class='fm-storage'>Speicher: <strong>";
+                    html += fmtBytes(freeBytes);
+                    html += "</strong> frei von ";
+                    html += fmtBytes(total);
+                    html += "</p>";
+                }
             }
 
             html += "<div class='fm-row'>"
@@ -325,9 +667,10 @@ namespace OpenKNX
                     "</div>"
                     "<div class='fm-upload-status'><span id='st'></span></div>";
 
-            // Nur currentDir ist dynamisch – der Rest steckt in /assets/filemanager.js
             html += "<script>const currentDir='";
-            html += jsStrScriptBody(dir);
+            html += jsStrScriptBody(dirUtf8);
+            html += "';const currentFs='";
+            html += fs;
             html += "';</script></div>";
 
             res.setLayout(true);
@@ -335,10 +678,11 @@ namespace OpenKNX
             res.send(html.c_str());
         }
 
-        // ── Download (Streaming) ──────────────────────────────────────────────
+        // ── Download (Streaming) ─────────────────────────────────────
 
         void FileManager::handleDownload(WebRequest& req, WebResponse& res)
         {
+            int d = drvParse(req);
             std::string path = sanitizePath(req.getQueryParam("path"));
             if (path.empty())
             {
@@ -346,20 +690,39 @@ namespace OpenKNX
                 res.send("Bad path");
                 return;
             }
-
-            if (!ensureFs() || !LittleFS.exists(path.c_str()))
+            if (!drvAvail(d) || (d == DINT && !ensureFs()))
             {
                 res.setStatus(404);
-                res.send("Not found");
+                res.send("Laufwerk nicht verfügbar");
+                return;
+            }
+            if (drvBusy(d))
+            {
+                res.setStatus(503);
+                res.send("Laufwerk beschäftigt");
                 return;
             }
 
-            FmFileCtx* ctx = new FmFileCtx{LittleFS.open(path.c_str(), "r")};
-            if (!ctx->f)
+            FmCtx* ctx = new FmCtx{d, File(), 0};
+            int32_t size = -1;
+            if (d == DINT)
+            {
+                ctx->f = LittleFS.open(path.c_str(), "r");
+                if (ctx->f) size = (int32_t)ctx->f.size();
+            }
+#ifdef OPENKNX_SDCARD
+            else if (d == DSD)
+                size = sd::fileStore.open(path.c_str());
+#endif
+#ifdef OPENKNX_EXTFLASH
+            else if (d == DEFC)
+                size = efc::fileStore.open(path.c_str());
+#endif
+            if (size < 0)
             {
                 delete ctx;
-                res.setStatus(500);
-                res.send("Open failed");
+                res.setStatus(404);
+                res.send("Datei nicht gefunden");
                 return;
             }
 
@@ -367,13 +730,14 @@ namespace OpenKNX
             std::string cd = "attachment; filename=\"" + name + "\"";
             res.setContentType("application/octet-stream");
             res.setHeader("Content-Disposition", cd.c_str());
-            res.sendStream(ctx->f.size(), fmFileRead, fmFileCleanup, ctx);
+            res.sendStream((size_t)size, fmRead, fmCleanup, ctx);
         }
 
-        // ── Upload (chunked: jeder Chunk ist ein separater POST) ──────────────
+        // ── Upload (chunked: jeder Chunk ist ein separater POST) ─────
 
         void FileManager::handleUpload(WebRequest& req, WebResponse& res)
         {
+            int d = drvParse(req);
             std::string path = sanitizePath(req.getQueryParam("path"));
             if (path.empty() || req.bodyLength() == 0)
             {
@@ -381,69 +745,56 @@ namespace OpenKNX
                 res.send("Bad request");
                 return;
             }
-
-            if (!ensureFs())
+            if (!drvAvail(d) || (d == DINT && !ensureFs()))
             {
-                res.setStatus(500);
-                res.send("LittleFS nicht verfügbar");
+                res.setStatus(404);
+                res.send("Laufwerk nicht verfügbar");
+                return;
+            }
+            if (drvBusy(d))
+            {
+                res.setStatus(503);
+                res.send("Laufwerk beschäftigt");
                 return;
             }
 
             std::string offsetStr = req.getQueryParam("offset");
-            size_t offset = offsetStr.empty() ? 0 : (size_t)atol(offsetStr.c_str());
+            uint32_t offset = offsetStr.empty() ? 0 : (uint32_t)atol(offsetStr.c_str());
 
-            if (offset == 0 && LittleFS.exists(path.c_str()))
+            if (offset == 0 && drvExists(d, path.c_str()))
             {
                 res.setStatus(409);
                 res.send("Datei existiert bereits");
                 return;
             }
 
-            File f = LittleFS.open(path.c_str(), offset == 0 ? "w" : "r+");
-            if (!f)
-            {
-                res.setStatus(500);
-                res.send("Cannot open file");
-                return;
-            }
-            if (offset > 0 && !f.seek(offset))
-            {
-                f.close();
-                res.setStatus(500);
-                res.send("Seek failed");
-                return;
-            }
-
             size_t needed = req.bodyLength();
-
-            f.write(req.body(), needed);
-            f.close();
-
-            // LittleFS schreibt erst beim close() auf Flash — write() gibt immer
-            // die Puffergröße zurück, auch wenn kein Platz mehr da ist.
-            // Einzige zuverlässige Prüfung: Dateigröße nach dem Schließen vergleichen.
+            if (!drvWriteChunk(d, path.c_str(), offset, req.body(), needed))
             {
-                File verify = LittleFS.open(path.c_str(), "r");
-                size_t actualSize = verify ? verify.size() : 0;
-                if (verify) verify.close();
+                res.setStatus(500);
+                res.send("Schreibfehler");
+                return;
+            }
 
-                if (actualSize != offset + needed)
-                {
-                    LittleFS.remove(path.c_str());
-                    res.setStatus(413);
-                    res.send("Dateisystem voll");
-                    return;
-                }
+            // LittleFS schreibt erst beim close() auf Flash, write() meldet immer die
+            // Puffergröße. Nur die Dateigröße danach erkennt ein volles Dateisystem.
+            if (drvSize(d, path.c_str()) != offset + needed)
+            {
+                drvRemove(d, path.c_str(), false);
+                res.setStatus(413);
+                res.send("Dateisystem voll");
+                return;
             }
 
             res.setContentType("text/plain");
             res.send("OK");
         }
 
-        // ── Delete (Datei oder Ordner) ────────────────────────────────────────
+        // ── Delete (Datei oder Ordner) ───────────────────────────────
 
         void FileManager::handleDelete(WebRequest& req, WebResponse& res)
         {
+            int d = drvParse(req);
             std::string path = sanitizePath(req.getQueryParam("path"));
             if (path.empty())
             {
@@ -451,21 +802,41 @@ namespace OpenKNX
                 res.send("Bad path");
                 return;
             }
-
-            if (!ensureFs())
+            if (!drvAvail(d) || (d == DINT && !ensureFs()))
             {
-                res.setStatus(500);
-                res.send("LittleFS nicht verfügbar");
+                res.setStatus(404);
+                res.send("Laufwerk nicht verfügbar");
                 return;
             }
 
-            File f = LittleFS.open(path.c_str(), "r");
-            bool isDir = f && f.isDirectory();
-            if (f) f.close();
+            // Typ wird serverseitig bestimmt: LittleFS über open(), die SD/EFC-Stores über ihr isDir().
+            // Der dir=-Hinweis des Clients wird nicht mehr benutzt.
+            bool isDir = false;
+            if (d == DINT)
+            {
+                File f = LittleFS.open(path.c_str(), "r");
+                if (!f)
+                {
+                    res.setStatus(404);
+                    res.send("Nicht gefunden");
+                    return;
+                }
+                isDir = f.isDirectory();
+                f.close();
+            }
+            else
+            {
+                if (!drvExists(d, path.c_str()))
+                {
+                    res.setStatus(404);
+                    res.send("Nicht gefunden");
+                    return;
+                }
+                isDir = drvIsDir(d, path.c_str());
+            }
 
             res.setContentType("text/plain");
-            bool ok = isDir ? LittleFS.rmdir(path.c_str()) : LittleFS.remove(path.c_str());
-            if (ok)
+            if (drvRemove(d, path.c_str(), isDir))
                 res.send("OK");
             else
             {
@@ -474,10 +845,11 @@ namespace OpenKNX
             }
         }
 
-        // ── Mkdir ─────────────────────────────────────────────────────────────
+        // ── Mkdir ────────────────────────────────────────────────────
 
         void FileManager::handleMkdir(WebRequest& req, WebResponse& res)
         {
+            int d = drvParse(req);
             std::string path = sanitizePath(req.getQueryParam("path"));
             if (path.empty())
             {
@@ -485,16 +857,15 @@ namespace OpenKNX
                 res.send("Bad path");
                 return;
             }
-
-            if (!ensureFs())
+            if (!drvAvail(d) || (d == DINT && !ensureFs()))
             {
-                res.setStatus(500);
-                res.send("LittleFS nicht verfügbar");
+                res.setStatus(404);
+                res.send("Laufwerk nicht verfügbar");
                 return;
             }
 
             res.setContentType("text/plain");
-            if (LittleFS.mkdir(path.c_str()))
+            if (drvMkdir(d, path.c_str()))
                 res.send("OK");
             else
             {

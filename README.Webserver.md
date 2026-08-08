@@ -14,6 +14,7 @@ OPENKNX_WEBSOCKET_MAX       – ESP32 only: max concurrent WebSocket connections
 OPENKNX_WEBSERVER_MAX_CONN  – RP2040 only: total webserver connection slots, shared HTTP+WS (default 3); raising requires more lwIP PCBs
 OPENKNX_WEBSOCKET_RX_CAP    – Per-WS RX cap in bytes (ESP32 accumulation buffer default 2048, overflow → disconnect; RP2040 payload buffer default 512, overflow → truncate)
 OPENKNX_WEBMONITOR        – /groupmonitor page, WS /groupmonitor, live KNX telegram stream (TP only, MASK_VERSION == 0x07B0)
+OPENKNX_WEBFS               – /filemanager page and its routes (browse, download, upload, delete, mkdir)
 ```
 
 `OPENKNX_WEBCONSOLE` requires `OPENKNX_WEBSERVER`.  
@@ -36,6 +37,36 @@ This allows first access to a freshly flashed or unconfigured device without ETS
 > <op:config name="%NET_ServiceHTTP%" value="1" />
 > ```
 > Without this entry the parameter remains hidden in ETS and the webserver only runs in the unconfigured state — which is undesirable in production devices.
+
+---
+
+## Character Encoding
+
+Everything the webserver sends or receives is **UTF-8** — HTTP `Content-Type` charsets, `<meta charset>`, WebSocket text frames, JSON. Not a stylistic choice: several of these have no charset override at all — WebSocket text frames (RFC 6455) must be valid UTF-8 with no negotiation, `fetch().text()`/`.json()` decode as UTF-8 unconditionally per the Fetch spec regardless of `Content-Type`, and `encodeURIComponent()` always percent-encodes as UTF-8. `<meta charset>` also loses to the HTTP header when both are present, so the two must agree anyway. Serving ISO-8859-15 instead would only move the problem, not remove it — every WS/`fetch()` call site would still need its own decode step.
+
+The KNX bus (DPT16 strings) and the device's storage (FAT32/LittleFS filenames) are **ISO-8859-15**, not UTF-8. Wherever such a value crosses into the webserver, it is converted with `OpenKNX::Charset` (`OGM-Common/src/OpenKNX/Charset.hpp`):
+
+```cpp
+#include "OpenKNX/Charset.hpp"
+
+std::string utf8;
+OpenKNX::Charset::encodeUtf8(utf8, iso.data(), iso.size());   // ISO-8859-15 -> UTF-8, never fails
+
+std::string iso;
+bool lossless = OpenKNX::Charset::decodeUtf8(iso, utf8.data(), utf8.size());
+// lossless == false: at least one character had no Latin-15 equivalent and was replaced with '?'
+```
+
+- **`encodeUtf8`** — always succeeds; every byte 0–255 is a valid Unicode code point.
+- **`decodeUtf8`** — can lose information; a character outside the Latin-15 repertoire (e.g. most emoji, CJK) becomes `?`. The `bool` return lets a caller react differently instead of silently accepting the fallback.
+- Header-only, gated behind `#ifdef OPENKNX_CHARSET` — a no-op include otherwise. `Network/Module.h` derives `OPENKNX_CHARSET` automatically from `OPENKNX_WEBSERVER`, so no separate build flag is needed.
+
+**Where it's used today:**
+- `GroupMonitor.cpp` — the DPT16 value decoded from a bus telegram is `encodeUtf8`'d before it goes into the JSON WebSocket message.
+- `Webconsole.cpp` — each line pulled from the logger ring buffer is `encodeUtf8`'d before being sent over the `/console` WebSocket.
+- `FileManager.cpp` — `sanitizePath()` runs `decodeUtf8` on every incoming path (browser → device, since `encodeURIComponent()` is always UTF-8) and maps any `?` fallback to `_` (safer than `?` on a filesystem); `handleList()` runs `encodeUtf8` on every filename read back from storage before it appears in the HTML listing, a link `href`, or the `currentDir` JS variable.
+
+**Legacy filenames:** files created via WebFS before this conversion existed have their non-ASCII characters stored as raw UTF-8 bytes, not ISO-8859-15. `encodeUtf8`/`decodeUtf8` are exact inverses for *any* byte sequence, not just "real" ISO-8859-15 text, so such a name still round-trips correctly (display and delete both work) — the on-disk bytes are just a different (also valid) sequence than a freshly-created file with the same visible name would get.
 
 ---
 
@@ -264,6 +295,11 @@ regardless of whether layout is active.
 | `/prog` (**POST**) | `OPENKNX_WEBSERVER` | Toggles the KNX programming mode, then `303` back to `/` |
 | `/console` | `OPENKNX_WEBCONSOLE` | WebSocket terminal — mirrors the serial logger |
 | `/groupmonitor` | `OPENKNX_WEBMONITOR` | Live KNX group/telegram monitor (TP only) |
+| `/filemanager` | `OPENKNX_WEBFS` | Directory listing and upload form |
+| `/filemanager/download` | `OPENKNX_WEBFS` | Streams one file as `application/octet-stream` |
+| `/filemanager/upload` (**POST**) | `OPENKNX_WEBFS` | One chunk per request (`offset` query param) |
+| `/filemanager/delete` (**POST**) | `OPENKNX_WEBFS` | Deletes a file or an empty directory |
+| `/filemanager/mkdir` (**POST**) | `OPENKNX_WEBFS` | Creates a directory |
 | `/assets/logo.svg` | `OPENKNX_WEBSERVER` | OpenKNX logo (generated, gzip) |
 
 `/prog` is deliberately **POST only** and is rendered as a form in the nav footer, not as a link. As a `GET` it would be triggerable from any foreign page via `<img src="http://device/prog?mode=1">`. The `mode` value still travels in the query string, so `getQueryParam()` keeps working; only the method changed.
@@ -300,3 +336,12 @@ Name, value and DPT come from an optional tab-separated file `/openknx_ga.tsv` o
 - **Names (browser):** the page loads the TSV itself once and resolves names client-side, so the device never has to hold the (arbitrarily long) name strings in RAM.
 - If the file is missing, Name/Value/DPT simply show `-` and everything else keeps working.
 - Only available on devices with a TP connection (`MASK_VERSION == 0x07B0`); on other masks the page and its WebSocket are not registered.
+
+### File Manager Page (`OPENKNX_WEBFS`)
+
+Browse, download, upload and delete files on the device's storage. Directory and file names are HTML- and JS-escaped in the listing; `..` in a path is rejected outright (`sanitizePath()`).
+
+- **Chunked upload:** the browser slices the file and sends **one POST per chunk**, each with an `offset` query parameter — the device never has to hold a whole file in RAM. `offset=0` on an existing file is refused with `409` so an upload cannot silently overwrite. After every chunk the resulting file size is compared against `offset + length`: LittleFS only writes on `close()` and `write()` always reports the buffer size, so this is the one reliable way to detect a full filesystem (→ `413`, partial file removed).
+- **Listing is streamed, not collected:** the directory is walked twice (directories pass, files pass) and rows are appended straight to the HTML. Nothing is buffered in a container — 250 entries in a `std::vector<std::string>` would cost ~10 KB heap, which RP2040 cannot spare next to lwIP and the connection slots. Listings are capped at 250 entries per pass, with a note in the table when the cap is hit.
+- **Downloads stream** via `WebResponse::sendStream()`; on ESP32 this runs synchronously in the httpd task (see the note under Platform Support).
+- **A missing drive or file answers `404`** on every route. `400` is reserved for a malformed path, `409`/`413` for an upload that would overwrite or does not fit, `500` only for an operation that actually failed (write error, non-empty directory). A directory that does not exist is not an error — it renders as an empty listing.

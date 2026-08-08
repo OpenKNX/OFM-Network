@@ -10,11 +10,13 @@ async function uploadFile() {
     picker.classList.add('fm-hidden');
     bar.classList.remove('fm-hidden');
     bar.value = 0;
-    st.textContent = '';
+    st.textContent = '⚠︎ Upload läuft – Seite nicht verlassen';
+    // Warn on navigation/link-click while upload is in flight (leaving aborts it)
+    window.onbeforeunload = () => '';
     try {
         for (let off = 0; off < file.size || off === 0; off += CHUNK) {
             const end = Math.min(off + CHUNK, file.size);
-            const r = await fetch('/filemanager/upload?path=' + encodeURIComponent(path) + '&offset=' + off,
+            const r = await fetch('/filemanager/upload?path=' + encodeURIComponent(path) + '&offset=' + off + '&fs=' + currentFs,
                 { method: 'POST', body: file.slice(off, end), headers: { 'Content-Type': 'application/octet-stream' } });
             if (!r.ok) {
                 const msg = await r.text();
@@ -31,18 +33,20 @@ async function uploadFile() {
         st.textContent = 'Fehler: ' + e.message;
         bar.classList.add('fm-hidden');
         picker.classList.remove('fm-hidden');
+    } finally {
+        window.onbeforeunload = null;
     }
 }
 
 async function delFile(path) {
     if (!confirm('Datei löschen: ' + path + '?')) return;
-    const r = await fetch('/filemanager/delete?path=' + encodeURIComponent(path), { method: 'POST' });
+    const r = await fetch('/filemanager/delete?path=' + encodeURIComponent(path) + '&fs=' + currentFs, { method: 'POST' });
     if (r.ok) location.reload(); else alert(await r.text());
 }
 
 async function delDir(path) {
     if (!confirm('Ordner löschen: ' + path + '?')) return;
-    const r = await fetch('/filemanager/delete?path=' + encodeURIComponent(path), { method: 'POST' });
+    const r = await fetch('/filemanager/delete?path=' + encodeURIComponent(path) + '&fs=' + currentFs, { method: 'POST' });
     if (r.ok) location.reload(); else alert(await r.text());
 }
 
@@ -51,7 +55,7 @@ async function mkDir() {
     if (!name) return;
     const base = currentDir === '/' ? '' : currentDir;
     const path = base + '/' + name;
-    const r = await fetch('/filemanager/mkdir?path=' + encodeURIComponent(path), { method: 'POST' });
+    const r = await fetch('/filemanager/mkdir?path=' + encodeURIComponent(path) + '&fs=' + currentFs, { method: 'POST' });
     if (r.ok) location.reload(); else alert(await r.text());
 }
 
