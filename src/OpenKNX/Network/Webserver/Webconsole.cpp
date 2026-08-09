@@ -85,8 +85,8 @@ namespace OpenKNX
                     openknx.console.processCommand(cmd);
             }
 
+            if (!openknxNetwork.webserver.hasClients("/console")) return;
             std::vector<int> clients = openknxNetwork.webserver.connectedClientFds("/console");
-            if (clients.empty()) return;
 
             uint32_t writePos = openknx.logger.ringWritePos();
 
