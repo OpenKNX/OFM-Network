@@ -270,11 +270,21 @@ namespace OpenKNX
 
         // ── Routing ────────────────────────────────────────────────────────
 
-        bool Webserver::hasSocket(const std::string& uri) const
+        WebSocketRoute* Webserver::findSocketRoute(const char* uri)
         {
             for (auto& s : _sockets)
-                if (s.uri == uri) return true;
-            return false;
+                if (s.uri == uri) return &s;
+            return nullptr;
+        }
+
+        const WebSocketRoute* Webserver::findSocketRoute(const char* uri) const
+        {
+            return const_cast<Webserver*>(this)->findSocketRoute(uri);
+        }
+
+        bool Webserver::hasSocket(const char* uri) const
+        {
+            return findSocketRoute(uri) != nullptr;
         }
 
         // ── Common setup ───────────────────────────────────────────────────
@@ -344,15 +354,13 @@ namespace OpenKNX
             // Snapshot under the WS state lock — the list is mutated from the httpd task
             // (upgrade) and the loop task (disconnect) while it is read here.
             wsStateLock();
-            std::vector<int> result;
-            auto it = _socketClients.find(uri);
-            if (it != _socketClients.end()) result = it->second;
+            const WebSocketRoute* r = findSocketRoute(uri.c_str());
+            std::vector<int> result = r ? r->clients : std::vector<int>{};
             wsStateUnlock();
             return result;
 #else
-            auto it = _socketClients.find(uri);
-            if (it == _socketClients.end()) return {};
-            return it->second;
+            const WebSocketRoute* r = findSocketRoute(uri.c_str());
+            return r ? r->clients : std::vector<int>{};
 #endif
         }
 
@@ -360,13 +368,13 @@ namespace OpenKNX
         {
 #ifdef ARDUINO_ARCH_ESP32
             wsStateLock();
-            auto it = _socketClients.find(uri);
-            bool has = it != _socketClients.end() && !it->second.empty();
+            const WebSocketRoute* r = findSocketRoute(uri.c_str());
+            bool has = r && !r->clients.empty();
             wsStateUnlock();
             return has;
 #else
-            auto it = _socketClients.find(uri);
-            return it != _socketClients.end() && !it->second.empty();
+            const WebSocketRoute* r = findSocketRoute(uri.c_str());
+            return r && !r->clients.empty();
 #endif
         }
 

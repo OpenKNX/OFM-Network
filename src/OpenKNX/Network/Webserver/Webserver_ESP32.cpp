@@ -44,8 +44,8 @@ namespace OpenKNX
         // auf demselben Socket verschränken.
         static SemaphoreHandle_t g_wsTxMutex = nullptr;
 
-        // RAII-Guard für _socketClients + g_wsSessions. Der rekursive Mutex liegt auf
-        // der Webserver-Instanz, damit auch Webserver.cpp ihn erreicht.
+        // RAII-Guard für WebSocketRoute::clients + g_wsSessions. Der rekursive Mutex liegt
+        // auf der Webserver-Instanz, damit auch Webserver.cpp ihn erreicht.
         class WsStateGuard
         {
             const Webserver* _w;
@@ -223,7 +223,7 @@ namespace OpenKNX
                 if (op == 0x01 || op == 0x02) // text / binary
                 {
                     bool isBinary = (op == 0x02);
-                    sess->ws->notifySocketMessage(sess->uri, sess->fd, payload.data(), (int)payLen, isBinary);
+                    sess->ws->notifySocketMessage(sess->uri.c_str(), sess->fd, payload.data(), (int)payLen, isBinary);
                 }
             }
 
@@ -279,7 +279,7 @@ namespace OpenKNX
                 g_wsSessions.push_back(sess);
             }
 
-            wsObj->notifySocketConnect(uri, fd, true);
+            wsObj->notifySocketConnect(uri.c_str(), fd, true);
             return true;
         }
 
@@ -338,7 +338,7 @@ namespace OpenKNX
                 httpd_req_get_hdr_value_str(req, "Upgrade", upgrade, sizeof(upgrade));
                 if (strcasecmp(upgrade, "websocket") == 0)
                 {
-                    if (!ws->hasSocket(uri))
+                    if (!ws->hasSocket(uri.c_str()))
                     {
                         WebRequest wsReq;
                         wsReq.uri = uri;
@@ -581,7 +581,7 @@ namespace OpenKNX
                 if (dead)
                 {
                     // Socket zurück an httpd (schliesst ihn), dann Registry räumen
-                    notifySocketConnect(sess->uri, sess->fd, false);
+                    notifySocketConnect(sess->uri.c_str(), sess->fd, false);
                     httpd_req_async_handler_complete(sess->async);
                     {
                         WsStateGuard guard(this);
@@ -609,7 +609,7 @@ namespace OpenKNX
             WsSendResult r = wsSendText(fd, data, len);
             if (r == WsSendResult::Failed)
             {
-                notifySocketConnect(uri, fd, false);
+                notifySocketConnect(uri.c_str(), fd, false);
                 markSessionDead(this, fd);
             }
             return r == WsSendResult::Ok;
@@ -629,49 +629,32 @@ namespace OpenKNX
 
         // ── Socket dispatch ─────────────────────────────────────────────────
 
-        // Pflegt nur _socketClients; die WsSession gehört Webserver::loop(). Damit aus
-        // jedem Task aufrufbar und beim Entfernen idempotent.
-        void Webserver::notifySocketConnect(const std::string& uri, int fd, bool connected)
+        // Pflegt nur WebSocketRoute::clients; die WsSession gehört Webserver::loop().
+        // Damit aus jedem Task aufrufbar und beim Entfernen idempotent.
+        void Webserver::notifySocketConnect(const char* uri, int fd, bool connected)
         {
+            WebSocketRoute* r = findSocketRoute(uri);
+            if (r)
             {
                 WsStateGuard guard(this);
                 if (connected)
-                {
-                    _socketClients[uri].push_back(fd);
-                }
+                    r->clients.push_back(fd);
                 else
-                {
-                    auto it = _socketClients.find(uri);
-                    if (it != _socketClients.end())
-                    {
-                        auto& v = it->second;
-                        v.erase(std::remove(v.begin(), v.end(), fd), v.end());
-                    }
-                }
+                    r->clients.erase(std::remove(r->clients.begin(), r->clients.end(), fd), r->clients.end());
             }
 
             // Fire the user callback outside the lock (it may call back into the webserver)
-            for (auto& sock : _sockets)
-            {
-                if (sock.uri == uri && sock.onConnect)
-                {
-                    sock.onConnect(fd, connected);
-                    break;
-                }
-            }
+            if (r && r->onConnect) r->onConnect(fd, connected);
         }
 
-        void Webserver::notifySocketMessage(const std::string& uri, int fd,
+        void Webserver::notifySocketMessage(const char* uri, int fd,
                                             uint8_t* data, int length, bool isBinary)
         {
-            for (auto& sock : _sockets)
+            WebSocketRoute* r = findSocketRoute(uri);
+            if (r && r->onMessage)
             {
-                if (sock.uri == uri && sock.onMessage)
-                {
-                    WebSocketFrame frame{data, length, isBinary};
-                    sock.onMessage(fd, &frame);
-                    break;
-                }
+                WebSocketFrame frame{data, length, isBinary};
+                r->onMessage(fd, &frame);
             }
         }
 
@@ -684,17 +667,19 @@ namespace OpenKNX
             {
                 if (wsSendText(fd, message, strlen(message)) == WsSendResult::Failed)
                 {
-                    notifySocketConnect(uri, fd, false);
+                    notifySocketConnect(uri.c_str(), fd, false);
                     markSessionDead(this, fd);
                 }
                 return;
             }
+            const WebSocketRoute* r = findSocketRoute(uri.c_str());
+            if (!r) return;
+
             std::vector<int> clients;
             {
                 WsStateGuard guard(this);
-                auto it = _socketClients.find(uri);
-                if (it == _socketClients.end() || it->second.empty()) return;
-                clients = it->second; // snapshot under lock
+                if (r->clients.empty()) return;
+                clients = r->clients; // snapshot under lock
             }
 
             size_t len = strlen(message);
@@ -702,7 +687,7 @@ namespace OpenKNX
             {
                 if (wsSendText(cfd, message, len) == WsSendResult::Failed)
                 {
-                    notifySocketConnect(uri, cfd, false);
+                    notifySocketConnect(uri.c_str(), cfd, false);
                     markSessionDead(this, cfd);
                 }
             }

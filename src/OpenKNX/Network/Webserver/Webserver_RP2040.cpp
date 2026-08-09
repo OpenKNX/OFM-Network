@@ -8,7 +8,6 @@
 #include "OpenKNX/Network/Webserver/Webserver.h"
 #include <algorithm>
 #include <lwip/tcp.h>
-#include <map>
 #include <string>
 #include <vector>
 
@@ -430,8 +429,7 @@ namespace OpenKNX
                 s->wsHdrRcvd = 0;
                 s->wsPayRcvd = 0;
 
-                std::string uri(s->uri);
-                s->ws->notifySocketConnect(uri, s->idx, true);
+                s->ws->notifySocketConnect(s->uri, s->idx, true);
 
                 uint32_t remoteIpAddr = 0;
                 uint16_t clientPort = 0;
@@ -641,8 +639,7 @@ namespace OpenKNX
                                 tcp_write(s->pcb, closeReply, 2, TCP_WRITE_FLAG_COPY);
                                 tcp_output(s->pcb);
                                 tcp_pcb* pcb = s->pcb;
-                                std::string uri(s->uri);
-                                s->ws->notifySocketConnect(uri, s->idx, false);
+                                s->ws->notifySocketConnect(s->uri, s->idx, false);
                                 tcp_arg(pcb, nullptr);
                                 tcp_recv(pcb, nullptr);
                                 tcp_sent(pcb, nullptr);
@@ -662,8 +659,7 @@ namespace OpenKNX
                                 // Leeres Frame zustellen (z.B. blankes Enter in der Webconsole),
                                 // damit der Empfänger eine Leerzeile verarbeiten kann.
                                 bool isBinary = (s->wsOpcode == 0x02);
-                                std::string uri(s->uri);
-                                s->ws->notifySocketMessage(uri, s->idx, (uint8_t*)s->rxBuf, 0, isBinary);
+                                s->ws->notifySocketMessage(s->uri, s->idx, (uint8_t*)s->rxBuf, 0, isBinary);
                             }
                             // Pong (0x0A): nothing to deliver.
                             s->wsRx = WR_HDR;
@@ -690,8 +686,7 @@ namespace OpenKNX
                             tcp_write(s->pcb, closeReply, 2, TCP_WRITE_FLAG_COPY);
                             tcp_output(s->pcb);
                             tcp_pcb* pcb = s->pcb;
-                            std::string uri(s->uri);
-                            s->ws->notifySocketConnect(uri, s->idx, false);
+                            s->ws->notifySocketConnect(s->uri, s->idx, false);
                             // tcp_arg vor releaseSlot löschen, sonst findet lwIPs FIN-ACK
                             // einen bereits wiederverwendeten Slot.
                             tcp_arg(pcb, nullptr);
@@ -714,8 +709,7 @@ namespace OpenKNX
                             int payLen = (int)(s->wsPayRcvd < sizeof(s->rxBuf)
                                                    ? s->wsPayRcvd
                                                    : sizeof(s->rxBuf));
-                            std::string uri(s->uri);
-                            s->ws->notifySocketMessage(uri, s->idx, (uint8_t*)s->rxBuf, payLen, isBinary);
+                            s->ws->notifySocketMessage(s->uri, s->idx, (uint8_t*)s->rxBuf, payLen, isBinary);
                         }
 
                         s->wsRx = WR_HDR;
@@ -744,8 +738,7 @@ namespace OpenKNX
             }
             if (s->state == CS_WS)
             {
-                std::string uri(s->uri);
-                s->ws->notifySocketConnect(uri, s->idx, false);
+                s->ws->notifySocketConnect(s->uri, s->idx, false);
             }
             releaseSlot(s);
         }
@@ -1090,11 +1083,11 @@ namespace OpenKNX
                 return;
             }
 
-            auto it = _socketClients.find(uri);
-            if (it == _socketClients.end() || it->second.empty()) return;
+            const WebSocketRoute* r = findSocketRoute(uri.c_str());
+            if (!r || r->clients.empty()) return;
 
             size_t len = strlen(message);
-            std::vector<int> clients = it->second;
+            std::vector<int> clients = r->clients; // snapshot: onSent/onErr must not see us iterate it
             for (int idx : clients)
             {
                 if (idx < 0 || idx >= MAX_CONN) continue;
@@ -1104,43 +1097,28 @@ namespace OpenKNX
             }
         }
 
-        void Webserver::notifySocketConnect(const std::string& uri, int fd, bool connected)
+        void Webserver::notifySocketConnect(const char* uri, int fd, bool connected)
         {
-            if (connected)
+            WebSocketRoute* r = findSocketRoute(uri);
+            if (r)
             {
-                _socketClients[uri].push_back(fd);
-            }
-            else
-            {
-                auto it = _socketClients.find(uri);
-                if (it != _socketClients.end())
-                {
-                    auto& v = it->second;
-                    v.erase(std::remove(v.begin(), v.end(), fd), v.end());
-                }
+                if (connected)
+                    r->clients.push_back(fd);
+                else
+                    r->clients.erase(std::remove(r->clients.begin(), r->clients.end(), fd), r->clients.end());
             }
 
-            for (auto& sock : _sockets)
-            {
-                if (sock.uri == uri && sock.onConnect)
-                {
-                    sock.onConnect(fd, connected);
-                    break;
-                }
-            }
+            if (r && r->onConnect) r->onConnect(fd, connected);
         }
 
-        void Webserver::notifySocketMessage(const std::string& uri, int fd,
+        void Webserver::notifySocketMessage(const char* uri, int fd,
                                             uint8_t* data, int length, bool isBinary)
         {
-            for (auto& sock : _sockets)
+            WebSocketRoute* r = findSocketRoute(uri);
+            if (r && r->onMessage)
             {
-                if (sock.uri == uri && sock.onMessage)
-                {
-                    WebSocketFrame frame{data, length, isBinary};
-                    sock.onMessage(fd, &frame);
-                    break;
-                }
+                WebSocketFrame frame{data, length, isBinary};
+                r->onMessage(fd, &frame);
             }
         }
 
