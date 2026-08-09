@@ -281,9 +281,13 @@ static constexpr int MAX_CONN = OPENKNX_WEBSERVER_MAX_CONN; // default 3, shared
 static ConnSlot g_slots[MAX_CONN];
 ```
 
-`OPENKNX_WEBSERVER_MAX_CONN` (RP2040, default 3) is **not** the same flag as ESP32's `OPENKNX_WEBSOCKET_MAX`: on RP2040 the slot pool is shared between HTTP and WebSocket, so the name reflects that. Raising it also needs more lwIP PCBs (`MEMP_NUM_TCP_PCB`). `OPENKNX_WEBSOCKET_RX_CAP` is shared with ESP32 (per-WS RX limit), but overflow behaviour differs: RP2040 truncates, ESP32 disconnects.
+`OPENKNX_WEBSERVER_MAX_CONN` (RP2040, default 3) is **not** the same flag as ESP32's `OPENKNX_WEBSOCKET_MAX`: on RP2040 the slot pool is shared between HTTP and WebSocket, so the name reflects that. Raising it also needs more lwIP PCBs (`MEMP_NUM_TCP_PCB`). `OPENKNX_WEBSERVER_RX_CAP` (RP2040, default 1024) follows the same naming rule for the same reason — the per-slot receive buffer serves HTTP headers *and* WS payloads, so there is one flag for both. ESP32's `OPENKNX_WEBSOCKET_RX_CAP` (default 2048) is WebSocket-only, because httpd buffers the HTTP side itself; overflow behaviour also differs (RP2040 truncates the payload, ESP32 disconnects).
 
-Each `ConnSlot` holds: HTTP RX buffer (1536 B), HTTP TX pointer, WS state machine state, WS payload buffer (`OPENKNX_WEBSOCKET_RX_CAP` B). Per-client webconsole read position is tracked in `Webconsole::_consoleReadPos` (keyed by fd/slot index), not in `ConnSlot` — see below.
+Each `ConnSlot` holds: **one** receive buffer (`OPENKNX_WEBSERVER_RX_CAP` B), HTTP TX pointer, WS state machine state. Per-client webconsole read position is tracked in `Webconsole::_consoleReadPos` (keyed by fd/slot index), not in `ConnSlot` — see below.
+
+**`rxBuf` serves both phases** — WS code casts to `uint8_t*` where it needs bytes instead of `char*`. A connection is in exactly one protocol at a time (`ConnState`), so the phases never overlap: filled only in `CS_HTTP_RECV`, then written only from `wsProcessData()`, which requires `CS_WS`. Both need reassembly across TCP segments — that is why a per-connection buffer exists at all; the WS *send* path needs none and uses a stack frame in `wsTcpSend()`.
+
+The one ordering constraint this creates lives in `doHttpDispatch()`: the `Sec-WebSocket-Key` is not copied out of the request either — `wsKeyOff` is an offset into `rxBuf` (0 = header absent) — so `wsComputeAccept()` reads `rxBuf` and must stay **before** `s->state = CS_WS`. Anything added to the upgrade path after that line is looking at WS payload memory, not at the request.
 
 **Important:** `onAccept` calls `memset(s, 0, sizeof(*s))`, which clears `s->idx`. Therefore `idx` is set **after** the memset via pointer arithmetic:
 ```cpp

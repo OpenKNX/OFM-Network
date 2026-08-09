@@ -17,6 +17,7 @@
 * fix: MQTT topic wildcard matching (`+`/`#`) now follows MQTT 3.1.1 §4.7 exactly (e.g. `a/+` matches `a/`, `a/#` matches `a`)
 * note: none of the webserver endpoints (overview, console, file manager, group monitor) require authentication yet — treat the device as trusted-network-only until an auth layer is added
 * fix: `Webserver.cpp` now explicitly includes `buildtime.h` for `BUILD_DATETIME`/`BUILD_TIMESTAMP` (moved there from `versions.h` in OGM-Common)
+* enhancement (RP2040): each webserver connection slot now holds a single receive buffer instead of separate HTTP and WebSocket ones — a connection is only ever in one of the two protocols, so the second buffer was never live at the same time. The size is now one flag, `OPENKNX_WEBSERVER_RX_CAP` (default 1024, was 1536 for HTTP + 512 for WS); `OPENKNX_WEBSOCKET_RX_CAP` is ESP32-only from now on. Saves ~2.3 KB RAM at the default of 3 slots. Side effect: inbound WS payloads may be up to 1024 B before truncation instead of 512; the smaller HTTP header buffer still fits a normal browser request but leaves less room for large cookies/headers than before
 
 ## 0.6.0: 2026-05-15
 
