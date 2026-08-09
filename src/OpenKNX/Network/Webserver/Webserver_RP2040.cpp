@@ -17,10 +17,10 @@
 #ifndef OPENKNX_WEBSERVER_MAX_CONN
 #define OPENKNX_WEBSERVER_MAX_CONN 3
 #endif
-// OPENKNX_WEBSOCKET_RX_CAP: per-WS payload buffer in bytes. Larger inbound payloads are
-// truncated (not dropped), unlike ESP32 which disconnects on overflow.
-#ifndef OPENKNX_WEBSOCKET_RX_CAP
-#define OPENKNX_WEBSOCKET_RX_CAP 512
+// One RX buffer per slot, for HTTP headers and WS payloads alike. Oversized headers
+// get a 431, oversized WS payloads are truncated. Max 65535 (rxLen is uint16_t).
+#ifndef OPENKNX_WEBSERVER_RX_CAP
+#define OPENKNX_WEBSERVER_RX_CAP 1024
 #endif
 
 namespace OpenKNX
@@ -68,16 +68,15 @@ namespace OpenKNX
             ConnState state;
             uint8_t pollCount;
 
-            // HTTP RX
-            char rxBuf[1536];
+            char rxBuf[OPENKNX_WEBSERVER_RX_CAP];
             uint16_t rxLen;
 
             // Parsed request
             uint8_t method;
             char uri[128];
             bool isWs;
-            bool uriTooLong; // uri[] didn't fit the actual request line — reject with 414
-            char wsKey[64];
+            bool uriTooLong;   // uri[] didn't fit the actual request line — reject with 414
+            uint16_t wsKeyOff; // Sec-WebSocket-Key offset into rxBuf, 0 = absent
 
             // HTTP TX — nur die Position; die zu sendenden Blöcke liegen in
             // g_response[idx].segments(), gehören also der WebResponse.
@@ -91,7 +90,6 @@ namespace OpenKNX
             uint32_t wsPayRcvd;
             uint8_t wsMask[4];
             bool wsMasked;
-            uint8_t wsPayBuf[OPENKNX_WEBSOCKET_RX_CAP];
             uint8_t wsHdrBuf[10]; // accumulate header bytes
             uint8_t wsHdrRcvd;
 
@@ -313,7 +311,7 @@ namespace OpenKNX
             p = lineEnd + 2;
 
             s->isWs = false;
-            s->wsKey[0] = '\0';
+            s->wsKeyOff = 0;
             s->contentLength = 0;
             bool hasUpgrade = false;
 
@@ -334,8 +332,8 @@ namespace OpenKNX
 
                     if (strcasecmp(name, "Upgrade") == 0 && strcasecmp(value, "websocket") == 0)
                         hasUpgrade = true;
-                    else if (strcasecmp(name, "Sec-WebSocket-Key") == 0)
-                        strncpy(s->wsKey, value, sizeof(s->wsKey) - 1);
+                    else if (strcasecmp(name, "Sec-WebSocket-Key") == 0 && *value)
+                        s->wsKeyOff = (uint16_t)(value - s->rxBuf); // already NUL-terminated in rxBuf
                     else if (strcasecmp(name, "Content-Length") == 0)
                         s->contentLength = (uint32_t)atoi(value);
                 }
@@ -343,7 +341,7 @@ namespace OpenKNX
             }
 
             s->headerEnd = (uint16_t)((end + 4) - s->rxBuf);
-            s->isWs = hasUpgrade && s->wsKey[0] != '\0' && s->method == WEB_GET;
+            s->isWs = hasUpgrade && s->wsKeyOff != 0 && s->method == WEB_GET;
             return true;
         }
 
@@ -401,7 +399,7 @@ namespace OpenKNX
             {
                 // WebSocket upgrade
                 char accept[64] = {};
-                if (!wsComputeAccept(s->wsKey, accept, sizeof(accept)))
+                if (!wsComputeAccept(s->rxBuf + s->wsKeyOff, accept, sizeof(accept)))
                 {
                     tcp_close(s->pcb);
                     releaseSlot(s);
@@ -657,7 +655,7 @@ namespace OpenKNX
                                 // damit der Empfänger eine Leerzeile verarbeiten kann.
                                 bool isBinary = (s->wsOpcode == 0x02);
                                 std::string uri(s->uri);
-                                s->ws->notifySocketMessage(uri, s->idx, s->wsPayBuf, 0, isBinary);
+                                s->ws->notifySocketMessage(uri, s->idx, (uint8_t*)s->rxBuf, 0, isBinary);
                             }
                             // Pong (0x0A): nothing to deliver.
                             s->wsRx = WR_HDR;
@@ -669,10 +667,10 @@ namespace OpenKNX
 
                     case WR_PAYLOAD:
                     {
-                        if (s->wsPayRcvd < sizeof(s->wsPayBuf))
-                            s->wsPayBuf[s->wsPayRcvd] = s->wsMasked
-                                                            ? (b ^ s->wsMask[s->wsPayRcvd % 4])
-                                                            : b;
+                        if (s->wsPayRcvd < sizeof(s->rxBuf))
+                            s->rxBuf[s->wsPayRcvd] = s->wsMasked
+                                                          ? (b ^ s->wsMask[s->wsPayRcvd % 4])
+                                                          : b;
                         s->wsPayRcvd++;
 
                         if (s->wsPayRcvd < (uint32_t)s->wsPayLen) break;
@@ -705,11 +703,11 @@ namespace OpenKNX
                         else if (s->wsOpcode == 0x01 || s->wsOpcode == 0x02) // text/binary
                         {
                             bool isBinary = (s->wsOpcode == 0x02);
-                            int payLen = (int)(s->wsPayRcvd < sizeof(s->wsPayBuf)
+                            int payLen = (int)(s->wsPayRcvd < sizeof(s->rxBuf)
                                                    ? s->wsPayRcvd
-                                                   : sizeof(s->wsPayBuf));
+                                                   : sizeof(s->rxBuf));
                             std::string uri(s->uri);
-                            s->ws->notifySocketMessage(uri, s->idx, s->wsPayBuf, payLen, isBinary);
+                            s->ws->notifySocketMessage(uri, s->idx, (uint8_t*)s->rxBuf, payLen, isBinary);
                         }
 
                         s->wsRx = WR_HDR;

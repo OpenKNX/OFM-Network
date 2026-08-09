@@ -27,6 +27,9 @@
 #ifndef OPENKNX_WEBCLIENT_TASK_STACK
 #define OPENKNX_WEBCLIENT_TASK_STACK 6144
 #endif
+#ifndef OPENKNX_WEBCLIENT_BUF_SIZE
+#define OPENKNX_WEBCLIENT_BUF_SIZE 512
+#endif
 
 #ifdef ARDUINO_ARCH_ESP32
 #include <freertos/FreeRTOS.h>
@@ -131,14 +134,16 @@ namespace OpenKNX
                 uint32_t bodyMaxSize = 0;
                 std::vector<std::pair<std::string, std::string>> responseHeaders;
 
-                uint8_t txBuf[512] = {};
+                // Allocated in startSlot()/freed in finishSlot() — PSRAM if available, only
+                // resident while a request is in flight.
+                uint8_t* txBuf = nullptr;
                 uint16_t txLen = 0;
                 uint16_t txSent = 0;
                 std::string requestBody;
                 uint32_t bodySent = 0;
                 std::vector<std::pair<std::string, std::string>> extraHeaders;
 
-                uint8_t rxBuf[512] = {};
+                uint8_t* rxBuf = nullptr;
 
                 bool headersComplete = false;
                 bool hdrExpectLF = false;

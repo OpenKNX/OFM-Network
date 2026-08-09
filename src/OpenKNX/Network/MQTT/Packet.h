@@ -6,6 +6,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#ifndef OPENKNX_MQTT_TXBUF_SIZE
+#define OPENKNX_MQTT_TXBUF_SIZE 512
+#endif
+
 namespace OpenKNX
 {
     namespace Network
@@ -107,6 +111,12 @@ namespace OpenKNX
 
             // MQTT topic wildcard matching ('+' and '#')
             bool topicMatches(const char *pattern, const char *topic);
+
+            // Shared TX scratch buffer for Broker and Client -- Module runs only one
+            // of the two at a time (see Module::cfgBroker()), so one buffer covers
+            // both instead of each holding its own. Allocated once in Module::setup(),
+            // only if MQTT is actually enabled at runtime -- stays nullptr otherwise.
+            extern uint8_t *mqttTxBuf;
 
             // Read big-endian uint16 from buffer
             inline uint16_t readU16(const uint8_t *p) { return (uint16_t)(p[0] << 8) | p[1]; }

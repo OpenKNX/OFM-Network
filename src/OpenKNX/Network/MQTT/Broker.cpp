@@ -370,10 +370,10 @@ namespace OpenKNX
                 // Send retained messages
                 for (auto &[topic, msg] : _retained)
                 {
-                    size_t n = buildPublish(_txBuf, sizeof(_txBuf), topic.c_str(),
+                    size_t n = buildPublish(mqttTxBuf, OPENKNX_MQTT_TXBUF_SIZE, topic.c_str(),
                                             msg.payload.c_str(), msg.payload.size(),
                                             0, true, 0); // QoS 0, siehe routePublish()
-                    if (n) sendToConn(c, _txBuf, n);
+                    if (n) sendToConn(c, mqttTxBuf, n);
                 }
                 logInfo("MQTT", "broker: client '%s' connected", c.clientId);
             }
@@ -428,10 +428,10 @@ namespace OpenKNX
                     {
                         if (topicMatches(topic, rtopic.c_str()))
                         {
-                            size_t n = buildPublish(_txBuf, sizeof(_txBuf), rtopic.c_str(),
+                            size_t n = buildPublish(mqttTxBuf, OPENKNX_MQTT_TXBUF_SIZE, rtopic.c_str(),
                                                     msg.payload.c_str(), msg.payload.size(),
                                                     0, true, 0); // QoS 0, siehe routePublish()
-                            if (n) sendToConn(c, _txBuf, n);
+                            if (n) sendToConn(c, mqttTxBuf, n);
                         }
                     }
                 }
@@ -549,7 +549,7 @@ namespace OpenKNX
                 // Ausgehend immer QoS 0: der Broker vergibt keine msgIds und verfolgt
                 // keine ausgehenden Acks. Ein PUBLISH mit QoS>0 und msgId 0 wäre
                 // protokollwidrig. Passend dazu grantet handleSubscribe() QoS 0.
-                size_t n = buildPublish(_txBuf, sizeof(_txBuf), topic, payload, len, 0, false, 0);
+                size_t n = buildPublish(mqttTxBuf, OPENKNX_MQTT_TXBUF_SIZE, topic, payload, len, 0, false, 0);
 
                 // Route to connected broker clients
                 for (auto &c : _conns)
@@ -559,7 +559,7 @@ namespace OpenKNX
                     {
                         if (topicMatches(sub.topic.c_str(), topic))
                         {
-                            if (n) sendToConn(c, _txBuf, n);
+                            if (n) sendToConn(c, mqttTxBuf, n);
                             break;
                         }
                     }

@@ -121,9 +121,6 @@ namespace OpenKNX
                 std::vector<std::pair<std::string, MessageCallback>,
                             PsramAllocator<std::pair<std::string, MessageCallback>>> _observers;
 
-                // Shared transmit scratch buffer — avoids 512-byte stack allocations
-                uint8_t _txBuf[512];
-
 #if defined(ARDUINO_ARCH_ESP32)
                 void *_server = nullptr; // WiFiServer*
                 void readConn(Conn &c);

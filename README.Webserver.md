@@ -12,7 +12,8 @@ OPENKNX_WEBCONSOLE          – /console page, WS /console, logger streaming
 OPENKNX_WEBCONSOLE_BUFFER   – Total size of the log ring buffer in bytes (default: 4096)
 OPENKNX_WEBSOCKET_MAX       – ESP32 only: max concurrent WebSocket connections (default 3, excess → HTTP 503)
 OPENKNX_WEBSERVER_MAX_CONN  – RP2040 only: total webserver connection slots, shared HTTP+WS (default 3); raising requires more lwIP PCBs
-OPENKNX_WEBSOCKET_RX_CAP    – Per-WS RX cap in bytes (ESP32 accumulation buffer default 2048, overflow → disconnect; RP2040 payload buffer default 512, overflow → truncate)
+OPENKNX_WEBSOCKET_RX_CAP    – ESP32 only: per-WS accumulation buffer in bytes (default 2048, overflow → disconnect)
+OPENKNX_WEBSERVER_RX_CAP    – RP2040 only: per-slot receive buffer in bytes, used for HTTP headers and WS payloads alike (default 1024; headers over it → HTTP 431, WS payloads over it → truncated). Max 65535; below ~1 KB a normal browser request no longer fits.
 OPENKNX_WEBMONITOR        – /groupmonitor page, WS /groupmonitor, live KNX telegram stream (TP only, MASK_VERSION == 0x07B0)
 OPENKNX_WEBFS               – /filemanager page and its routes (browse, download, upload, delete, mkdir)
 ```

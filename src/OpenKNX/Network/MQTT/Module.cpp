@@ -15,6 +15,17 @@ namespace OpenKNX
                 if (_initialized) return;
                 if (!configured || !active()) return;
 
+                if (!mqttTxBuf)
+                {
+                    // setup() re-runs every tick until _initialized -- only allocate once.
+                    mqttTxBuf = (uint8_t *)PSRAM_CALLOC(1, OPENKNX_MQTT_TXBUF_SIZE);
+                    if (!mqttTxBuf)
+                    {
+                        logErrorP("MQTT: out of memory for TX buffer");
+                        return;
+                    }
+                }
+
                 logInfoP("Setting up MQTT");
                 logIndentUp();
                 logInfoP("Mode: %s", cfgBroker() ? "Broker" : "Client");

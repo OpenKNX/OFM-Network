@@ -103,9 +103,6 @@ namespace OpenKNX
                 uint8_t _rxBuf[RX_BUF_SIZE];
                 size_t _rxLen = 0;
 
-                // Shared transmit scratch buffer — avoids 512-byte stack allocations
-                uint8_t _txBuf[512];
-
                 std::vector<Subscription> _subscriptions;
                 size_t _subscribedUpTo = 0; // index into _subscriptions for pending sends
 

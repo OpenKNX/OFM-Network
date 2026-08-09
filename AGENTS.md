@@ -89,6 +89,8 @@ MQTT 3.1.1 client + broker, no external dependencies. Guard: `#ifdef OPENKNX_MQT
 
 **Setup lifecycle:** Deferred — `mqtt.setup()` is called from `Network::Module::loop()` only when `established()` is true.
 
+**Shared TX buffer:** `Broker` and `Client` both need a scratch buffer for outgoing packets, but only one of the two ever runs (`cfgBroker()`), so they share `mqttTxBuf` (`OPENKNX_MQTT_TXBUF_SIZE`, default 512) declared in `Packet.h` instead of each holding its own. It is a **pointer**, allocated once in `Module::setup()` from PSRAM if available and never freed (MQTT cannot be switched off without a restart) — so a firmware built with `OPENKNX_MQTT` but with MQTT disabled in ETS pays nothing for it. Two consequences: `sizeof(mqttTxBuf)` is the pointer size, never the capacity — always pass `OPENKNX_MQTT_TXBUF_SIZE` to the `build*()` functions; and `setup()` re-runs every tick until `_initialized`, so the allocation is guarded by `if (!mqttTxBuf)` to avoid leaking one buffer per tick.
+
 **API:**
 ```cpp
 openknxNetwork.mqtt.publish("abs/topic", payload, len, qos, retain);
@@ -100,7 +102,9 @@ openknxNetwork.mqtt.devicePrefix();  // e.g. "openknx/abc12345/"
 
 Full reference: [`README.MQTT.md`](README.MQTT.md)
 
-Full reference: [`README.MQTT.md`](README.MQTT.md)
+### `OpenKNX::Format::JSON` (`src/OpenKNX/Format/JSON/`)
+
+`Writer.h/.cpp` and `Reader.h/.cpp` — **use these instead of assembling JSON by hand.** `Writer` is a fluent builder (`beginObject()`/`field(k, v)`/`endObject()`, overloads for `const char*`, `std::string`, `int32_t`, `uint32_t`, `float`, `bool`, plus `null()`); it escapes keys and values itself, so no manual quoting at call sites. `reset()` clears the content but keeps the internal `std::string` capacity — a `Writer` held as a member and reset per message therefore stops allocating once warmed up, which is why `GroupMonitor` keeps one for its per-telegram broadcast.
 
 ---
 
@@ -281,9 +285,13 @@ static constexpr int MAX_CONN = OPENKNX_WEBSERVER_MAX_CONN; // default 3, shared
 static ConnSlot g_slots[MAX_CONN];
 ```
 
-`OPENKNX_WEBSERVER_MAX_CONN` (RP2040, default 3) is **not** the same flag as ESP32's `OPENKNX_WEBSOCKET_MAX`: on RP2040 the slot pool is shared between HTTP and WebSocket, so the name reflects that. Raising it also needs more lwIP PCBs (`MEMP_NUM_TCP_PCB`). `OPENKNX_WEBSOCKET_RX_CAP` is shared with ESP32 (per-WS RX limit), but overflow behaviour differs: RP2040 truncates, ESP32 disconnects.
+`OPENKNX_WEBSERVER_MAX_CONN` (RP2040, default 3) is **not** the same flag as ESP32's `OPENKNX_WEBSOCKET_MAX`: on RP2040 the slot pool is shared between HTTP and WebSocket, so the name reflects that. Raising it also needs more lwIP PCBs (`MEMP_NUM_TCP_PCB`). `OPENKNX_WEBSERVER_RX_CAP` (RP2040, default 1024) follows the same naming rule for the same reason — the per-slot receive buffer serves HTTP headers *and* WS payloads, so there is one flag for both. ESP32's `OPENKNX_WEBSOCKET_RX_CAP` (default 2048) is WebSocket-only, because httpd buffers the HTTP side itself; overflow behaviour also differs (RP2040 truncates the payload, ESP32 disconnects).
 
-Each `ConnSlot` holds: HTTP RX buffer (1536 B), HTTP TX pointer, WS state machine state, WS payload buffer (`OPENKNX_WEBSOCKET_RX_CAP` B). Per-client webconsole read position is tracked in `Webconsole::_consoleReadPos` (keyed by fd/slot index), not in `ConnSlot` — see below.
+Each `ConnSlot` holds: **one** receive buffer (`OPENKNX_WEBSERVER_RX_CAP` B), HTTP TX pointer, WS state machine state. Per-client webconsole read position is tracked in `Webconsole::_consoleReadPos` (keyed by fd/slot index), not in `ConnSlot` — see below.
+
+**`rxBuf` serves both phases** — WS code casts to `uint8_t*` where it needs bytes instead of `char*`. A connection is in exactly one protocol at a time (`ConnState`), so the phases never overlap: filled only in `CS_HTTP_RECV`, then written only from `wsProcessData()`, which requires `CS_WS`. Both need reassembly across TCP segments — that is why a per-connection buffer exists at all; the WS *send* path needs none and uses a stack frame in `wsTcpSend()`.
+
+The one ordering constraint this creates lives in `doHttpDispatch()`: the `Sec-WebSocket-Key` is not copied out of the request either — `wsKeyOff` is an offset into `rxBuf` (0 = header absent) — so `wsComputeAccept()` reads `rxBuf` and must stay **before** `s->state = CS_WS`. Anything added to the upgrade path after that line is looking at WS payload memory, not at the request.
 
 **Important:** `onAccept` calls `memset(s, 0, sizeof(*s))`, which clears `s->idx`. Therefore `idx` is set **after** the memset via pointer arithmetic:
 ```cpp
@@ -349,7 +357,7 @@ Both platforms parse only what the bundled browser clients actually send: masked
 
 - **Parallel tap, bypassing the stack:** registers `knx.bau().getDataLinkLayer()->getTPUart().registerReceivedFrame(...)` — the same hook MQTT raw-frame publish uses (`MQTT/Module.cpp`). The callback fires in `processRxFrameBuffer()` (loop task, after repetition filter, before stack processing) for **every** received frame — no filtering.
 - **Read-only on the bus, but not stateless:** the module never sends a telegram. It does accept two WS commands, `busmonitor:on` / `busmonitor:off`, which switch the TPUart between monitoring mode and normal operation (`startMonitoring()` / `reset()`). In monitoring mode the device stops processing KNX telegrams — same as ETS busmonitor. Unauthenticated, like every other webserver endpoint.
-- **Deliberately no ring buffer and no `loop()`** (unlike Webconsole, whose buffer exists because the logger fills independently of clients). `onFrame()` decodes the `TPUart::Frame` and broadcasts compact JSON directly via `webserver.sendWebsocketMessage("/groupmonitor", json)`. Safe from the callback because it shares the loop task with the webserver (ESP32: TX/state mutex; RP2040: single-thread). Slow clients are dropped by the WS layer; new clients see only telegrams arriving after connect.
+- **Deliberately no ring buffer and no `loop()`** (unlike Webconsole, whose buffer exists because the logger fills independently of clients). `onFrame()` decodes the `TPUart::Frame` and broadcasts compact JSON directly via `webserver.sendWebsocketMessage("/groupmonitor", …)`, built with a persistent [`JSON::Writer`](#openknxformatjson-srcopenknxformatjson) member (`reset()` keeps its capacity, so no per-telegram heap growth); `hex` goes into a stack buffer. The only remaining allocation is the Latin-15→UTF-8 conversion of `val`, and only for Write/Response with a resolved DPT. Safe from the callback because it shares the loop task with the webserver (ESP32: TX/state mutex; RP2040: single-thread). Slow clients are dropped by the WS layer; new clients see only telegrams arriving after connect.
 - **Decoding:** `humanSource()`/`humanDestination()`, `isGroupAddress()`; APCI from `((d[meta-2]&0x03)<<8)|d[meta-1]` masked to `0x03C0` → Read/Response/Write/other (group only); payload hex = `apduSize()` bytes from `metadataSize()-1`. JSON keys: `src`, `dst`, `ga`, `apci`, `len`, `hex`, `flags` (9 chars `TDIERFBNA`, `_` where not set), plus for group telegrams `addr`, `dpt`, `val`.
 - **Assets** `/assets/groupmonitor.css` + `.js` via `Asset()` (generated `webassets.h`, see [Web Assets](#web-assets-webassets-generated-webassetsh)) + `addStylesheet()`/`addJavaScript()`; client timestamps on arrival; autoscroll/pause/clear; 1000-row cap. `setup()` guarded with `_initialized` so a webserver restart never double-registers the frame callback.
 - **Name/Value/DPT from `/openknx_ga.tsv`** (LittleFS, tab-separated `ga\tdpt\tsubset\thauptgruppe\tmittelgruppe\tname`):
