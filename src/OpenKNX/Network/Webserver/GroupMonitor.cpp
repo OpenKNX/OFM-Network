@@ -19,9 +19,13 @@ namespace OpenKNX
             "<h1>Gruppenmonitor <span id='gm-status' class='gm-status gm-status-sm'>Verbinde&hellip;</span></h1>"
             "<div class='gm-bar'>"
             "<label><input type='checkbox' id='gm-scroll' checked> Autoscroll</label>"
+#if MASK_VERSION != 0x091A
+            // Not on a router: busmonitor mode takes the TP-UART out of normal
+            // processing, which on 0x091A would stop TP<->IP routing, not just monitoring.
             "<label title='Im Busmonitor-Modus werden keine KNX-Telegramme mehr verarbeitet!'>"
             "<input type='checkbox' id='gm-busmon'>"
             " <span class='gm-busmon-warn'>&#x26A0; Busmonitor</span></label>"
+#endif
             "<span class='gm-spacer'></span>"
             "<button type='button' id='gm-startstop'></button>"
             "<button type='button' id='gm-clear'>Leeren</button>"
@@ -69,12 +73,14 @@ namespace OpenKNX
             openknxNetwork.webserver.addSocket("/groupmonitor",
                                                [](int, WebSocketFrame* frame) {
                                                    if (!frame || frame->length == 0) return;
+#if MASK_VERSION != 0x091A
                                                    std::string cmd((const char*)frame->data, frame->length);
                                                    auto& dll = openknxNetwork.tpUart();
                                                    if (cmd == "busmonitor:on")
                                                        dll.startMonitoring();
                                                    else if (cmd == "busmonitor:off")
                                                        dll.reset();
+#endif
                                                },
                                                nullptr);
 

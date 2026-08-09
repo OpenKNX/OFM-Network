@@ -39,20 +39,22 @@
     updateBtn();
     document.getElementById('gm-clear').onclick = () => { body.innerHTML = ''; };
 
-    // Busmonitor checkbox
-    cbBusmon.onchange = function () {
-        if (this.checked) {
-            if (!confirm('Im Busmonitor-Modus werden keine KNX-Telegramme mehr verarbeitet und das Gerät kann nicht mehr am Bus teilnehmen.')) {
-                this.checked = false;
-                return;
+    // Busmonitor checkbox — absent on a router build (0x091A), see GroupMonitor.cpp
+    if (cbBusmon) {
+        cbBusmon.onchange = function () {
+            if (this.checked) {
+                if (!confirm('Im Busmonitor-Modus werden keine KNX-Telegramme mehr verarbeitet und das Gerät kann nicht mehr am Bus teilnehmen.')) {
+                    this.checked = false;
+                    return;
+                }
+                if (ws && ws.readyState === 1) ws.send('busmonitor:on');
+                statusRow('Busmonitor-Modus aktiviert &mdash; Telegramme werden nicht mehr verarbeitet', 'gm-sys-err');
+            } else {
+                if (ws && ws.readyState === 1) ws.send('busmonitor:off');
+                statusRow('Busmonitor-Modus deaktiviert (TP-Reset)', 'gm-sys-ok');
             }
-            if (ws && ws.readyState === 1) ws.send('busmonitor:on');
-            statusRow('Busmonitor-Modus aktiviert &mdash; Telegramme werden nicht mehr verarbeitet', 'gm-sys-err');
-        } else {
-            if (ws && ws.readyState === 1) ws.send('busmonitor:off');
-            statusRow('Busmonitor-Modus deaktiviert (TP-Reset)', 'gm-sys-ok');
-        }
-    };
+        };
+    }
 
     // Helper
     function p(n) { return (n < 10 ? '0' : '') + n; }
@@ -103,11 +105,13 @@
             st.className = 'gm-status ok';
             reconnDelay = 2000;
             statusRow('Verbunden', 'gm-sys-ok');
-            // Query busmonitor state after connect
-            fetch('/groupmonitor/state').then(r => r.json()).then(s => {
-                cbBusmon.checked = !!s.monitoring;
-                if (s.monitoring) statusRow('Busmonitor-Modus ist aktiv &mdash; Telegramme werden nicht verarbeitet', 'gm-sys-err');
-            }).catch(() => {});
+            // Query busmonitor state after connect (cbBusmon absent on a router build)
+            if (cbBusmon) {
+                fetch('/groupmonitor/state').then(r => r.json()).then(s => {
+                    cbBusmon.checked = !!s.monitoring;
+                    if (s.monitoring) statusRow('Busmonitor-Modus ist aktiv &mdash; Telegramme werden nicht verarbeitet', 'gm-sys-err');
+                }).catch(() => {});
+            }
         };
         ws.onmessage = e => { try { addRow(JSON.parse(e.data)); } catch (err) {} };
         ws.onclose = () => {
