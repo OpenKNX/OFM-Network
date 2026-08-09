@@ -53,7 +53,7 @@ OPENKNX_MQTT_TXBUF_MAX           – ceiling for that growth; larger messages ar
 | `ParamNET_MQTTPassword` | Password (max 20 chars) |
 | `ParamNET_MQTTCustomPrefix` | Enable custom device prefix |
 | `ParamNET_MQTTPrefix` | Custom prefix string (max 20 chars) |
-| `ParamNET_MQTTTPRawData` | Publish KNX TP raw frames (ESP32 TP-UART only, mask 0x07B0) |
+| `ParamNET_MQTTTPRawData` | Publish every KNX TP telegram as JSON (mask 0x07B0 only), Broker and Client mode alike |
 
 ---
 
@@ -76,7 +76,38 @@ The prefix is determined as follows (in order):
 | `openknx/<prefix>/status` | `1` | yes | Published every `OPENKNX_MQTT_STATUS_TIME` ms while connected |
 | `openknx/<prefix>/status` | `0` | yes | LWT (Last Will & Testament) — published by broker when device disconnects |
 | `openknx/<prefix>/uptime` | seconds | no | Seconds since boot, published alongside status |
-| `openknx/<prefix>/knxtp/raw` | binary | no | KNX TP raw frames (ESP32 TP-UART, requires `ParamNET_MQTTTPRawData`) |
+| `openknx/<prefix>/knx/tp/telegramm` | JSON | no | Every KNX TP telegram, requires `ParamNET_MQTTTPRawData` — see below |
+
+### `knx/tp/telegramm` Payload
+
+One JSON object per received TP telegram, built by the same decoder as `/groupmonitor` (`OpenKNX::Network::buildTelegramJson()`, see [`AGENTS.md`](AGENTS.md)):
+
+```json
+{"src":{"addr":4353,"text":"1.1.1"},"dst":{"addr":2307,"text":"1/1/3"},"ga":true,
+ "apci":"Write","len":1,"hex":"81","raw":"BC110109030081","value":{"dpt":"1.001","text":"1"},
+ "flags":{"transmitted":false,"addressed":true,"invalid":false,"extended":false,
+          "repeated":false,"filtered":false,"busy":false,"nack":false,"ack":true}}
+```
+
+| Field | Description |
+|-------|-------------|
+| `src.addr` / `dst.addr` | Raw 16-bit addresses — subscribe/filter on these |
+| `src.text` / `dst.text` | Same addresses formatted, **without** zero padding (`1.1.3`, not `01.01.003`). `dst.text` uses `/` for group addresses, `.` for individual ones |
+| `ga` | `true` if `dst` is a group address |
+| `apci` | `Read` / `Response` / `Write` / `other` for group telegrams, `-` otherwise |
+| `len` | APDU length |
+| `hex` | The APDU, `len` bytes starting at the second APCI octet. **Not a plain value**: for `len == 1` the value sits in the low 6 bits of that single byte, for `len > 1` it is the `len - 1` bytes after it |
+| `raw` | The complete telegram — control byte, addresses, APDU, CRC — for anyone who wants to decode it themselves |
+| `value` | **Omitted entirely** unless `/openknx_ga.tsv` resolves a DPT for `dst.addr` — without a DPT the payload can't be interpreted, so there is nothing to report |
+| `value.dpt` | `"m.sss"` |
+| `value.text` | Decoded value (UTF-8). Empty when the DPT is known but not among the formatted ones — `hex` is then the only representation |
+| `flags` | The nine TP-UART frame flags, individually |
+
+Fires on **every** telegram (group and individual; non-frames dropped via `isFrame()`), independent of Broker/Client mode.
+
+Nothing is written to the socket from the KNX receive path: the telegram is decoded and handed to `publish()`, which queues it and returns (see [Send Queue](#send-queue)). It goes out from the MQTT loop within a few milliseconds, in order.
+
+A telegram with a long APDU produces up to ~1.4 KB of JSON (`hex` up to 508 characters, `raw` up to 526), well past the 512-byte start size of the TX buffer — but that buffer grows on demand up to `OPENKNX_MQTT_TXBUF_MAX`, so no compile flag has to be touched for this feature. Only a message beyond that ceiling is rejected, with one log line.
 
 ## API
 

@@ -63,18 +63,23 @@
     const TC = { Write: 'gm-w', Read: 'gm-r', Response: 'gm-rsp' };
     function esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 
+    // Firmware sendet die Flags einzeln; die Spalte bleibt kompakt als TDIERFBNA
+    const FLAGS = [['transmitted', 'T'], ['addressed', 'D'], ['invalid', 'I'], ['extended', 'E'],
+                   ['repeated', 'R'], ['filtered', 'F'], ['busy', 'B'], ['nack', 'N'], ['ack', 'A']];
+    function flagStr(f) { return f ? FLAGS.map(([k, c]) => f[k] ? c : '_').join('') : ''; }
+
     function addRow(m) {
         if (!running) return;
         const tr = document.createElement('tr');
-        const ga = (gaNames && m.addr != null) ? gaNames.get(m.addr) : null;
-        tr.innerHTML = '<td>' + ts() + '</td><td class="gm-flag">' + (m.flags || '') + '</td>'
-            + '<td>' + m.src + '</td><td>' + m.dst + '</td>'
+        const ga = (gaNames && m.ga) ? gaNames.get(m.dst.addr) : null;
+        tr.innerHTML = '<td>' + ts() + '</td><td class="gm-flag">' + flagStr(m.flags) + '</td>'
+            + '<td>' + m.src.text + '</td><td>' + m.dst.text + '</td>'
             + '<td class="' + (TC[m.apci] || '') + '">' + m.apci + '</td>'
             + '<td>' + (ga ? esc(ga.hg) : '-') + '</td>'
             + '<td>' + (ga ? esc(ga.mg) : '-') + '</td>'
             + '<td>' + (ga ? esc(ga.nm) : '-') + '</td>'
-            + '<td>' + (m.val ? esc(m.val) : '-') + '</td>'
-            + '<td>' + (m.dpt || '-') + '</td>'
+            + '<td>' + (m.value && m.value.text ? esc(m.value.text) : '-') + '</td>'
+            + '<td>' + (m.value ? m.value.dpt : '-') + '</td>'
             + '<td class="gm-data">' + (m.hex || '') + '</td>'
             + '<td>' + m.len + '</td>';
         body.appendChild(tr);
