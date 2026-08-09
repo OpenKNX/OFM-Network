@@ -195,28 +195,36 @@ namespace OpenKNX
             tcp_output(s->pcb);
         }
 
-        // Streaming-Download: liest Chunks aus LittleFS und schreibt sie via TCP.
+        // Streaming-Download: liest einen Chunk aus LittleFS und schreibt ihn via TCP.
         // 512-Byte Stack-Buffer — kein Heap, kein Fragmentierungsrisiko.
+        //
+        // Nur EIN Chunk pro Aufruf: der ganze tcp_sndbuf() (bis zu TCP_SND_BUF, hier
+        // 8*TCP_MSS ~ 11.6 KB) leerzulesen hätte diesen einen loop()-Tick um die Zeit
+        // für bis zu ~23 Flash-/SPI-Reads verlängert -- sichtbar als "loop took longer
+        // than usual", proportional zur Dateigröße. onSent() ruft für den Rest erneut
+        // auf, sobald der Client die nächste Portion bestätigt (mehrfach pro Sekunde,
+        // nicht am ~2 s Poll-Timer hängend), Durchsatz bleibt dadurch unverändert.
         static void tcpSendStreamChunk(ConnSlot* s)
         {
+            if (s->streamSent >= s->streamTotal) return;
+
+            int avail = (int)tcp_sndbuf(s->pcb);
+            if (avail <= 0) return; // onSent feuert wenn Platz frei
+
             uint8_t buf[512];
-            while (s->streamSent < s->streamTotal)
+            size_t toRead = sizeof(buf);
+            if (toRead > (size_t)avail) toRead = (size_t)avail;
+            size_t rem = s->streamTotal - s->streamSent;
+            if (toRead > rem) toRead = rem;
+
+            size_t got = s->streamReader(s->streamCtx, buf, toRead);
+            if (got == 0)
             {
-                int avail = (int)tcp_sndbuf(s->pcb);
-                if (avail <= 0) break; // onSent feuert wenn Platz frei
-                size_t toRead = sizeof(buf);
-                if (toRead > (size_t)avail) toRead = (size_t)avail;
-                size_t rem = s->streamTotal - s->streamSent;
-                if (toRead > rem) toRead = rem;
-                size_t got = s->streamReader(s->streamCtx, buf, toRead);
-                if (got == 0)
-                {
-                    s->streamSent = s->streamTotal;
-                    break;
-                } // EOF
-                if (tcp_write(s->pcb, buf, (u16_t)got, TCP_WRITE_FLAG_COPY) != ERR_OK) break;
-                s->streamSent += got;
+                s->streamSent = s->streamTotal; // EOF
+                return;
             }
+            if (tcp_write(s->pcb, buf, (u16_t)got, TCP_WRITE_FLAG_COPY) != ERR_OK) return;
+            s->streamSent += got;
             tcp_output(s->pcb);
         }
 
