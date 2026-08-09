@@ -119,40 +119,45 @@ namespace OpenKNX
 #ifdef OPENKNX_WEBSERVER
         void Webserver::buildOverviewPage(WebResponse& res)
         {
-            auto row = [](const char* label, const std::string& val) -> std::string {
-                return std::string("<tr><td>") + label + "</td><td>" + val + "</td></tr>";
-            };
-
             char buf[64];
             std::string page = "<div class='container'><h1>Übersicht</h1>";
+
+            // Appends straight into page instead of building+copying a separate string per row.
+            auto row = [&page](const char* label, const std::string& val) {
+                page += "<tr><td>";
+                page += label;
+                page += "</td><td>";
+                page += val;
+                page += "</td></tr>";
+            };
 
             // ── Gerät ──────────────────────────────────────────────────────────
             page += "<h2>Gerät</h2><table class='attribute-table'><tbody>";
 #ifdef DEVICE_ID
-            page += row("ID", DEVICE_ID);
+            row("ID", DEVICE_ID);
 #endif
 #ifdef DEVICE_NAME
-            page += row("Name", DEVICE_NAME);
+            row("Name", DEVICE_NAME);
 #elif defined(HARDWARE_NAME)
-            page += row("Name", HARDWARE_NAME);
+            row("Name", HARDWARE_NAME);
 #endif
-            page += row("Seriennummer", openknx.info.humanSerialNumber());
+            row("Seriennummer", openknx.info.humanSerialNumber());
             page += "</tbody></table>";
 
             // ── Firmware ───────────────────────────────────────────────────────
             page += "<h2>Firmware</h2><table class='attribute-table'><tbody>";
-            page += row("Name", openknx.info.firmwareName());
-            page += row("Version", openknx.info.humanFirmwareVersion(true));
-            page += row("Nummer", openknx.info.humanFirmwareNumber());
+            row("Name", openknx.info.firmwareName());
+            row("Version", openknx.info.humanFirmwareVersion(true));
+            row("Nummer", openknx.info.humanFirmwareNumber());
 #if MASK_VERSION == 0x07B0
-            page += row("KNX-Typ", "TP (07B0)");
+            row("KNX-Typ", "TP (07B0)");
 #elif MASK_VERSION == 0x57B0
-            page += row("KNX-Typ", "IP (57B0)");
+            row("KNX-Typ", "IP (57B0)");
 #elif MASK_VERSION == 0x091A
-            page += row("KNX-Typ", "Router (091A)");
+            row("KNX-Typ", "Router (091A)");
 #else
             snprintf(buf, sizeof(buf), "%04X", MASK_VERSION);
-            page += row("KNX-Typ", buf);
+            row("KNX-Typ", buf);
 #endif
             {
 #ifdef OPENKNX_DUALCORE
@@ -164,10 +169,10 @@ namespace OpenKNX
                 if (temp > 0.0f)
                 {
                     snprintf(buf, sizeof(buf), "%s (%.1f °C)", cpuMode, temp);
-                    page += row("CPU-Modus", buf);
+                    row("CPU-Modus", buf);
                 }
                 else
-                    page += row("CPU-Modus", cpuMode);
+                    row("CPU-Modus", cpuMode);
             }
             page += "</tbody></table>";
 
@@ -178,12 +183,12 @@ namespace OpenKNX
                 addr += knx.configured()
                             ? " <span class='green'>(Konfiguriert)</span>"
                             : " <span class='gray'>(Nicht konfiguriert)</span>";
-                page += row("KNX-Adresse", addr);
+                row("KNX-Adresse", addr);
             }
             if (openknx.info.applicationNumber() > 0)
             {
-                page += row("Version", openknx.info.humanApplicationVersion());
-                page += row("Nummer", openknx.info.humanApplicationNumber());
+                row("Version", openknx.info.humanApplicationVersion());
+                row("Nummer", openknx.info.humanApplicationNumber());
             }
             page += "</tbody></table>";
 
@@ -198,24 +203,24 @@ namespace OpenKNX
                 uint32_t m = s / 60;
                 s %= 60;
                 snprintf(buf, sizeof(buf), "%ud %02u:%02u:%02u", d, h, m, s);
-                page += row("Uptime", buf);
+                row("Uptime", buf);
             }
             {
                 float fm = freeMemory() / 1024.0f;
                 float fmMin = openknx.common.freeMemoryMin() / 1024.0f;
                 snprintf(buf, sizeof(buf), "%.3f KiB (min. %.3f KiB)", fm, fmMin);
-                page += row("Freier Speicher", buf);
+                row("Freier Speicher", buf);
             }
 #ifdef OPENKNX_WATCHDOG
             if (openknx.watchdog.active())
             {
                 snprintf(buf, sizeof(buf), "Running (%is)", (int)openknx.watchdog.maxPeriod());
-                page += row("Watchdog", buf);
+                row("Watchdog", buf);
             }
             else
-                page += row("Watchdog", "Disabled");
+                row("Watchdog", "Disabled");
 #else
-            page += row("Watchdog", "Unsupported");
+            row("Watchdog", "Unsupported");
 #endif
             page += "</tbody></table>";
 
@@ -229,36 +234,36 @@ namespace OpenKNX
                 bool net = openknxNetwork.established();
 
                 page += "<h2>Netzwerk</h2><table class='attribute-table'><tbody>";
-                page += row("Hostname", openknxNetwork.hostName());
-                page += row("MAC", macStr);
-                page += row("IP-Adresse", net ? openknxNetwork.localIP().toString().c_str()
+                row("Hostname", openknxNetwork.hostName());
+                row("MAC", macStr);
+                row("IP-Adresse", net ? openknxNetwork.localIP().toString().c_str()
                                               : "<span class='gray'>–</span>");
-                page += row("Subnetz", net ? openknxNetwork.subnetMask().toString().c_str()
+                row("Subnetz", net ? openknxNetwork.subnetMask().toString().c_str()
                                            : "<span class='gray'>–</span>");
-                page += row("Gateway", net ? openknxNetwork.gatewayIP().toString().c_str()
+                row("Gateway", net ? openknxNetwork.gatewayIP().toString().c_str()
                                            : "<span class='gray'>–</span>");
-                page += row("DNS", net ? openknxNetwork.nameServerIP().toString().c_str()
+                row("DNS", net ? openknxNetwork.nameServerIP().toString().c_str()
                                        : "<span class='gray'>–</span>");
                 page += "</tbody></table>";
             }
 
             // ── Versionen ──────────────────────────────────────────────────────
             page += "<h2>Versionen</h2><table class='attribute-table'><tbody>";
-            page += row("This Firmware", openknx.info.humanFirmwareVersion(true));
+            row("This Firmware", openknx.info.humanFirmwareVersion(true));
 #ifdef KNX_Version
-            page += row("KNX", KNX_Version);
+            row("KNX", KNX_Version);
 #endif
 #ifdef MODULE_Common_Version
-            page += row(openknx.common.logPrefix().c_str(), MODULE_Common_Version);
+            row(openknx.common.logPrefix().c_str(), MODULE_Common_Version);
 #endif
             for (uint8_t i = 0; i < openknx.modules.count; i++)
             {
                 if (openknx.modules.list[i]->version().empty()) continue;
-                page += row(openknx.modules.list[i]->name().c_str(),
+                row(openknx.modules.list[i]->name().c_str(),
                             openknx.modules.list[i]->version());
             }
             page += "<tr><td colspan='2' style='padding-top:1em'></td></tr>";
-            page += row("Buildtime", BUILD_DATETIME);
+            row("Buildtime", BUILD_DATETIME);
             page += "</tbody></table>";
 
             page += "</div>";
