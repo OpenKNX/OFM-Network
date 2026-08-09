@@ -251,9 +251,31 @@ namespace OpenKNX
                 Slot &s = _slots[idx];
                 s = Slot{};
 
+                s.txBuf = (uint8_t*)PSRAM_CALLOC(1, OPENKNX_WEBCLIENT_BUF_SIZE);
+                s.rxBuf = (uint8_t*)PSRAM_CALLOC(1, OPENKNX_WEBCLIENT_BUF_SIZE);
+                if (!s.txBuf || !s.rxBuf)
+                {
+                    logError("Webclient", "Out of memory for request buffers");
+                    free(s.txBuf);
+                    free(s.rxBuf);
+                    s.txBuf = nullptr;
+                    s.rxBuf = nullptr;
+                    if (req.onDone)
+                    {
+                        Response res;
+                        req.onDone(res);
+                    }
+                    startNextPending();
+                    return;
+                }
+
                 if (!parseUrl(req.url, s.host, s.port, s.path, s.ssl))
                 {
                     logError("Webclient", "Invalid URL: %s", req.url.c_str());
+                    free(s.txBuf);
+                    free(s.rxBuf);
+                    s.txBuf = nullptr;
+                    s.rxBuf = nullptr;
                     if (req.onDone)
                     {
                         Response res;
@@ -395,7 +417,7 @@ namespace OpenKNX
 
                     case Slot::State::HEADERS:
                     {
-                        int n = platformRead(s, s.rxBuf, sizeof(s.rxBuf));
+                        int n = platformRead(s, s.rxBuf, OPENKNX_WEBCLIENT_BUF_SIZE);
                         if (n < 0) { finishSlot(idx, false); return; }
                         int i = 0;
                         for (; i < n && !s.headersComplete; i++)
@@ -432,7 +454,7 @@ namespace OpenKNX
 
                     case Slot::State::BODY:
                     {
-                        int n = platformRead(s, s.rxBuf, sizeof(s.rxBuf));
+                        int n = platformRead(s, s.rxBuf, OPENKNX_WEBCLIENT_BUF_SIZE);
                         if (n < 0) { finishSlot(idx, false); return; }
                         if (n > 0)
                         {
@@ -468,6 +490,11 @@ namespace OpenKNX
             {
                 Slot &s = _slots[idx];
                 platformClose(s);
+
+                free(s.txBuf);
+                free(s.rxBuf);
+                s.txBuf = nullptr;
+                s.rxBuf = nullptr;
 
                 DoneCallback doneCb = std::move(s.onDone);
 
@@ -536,7 +563,7 @@ namespace OpenKNX
                     buf[len++] = '\n';
                 }
 
-                if (len > (int)sizeof(s.txBuf)) len = sizeof(s.txBuf);
+                if (len > OPENKNX_WEBCLIENT_BUF_SIZE) len = OPENKNX_WEBCLIENT_BUF_SIZE;
                 memcpy(s.txBuf, buf, len);
                 s.txLen = (uint16_t)len;
                 s.txSent = 0;

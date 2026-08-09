@@ -25,6 +25,7 @@ OPENKNX_WEBCLIENT_SLOTS            – parallel request slots (RP2040) / queue d
 OPENKNX_WEBCLIENT_TIMEOUT          – total request timeout in ms — default: 10000
 OPENKNX_WEBCLIENT_TASK_STACK       – ESP32 FreeRTOS worker task stack size in bytes — default: 6144
 OPENKNX_WEBCLIENT_MAX_BODY         – default max response body size buffered into Response.body() — default: 4096
+OPENKNX_WEBCLIENT_BUF_SIZE         – RP2040 per-slot TX/RX buffer size in bytes — default: 512
 ```
 
 ---
@@ -221,6 +222,8 @@ Plain HTTP is fully non-blocking. DNS resolution uses `OpenKNX::Network::DNS::qu
 **HTTPS is fully non-blocking**: The BearSSL state machine is driven one step per `loop()` call in the `SSL_HANDSHAKE` state. Each iteration checks the engine state (`BR_SSL_SENDREC`/`BR_SSL_RECVREC`/`BR_SSL_SENDAPP`), sends or receives one batch of TLS records, and returns immediately. The W5500 background context delivers incoming TLS records via the `lwipRecv` pbuf chain between `loop()` calls. Handshake typically completes in 20–100 loop iterations.
 
 Up to `OPENKNX_WEBCLIENT_SLOTS` requests can be active simultaneously. Additional requests are queued in an unbounded pending deque and started as slots become free.
+
+Each slot's TX/RX buffers (`OPENKNX_WEBCLIENT_BUF_SIZE` bytes each) are allocated in `startSlot()` and freed in `finishSlot()` — PSRAM if available (`PSRAM_CALLOC`, see [Helper.h](../OGM-Common/src/OpenKNX/Helper.h)), plain heap otherwise. They are not resident while a slot is idle. Allocation runs from `Handler::loop()`, before the connection is opened — never from an lwIP callback — so an allocation failure is caught synchronously and just fails the request (`onDone` with an empty `Response`).
 
 ---
 
