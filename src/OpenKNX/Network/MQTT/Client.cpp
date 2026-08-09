@@ -84,9 +84,9 @@ namespace OpenKNX
             {
                 if (_state != STATE_READY) return false;
                 uint16_t msgId = (qos > 0) ? _msgId++ : 0;
-                size_t n = buildPublish(_txBuf, sizeof(_txBuf), topic, payload, len, qos, retain, msgId);
+                size_t n = buildPublish(mqttTxBuf, OPENKNX_MQTT_TXBUF_SIZE, topic, payload, len, qos, retain, msgId);
                 if (!n) return false;
-                bool result = sendRaw(_txBuf, n);
+                bool result = sendRaw(mqttTxBuf, n);
 
                 // Echo to local subscribers. Callback vorher kopieren und per Index
                 // iterieren — ein subscribe() aus dem Callback realloziert den Vector.
@@ -234,8 +234,8 @@ namespace OpenKNX
                     opts.will.retain = _willRetain;
                     opts.will.qos = _willQos;
                 }
-                size_t n = buildConnect(_txBuf, sizeof(_txBuf), opts);
-                if (n) sendRaw(_txBuf, n);
+                size_t n = buildConnect(mqttTxBuf, OPENKNX_MQTT_TXBUF_SIZE, opts);
+                if (n) sendRaw(mqttTxBuf, n);
                 _lastActivity = millis();
             }
 
@@ -244,9 +244,9 @@ namespace OpenKNX
                 while (_subscribedUpTo < _subscriptions.size())
                 {
                     auto &sub = _subscriptions[_subscribedUpTo];
-                    size_t n = buildSubscribe(_txBuf, sizeof(_txBuf),
+                    size_t n = buildSubscribe(mqttTxBuf, OPENKNX_MQTT_TXBUF_SIZE,
                                               sub.topic.c_str(), sub.qos, _msgId++);
-                    if (!n || !sendRaw(_txBuf, n)) break;
+                    if (!n || !sendRaw(mqttTxBuf, n)) break;
                     ++_subscribedUpTo;
                 }
             }

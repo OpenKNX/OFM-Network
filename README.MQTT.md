@@ -34,6 +34,7 @@ OPENKNX_MQTT_TASK_STACK         – ESP32 FreeRTOS task stack size in bytes (def
 OPENKNX_MQTT_BROKER_MAX_CLIENTS – max simultaneous broker clients (default: 5 ESP32, 3 RP2040)
 OPENKNX_MQTT_BROKER_MAX_RETAINED – max retained messages stored by broker (default: 32)
 OPENKNX_MQTT_BROKER_MAX_SUBS    – max subscriptions per broker client (default: 16)
+OPENKNX_MQTT_TXBUF_SIZE          – shared TX scratch buffer size in bytes, Broker and Client (default: 512)
 ```
 
 ---
@@ -136,6 +137,12 @@ The broker/client loop runs in a dedicated **FreeRTOS task** (Core 0, `OPENKNX_M
 ### RP2040
 
 The broker/client loop runs in the main Arduino **`loop()`** (single-threaded, `NO_SYS=1`). The broker uses lwIP callbacks (`tcp_accept`, `tcp_recv`, `tcp_err`, `tcp_poll`) only for buffering incoming data — all MQTT protocol processing happens in `loop()`, never inside a callback.
+
+### Shared TX Buffer
+
+`Broker` and `Client` both need a scratch buffer for outgoing packets, but `Module` only ever runs one of the two at a time (`ParamNET_MQTTMode`, see `cfgBroker()`). Rather than each owning its own, both use one shared buffer, `mqttTxBuf` (`OPENKNX_MQTT_TXBUF_SIZE`, declared in `Packet.h`) — a free function, not a member, so it's not duplicated per class either way.
+
+`mqttTxBuf` stays `nullptr` until MQTT is actually enabled at runtime (`ParamNET_MQTT`): `Module::setup()` allocates it once, from PSRAM if available, right before the first `Broker`/`Client::begin()` call, and never frees it — MQTT cannot be toggled off again without a restart. A firmware image that supports `OPENKNX_MQTT` but whose ETS project leaves it disabled therefore costs 0 bytes for this buffer, not `OPENKNX_MQTT_TXBUF_SIZE`.
 
 ### File Structure
 

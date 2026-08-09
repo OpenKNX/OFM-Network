@@ -89,6 +89,8 @@ MQTT 3.1.1 client + broker, no external dependencies. Guard: `#ifdef OPENKNX_MQT
 
 **Setup lifecycle:** Deferred — `mqtt.setup()` is called from `Network::Module::loop()` only when `established()` is true.
 
+**Shared TX buffer:** `Broker` and `Client` both need a scratch buffer for outgoing packets, but only one of the two ever runs (`cfgBroker()`), so they share `mqttTxBuf` (`OPENKNX_MQTT_TXBUF_SIZE`, default 512) declared in `Packet.h` instead of each holding its own. It is a **pointer**, allocated once in `Module::setup()` from PSRAM if available and never freed (MQTT cannot be switched off without a restart) — so a firmware built with `OPENKNX_MQTT` but with MQTT disabled in ETS pays nothing for it. Two consequences: `sizeof(mqttTxBuf)` is the pointer size, never the capacity — always pass `OPENKNX_MQTT_TXBUF_SIZE` to the `build*()` functions; and `setup()` re-runs every tick until `_initialized`, so the allocation is guarded by `if (!mqttTxBuf)` to avoid leaking one buffer per tick.
+
 **API:**
 ```cpp
 openknxNetwork.mqtt.publish("abs/topic", payload, len, qos, retain);
@@ -100,7 +102,9 @@ openknxNetwork.mqtt.devicePrefix();  // e.g. "openknx/abc12345/"
 
 Full reference: [`README.MQTT.md`](README.MQTT.md)
 
-Full reference: [`README.MQTT.md`](README.MQTT.md)
+### `OpenKNX::Format::JSON` (`src/OpenKNX/Format/JSON/`)
+
+`Writer.h/.cpp` and `Reader.h/.cpp` — **use these instead of assembling JSON by hand.** `Writer` is a fluent builder (`beginObject()`/`field(k, v)`/`endObject()`, overloads for `const char*`, `std::string`, `int32_t`, `uint32_t`, `float`, `bool`, plus `null()`); it escapes keys and values itself, so no manual quoting at call sites. `reset()` clears the content but keeps the internal `std::string` capacity — a `Writer` held as a member and reset per message therefore stops allocating once warmed up, which is why `GroupMonitor` keeps one for its per-telegram broadcast.
 
 ---
 
@@ -353,7 +357,7 @@ Both platforms parse only what the bundled browser clients actually send: masked
 
 - **Parallel tap, bypassing the stack:** registers `knx.bau().getDataLinkLayer()->getTPUart().registerReceivedFrame(...)` — the same hook MQTT raw-frame publish uses (`MQTT/Module.cpp`). The callback fires in `processRxFrameBuffer()` (loop task, after repetition filter, before stack processing) for **every** received frame — no filtering.
 - **Read-only on the bus, but not stateless:** the module never sends a telegram. It does accept two WS commands, `busmonitor:on` / `busmonitor:off`, which switch the TPUart between monitoring mode and normal operation (`startMonitoring()` / `reset()`). In monitoring mode the device stops processing KNX telegrams — same as ETS busmonitor. Unauthenticated, like every other webserver endpoint.
-- **Deliberately no ring buffer and no `loop()`** (unlike Webconsole, whose buffer exists because the logger fills independently of clients). `onFrame()` decodes the `TPUart::Frame` and broadcasts compact JSON directly via `webserver.sendWebsocketMessage("/groupmonitor", json)`. Safe from the callback because it shares the loop task with the webserver (ESP32: TX/state mutex; RP2040: single-thread). Slow clients are dropped by the WS layer; new clients see only telegrams arriving after connect.
+- **Deliberately no ring buffer and no `loop()`** (unlike Webconsole, whose buffer exists because the logger fills independently of clients). `onFrame()` decodes the `TPUart::Frame` and broadcasts compact JSON directly via `webserver.sendWebsocketMessage("/groupmonitor", …)`, built with a persistent [`JSON::Writer`](#openknxformatjson-srcopenknxformatjson) member (`reset()` keeps its capacity, so no per-telegram heap growth); `hex` goes into a stack buffer. The only remaining allocation is the Latin-15→UTF-8 conversion of `val`, and only for Write/Response with a resolved DPT. Safe from the callback because it shares the loop task with the webserver (ESP32: TX/state mutex; RP2040: single-thread). Slow clients are dropped by the WS layer; new clients see only telegrams arriving after connect.
 - **Decoding:** `humanSource()`/`humanDestination()`, `isGroupAddress()`; APCI from `((d[meta-2]&0x03)<<8)|d[meta-1]` masked to `0x03C0` → Read/Response/Write/other (group only); payload hex = `apduSize()` bytes from `metadataSize()-1`. JSON keys: `src`, `dst`, `ga`, `apci`, `len`, `hex`, `flags` (9 chars `TDIERFBNA`, `_` where not set), plus for group telegrams `addr`, `dpt`, `val`.
 - **Assets** `/assets/groupmonitor.css` + `.js` via `Asset()` (generated `webassets.h`, see [Web Assets](#web-assets-webassets-generated-webassetsh)) + `addStylesheet()`/`addJavaScript()`; client timestamps on arrival; autoscroll/pause/clear; 1000-row cap. `setup()` guarded with `_initialized` so a webserver restart never double-registers the frame callback.
 - **Name/Value/DPT from `/openknx_ga.tsv`** (LittleFS, tab-separated `ga\tdpt\tsubset\thauptgruppe\tmittelgruppe\tname`):

@@ -9,6 +9,8 @@ namespace OpenKNX
     {
         namespace MQTT
         {
+            uint8_t *mqttTxBuf = nullptr;
+
             // Variable-length integer (MQTT 2.2.3)
 
             size_t writeVarInt(uint8_t *buf, size_t bufLen, uint32_t value)
