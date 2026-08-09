@@ -57,11 +57,18 @@ namespace OpenKNX
                     logError("MQTT", "broker: tcp_new failed");
                     return false;
                 }
-                tcp_bind(pcb, IP_ADDR_ANY, port);
+                if (tcp_bind(pcb, IP_ADDR_ANY, port) != ERR_OK)
+                {
+                    logError("MQTT", "broker: port %u already in use", port);
+                    tcp_close(pcb);
+                    return false;
+                }
+                // tcp_listen() frees pcb on success only -- on failure it is still ours
                 _listenPcb = tcp_listen(pcb);
                 if (!_listenPcb)
                 {
                     logError("MQTT", "broker: tcp_listen failed");
+                    tcp_close(pcb);
                     return false;
                 }
                 tcp_arg((struct tcp_pcb *)_listenPcb, this);
@@ -370,7 +377,7 @@ namespace OpenKNX
                 // Send retained messages
                 for (auto &[topic, msg] : _retained)
                 {
-                    size_t n = buildPublish(mqttTxBuf, OPENKNX_MQTT_TXBUF_SIZE, topic.c_str(),
+                    size_t n = buildPublish(mqttTxBuf, mqttTxBufSize, topic.c_str(),
                                             msg.payload.c_str(), msg.payload.size(),
                                             0, true, 0); // QoS 0, siehe routePublish()
                     if (n) sendToConn(c, mqttTxBuf, n);
@@ -428,7 +435,7 @@ namespace OpenKNX
                     {
                         if (topicMatches(topic, rtopic.c_str()))
                         {
-                            size_t n = buildPublish(mqttTxBuf, OPENKNX_MQTT_TXBUF_SIZE, rtopic.c_str(),
+                            size_t n = buildPublish(mqttTxBuf, mqttTxBufSize, rtopic.c_str(),
                                                     msg.payload.c_str(), msg.payload.size(),
                                                     0, true, 0); // QoS 0, siehe routePublish()
                             if (n) sendToConn(c, mqttTxBuf, n);
@@ -549,7 +556,11 @@ namespace OpenKNX
                 // Ausgehend immer QoS 0: der Broker vergibt keine msgIds und verfolgt
                 // keine ausgehenden Acks. Ein PUBLISH mit QoS>0 und msgId 0 wäre
                 // protokollwidrig. Passend dazu grantet handleSubscribe() QoS 0.
-                size_t n = buildPublish(mqttTxBuf, OPENKNX_MQTT_TXBUF_SIZE, topic, payload, len, 0, false, 0);
+                // Client messages bypass Module's queue, so the buffer has to grow here.
+                // n = 0 only skips the wire, local observers below still get it.
+                size_t n = mqttTxReserve(publishSize(strlen(topic), len))
+                               ? buildPublish(mqttTxBuf, mqttTxBufSize, topic, payload, len, 0, false, 0)
+                               : 0;
 
                 // Route to connected broker clients
                 for (auto &c : _conns)

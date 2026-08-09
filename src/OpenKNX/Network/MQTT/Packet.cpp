@@ -2,6 +2,8 @@
 #ifdef OPENKNX_MQTT
 
 #include "Packet.h"
+#include "OpenKNX.h" // PSRAM_MALLOC
+#include <stdlib.h>
 
 namespace OpenKNX
 {
@@ -10,6 +12,24 @@ namespace OpenKNX
         namespace MQTT
         {
             uint8_t *mqttTxBuf = nullptr;
+            size_t mqttTxBufSize = 0;
+
+            bool mqttTxReserve(size_t need)
+            {
+                if (need <= mqttTxBufSize) return true;
+                if (need > OPENKNX_MQTT_TXBUF_MAX) return false;
+
+                need = (need + 127) & ~(size_t)127; // 128-B steps, else every slightly larger message reallocates
+                if (need > OPENKNX_MQTT_TXBUF_MAX) need = OPENKNX_MQTT_TXBUF_MAX;
+
+                uint8_t *buf = (uint8_t *)PSRAM_MALLOC(need);
+                if (!buf) return false;
+
+                if (mqttTxBuf) free(mqttTxBuf); // scratch, nothing to preserve
+                mqttTxBuf = buf;
+                mqttTxBufSize = need;
+                return true;
+            }
 
             // Variable-length integer (MQTT 2.2.3)
 

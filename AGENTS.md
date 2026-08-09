@@ -77,30 +77,16 @@ Non-blocking ICMP ping with queue + parallel slots:
 ### `OpenKNX::Network::MQTT::Module` (`src/OpenKNX/Network/MQTT/`)
 MQTT 3.1.1 client + broker, no external dependencies. Guard: `#ifdef OPENKNX_MQTT`. Accessed as `openknxNetwork.mqtt`.
 
-**Files:**
-- `Packet.h/.cpp` — MQTT 3.1.1 packet serialization/deserialization, level-based topic matching (`+`/`#` per §4.7)
-- `Client.h/.cpp` — connects to an external MQTT broker
-- `Broker.h/.cpp` — embedded MQTT broker (auth, retained messages, QoS 0+1, keep-alive)
-- `Module.h/.cpp` — OpenKNX::Module subclass with public publish/subscribe API
+`Packet` (wire format), `Client` (external broker), `Broker` (embedded), `Module` (public API). Broker/Client run in a FreeRTOS task on ESP32, in `loop()` on RP2040; `setup()` is deferred until `established()`.
 
-**Platform behaviour:**
-- **ESP32**: Broker/Client loop in FreeRTOS task (Core 0). `publish()` and `subscribe()` are mutex-protected.
-- **RP2040**: Broker/Client loop in main `loop()` (NO_SYS=1). lwIP callbacks (`tcp_accept/recv/err/poll`) only buffer data — all protocol processing in `loop()`.
+**Rules that are not visible at the call site** — full reference in [`README.MQTT.md`](README.MQTT.md):
 
-**Setup lifecycle:** Deferred — `mqtt.setup()` is called from `Network::Module::loop()` only when `established()` is true.
-
-**Shared TX buffer:** `Broker` and `Client` both need a scratch buffer for outgoing packets, but only one of the two ever runs (`cfgBroker()`), so they share `mqttTxBuf` (`OPENKNX_MQTT_TXBUF_SIZE`, default 512) declared in `Packet.h` instead of each holding its own. It is a **pointer**, allocated once in `Module::setup()` from PSRAM if available and never freed (MQTT cannot be switched off without a restart) — so a firmware built with `OPENKNX_MQTT` but with MQTT disabled in ETS pays nothing for it. Two consequences: `sizeof(mqttTxBuf)` is the pointer size, never the capacity — always pass `OPENKNX_MQTT_TXBUF_SIZE` to the `build*()` functions; and `setup()` re-runs every tick until `_initialized`, so the allocation is guarded by `if (!mqttTxBuf)` to avoid leaking one buffer per tick.
-
-**API:**
-```cpp
-openknxNetwork.mqtt.publish("abs/topic", payload, len, qos, retain);
-openknxNetwork.mqtt.publishP("rel/topic", payload);  // prepends devicePrefix()
-openknxNetwork.mqtt.subscribe("openknx/+/cmd", callback, qos);
-openknxNetwork.mqtt.connected();
-openknxNetwork.mqtt.devicePrefix();  // e.g. "openknx/abc12345/"
-```
-
-Full reference: [`README.MQTT.md`](README.MQTT.md)
+- **`publish()`/`publishP()` queue, they never write the socket.** `true` means *accepted*, not delivered. That is what makes them safe from timing-critical code such as the KNX loop — never publish inline.
+- **`connected()` is a mirrored flag.** Never reach into `_broker`/`_client` from a caller; that would take `_mutex` from the wrong task.
+- **`setup()` completes even when `begin()` fails**, otherwise it re-runs — with its log block — every tick. Only pre-`begin()` failures (`mqttTxReserve()` OOM) return early to be retried.
+- **`mqttTxBuf` grows on demand**: pass `mqttTxBufSize` to the `build*()` functions, never a literal; grow only in the send path, never in `enqueue()`.
+- **DNS via `OpenKNX::Network::DNS::query()`**, never `dns_gethostbyname()`. Its callback can fire *inline*, so nothing may touch client state after the call.
+- `_mutex` is **recursive** — a subscription callback may re-enter `subscribe()` from the MQTT task.
 
 ### `OpenKNX::Format::JSON` (`src/OpenKNX/Format/JSON/`)
 
@@ -363,7 +349,7 @@ Both platforms parse only what the bundled browser clients actually send: masked
 - **Name/Value/DPT from `/openknx_ga.tsv`** (LittleFS, tab-separated `ga\tdpt\tsubset\thauptgruppe\tmittelgruppe\tname`):
   - `GATable` (`src/OpenKNX/Network/GATable.{h,cpp}`, member `openknxNetwork.gatable`) — `begin()` loads the TSV once (idempotent) into a sorted POD vector `GAEntry{uint16_t addr; uint8_t dpt; uint8_t sub;}` (4 B/GA, **no strings**, `PsramAllocator` under `OPENKNX_PSRAM`). `getDpt(addr, dpt, sub)` = binary search, no I/O. Parses only fields 0/1/2 on the fly (no large line buffer); skips header + lines without a valid addr. Member/begin-call gated identically to groupmonitor; `gatable.begin()` runs just before `groupmonitor.setup()` in `Module.cpp` and logs the entry count.
   - **Value decode** in `onFrame()` for Write/Response only, via already-linked knx-stack `KNX_Decode_Value()` (`<knx/dptconvert.h>`, `Dpt`, `KNXValue`) into a stack buffer. Payload prep: `len<=1` → 6-bit value in `d[meta-1]&0x3F`; else `len-1` bytes from `d[meta]`. Formatted (static `decodeValue()`) for DPT 1/5/6/7/8/9/12/13/14/16/17/18; **5.001** is raw 0–255 from the stack → converted to `%`. JSON gains `addr` (numeric GA, group only), `dpt` (`"m.sss"`), `val` (JSON-escaped via `appendJsonEscaped()`).
-  - **Names** stay client-side: browser fetches the TSV (`/filemanager/download?path=%2Fopenknx_ga.tsv`), builds `addr→name` Map, fills the Name column; backend never handles name strings. File absent → columns show `-`, no crash.
+- **Names** stay client-side: browser fetches the TSV (`/filemanager/download?path=%2Fopenknx_ga.tsv`), builds `addr→name` Map, fills the Name column; backend never handles name strings. File absent → columns show `-`, no crash.
 
 ### File Manager (`OPENKNX_WEBFS`)
 

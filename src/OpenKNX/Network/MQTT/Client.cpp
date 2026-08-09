@@ -12,7 +12,7 @@
 #include <WiFi.h>
 #endif
 #elif defined(ARDUINO_ARCH_RP2040)
-#include <lwip/dns.h>
+#include "OpenKNX/Network/DNS.h"
 #include <lwip/tcp.h>
 #endif
 
@@ -47,9 +47,10 @@ namespace OpenKNX
                 _port = port;
                 _keepAlive = keepAliveSeconds;
                 _state = STATE_DISCONNECTED;
-                if (tcpConnect(_host, _port)) return true;
-                armReconnectTimer();
-                return false;
+                // Setup succeeds even if the first connect does not -- that is runtime
+                // state, retried from loop(). See README.MQTT.md.
+                if (!tcpConnect(_host, _port)) armReconnectTimer();
+                return true;
             }
 
             void Client::armReconnectTimer()
@@ -84,7 +85,7 @@ namespace OpenKNX
             {
                 if (_state != STATE_READY) return false;
                 uint16_t msgId = (qos > 0) ? _msgId++ : 0;
-                size_t n = buildPublish(mqttTxBuf, OPENKNX_MQTT_TXBUF_SIZE, topic, payload, len, qos, retain, msgId);
+                size_t n = buildPublish(mqttTxBuf, mqttTxBufSize, topic, payload, len, qos, retain, msgId);
                 if (!n) return false;
                 bool result = sendRaw(mqttTxBuf, n);
 
@@ -119,13 +120,22 @@ namespace OpenKNX
                 {
                     case STATE_DISCONNECTED:
                         // Reconnect timer elapsed → attempt a fresh connection.
-                        // On failure re-arm the timer so we retry in another 5 s.
+                        // Cleared first: tcpConnect() can fail inline (DNS cache hit) and
+                        // re-arm the timer itself, which must not be overwritten here.
                         if (_reconnectTimer && delayCheck(_reconnectTimer, 5000))
                         {
-                            if (tcpConnect(_host, _port))
-                                _reconnectTimer = 0;
-                            else
-                                armReconnectTimer();
+                            _reconnectTimer = 0;
+                            if (!tcpConnect(_host, _port)) armReconnectTimer();
+                        }
+                        return;
+
+                    case STATE_RESOLVING:
+                        // Answered by callback; lwIP times out itself, this is the backstop
+                        if (delayCheck(_lastActivity, 15000))
+                        {
+                            logError("MQTT", "DNS timeout");
+                            _state = STATE_DISCONNECTED;
+                            armReconnectTimer();
                         }
                         return;
 
@@ -234,7 +244,7 @@ namespace OpenKNX
                     opts.will.retain = _willRetain;
                     opts.will.qos = _willQos;
                 }
-                size_t n = buildConnect(mqttTxBuf, OPENKNX_MQTT_TXBUF_SIZE, opts);
+                size_t n = buildConnect(mqttTxBuf, mqttTxBufSize, opts);
                 if (n) sendRaw(mqttTxBuf, n);
                 _lastActivity = millis();
             }
@@ -244,7 +254,7 @@ namespace OpenKNX
                 while (_subscribedUpTo < _subscriptions.size())
                 {
                     auto &sub = _subscriptions[_subscribedUpTo];
-                    size_t n = buildSubscribe(mqttTxBuf, OPENKNX_MQTT_TXBUF_SIZE,
+                    size_t n = buildSubscribe(mqttTxBuf, mqttTxBufSize,
                                               sub.topic.c_str(), sub.qos, _msgId++);
                     if (!n || !sendRaw(mqttTxBuf, n)) break;
                     ++_subscribedUpTo;
@@ -405,14 +415,39 @@ namespace OpenKNX
 
             Client *Client::_instance = nullptr;
 
-            bool Client::tcpConnect(const char *host, uint16_t port)
+            bool Client::tcpConnect(const char *host, uint16_t /*port*/)
             {
                 tcpDisconnect(); // free any previous pcb (e.g. repeated begin())
                 _instance = this;
-                _state = STATE_CONNECTING;
+                _state = STATE_RESOLVING;
+                _lastActivity = millis();
+
+                // May call back inline on a cache hit, so nothing must touch _state after this
+                const uint16_t id = ++_resolveId;
+                OpenKNX::Network::DNS::query(host, [this, id](IPAddress ip) {
+                    if (id != _resolveId || _state != STATE_RESOLVING) return;
+                    onResolved(ip);
+                });
+                return true;
+            }
+
+            void Client::onResolved(IPAddress ip)
+            {
+                if (ip == IPAddress(0, 0, 0, 0))
+                {
+                    logError("MQTT", "cannot resolve '%s'", _host);
+                    _state = STATE_DISCONNECTED;
+                    armReconnectTimer();
+                    return;
+                }
 
                 struct tcp_pcb *pcb = tcp_new();
-                if (!pcb) return false;
+                if (!pcb)
+                {
+                    _state = STATE_DISCONNECTED;
+                    armReconnectTimer();
+                    return;
+                }
                 _pcb = pcb;
 
                 tcp_arg(pcb, this);
@@ -421,22 +456,17 @@ namespace OpenKNX
                 tcp_poll(pcb, lwipPoll, 4); // ~2 s
 
                 ip_addr_t addr;
-                err_t err = dns_gethostbyname(host, &addr, nullptr, nullptr);
-                if (err == ERR_OK)
+                IP_ADDR4(&addr, ip[0], ip[1], ip[2], ip[3]);
+
+                _state = STATE_CONNECTING;
+                _lastActivity = millis();
+                if (tcp_connect(pcb, &addr, _port, lwipConnected) != ERR_OK)
                 {
-                    tcp_connect(pcb, &addr, port, lwipConnected);
-                }
-                else
-                {
-                    // DNS pending — not fully supported in this minimal impl.
-                    // Caller must pass an IP string when using RP2040.
                     tcp_abort(pcb);
                     _pcb = nullptr;
                     _state = STATE_DISCONNECTED;
-                    return false;
+                    armReconnectTimer();
                 }
-                _lastActivity = millis();
-                return true;
             }
 
             void Client::tcpDisconnect()

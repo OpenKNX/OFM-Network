@@ -8,6 +8,7 @@
 #include <vector>
 
 #ifdef ARDUINO_ARCH_RP2040
+#include <IPAddress.h>
 #include <lwip/tcp.h>
 #endif
 
@@ -56,6 +57,7 @@ namespace OpenKNX
                 enum State : uint8_t
                 {
                     STATE_DISCONNECTED,
+                    STATE_RESOLVING, // RP2040 only, ESP32 resolves inside WiFiClient::connect()
                     STATE_CONNECTING,
                     STATE_CONNECTED, // TCP up, CONNECT sent, waiting CONNACK
                     STATE_READY,     // CONNACK received, subscriptions pending/done
@@ -119,6 +121,9 @@ namespace OpenKNX
                 static err_t lwipConnected(void *arg, struct tcp_pcb *pcb, err_t err);
                 static err_t lwipPoll(void *arg, struct tcp_pcb *pcb);
                 bool _tcpConnectPending = false;
+
+                void onResolved(IPAddress ip);
+                uint16_t _resolveId = 0; // drops results of a superseded lookup
 #endif
             };
 
