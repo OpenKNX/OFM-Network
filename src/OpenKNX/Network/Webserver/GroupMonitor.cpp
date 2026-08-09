@@ -92,23 +92,6 @@ namespace OpenKNX
 
         // ── Wert-Dekodierung (knx-Stack) ────────────────────────────────────────────
 
-        // Hängt s JSON-escaped an json an (nur " \ und Steuerzeichen relevant).
-        static void appendJsonEscaped(std::string& json, const char* s)
-        {
-            for (const char* p = s; *p; ++p)
-            {
-                const char c = *p;
-                if (c == '"' || c == '\\')
-                {
-                    json += '\\';
-                    json += c;
-                }
-                else if ((uint8_t)c >= 0x20)
-                    json += c;
-                // Steuerzeichen (< 0x20) werden verworfen
-            }
-        }
-
         // Dekodiert die Telegramm-Payload anhand des DPT über den knx-Stack in einen
         // lesbaren Wert (Stack-Buffer, keine Heap-Strings). out bleibt leer bei
         // unbekanntem/nicht unterstütztem DPT → Browser zeigt dann die Rohbytes.
@@ -210,27 +193,6 @@ namespace OpenKNX
                 }
             }
 
-            // Payload-Bytes (len Bytes ab meta-1) als Hex.
-            std::string hex;
-            hex.reserve(len * 2);
-            const uint16_t start = (meta >= 1) ? (meta - 1) : 0;
-            for (uint16_t i = 0; i < len && (start + i) < total; i++)
-            {
-                char b[3];
-                snprintf(b, sizeof(b), "%02X", (uint8_t)d[start + i]);
-                hex += b;
-            }
-
-            std::string json = "{\"src\":\"";
-            json += frame.humanSource();
-            json += "\",\"dst\":\"";
-            json += frame.humanDestination();
-            json += "\",\"ga\":";
-            json += ga ? "1" : "0";
-            json += ",\"apci\":\"";
-            json += apci;
-            json += "\",\"len\":";
-            json += std::to_string(len);
             char flags[10];
             flags[0] = frame.isTransmitted() ? 'T' : '_';
             flags[1] = frame.isAddressed()   ? 'D' : '_';
@@ -243,27 +205,41 @@ namespace OpenKNX
             flags[8] = frame.isAck()         ? 'A' : '_';
             flags[9] = '\0';
 
-            if (ga)
-            {
-                json += ",\"addr\":";
-                json += std::to_string(addr); // numerische GA für Namens-Lookup im Browser
-            }
-            json += ",\"dpt\":\"";
-            json += dptStr;
-            json += "\",\"val\":\"";
-            {
-                // val is raw DPT16 bus data (ISO-8859-15); WS text frame needs UTF-8.
-                std::string valUtf8;
-                OpenKNX::Charset::encodeUtf8(valUtf8, val, strlen(val));
-                appendJsonEscaped(json, valUtf8.c_str());
-            }
-            json += "\",\"hex\":\"";
-            json += hex;
-            json += "\",\"flags\":\"";
-            json += flags;
-            json += "\"}";
+            // Payload-Bytes (len Bytes ab meta-1) als Hex -- Stack-Buffer, kein Heap.
+            char hex[512] = {};
+            int hexLen = 0;
+            const uint16_t start = (meta >= 1) ? (meta - 1) : 0;
+            for (uint16_t i = 0; i < len && (start + i) < total && hexLen < (int)sizeof(hex) - 2; i++)
+                hexLen += snprintf(hex + hexLen, sizeof(hex) - hexLen, "%02X", (uint8_t)d[start + i]);
 
-            openknxNetwork.webserver.sendWebsocketMessage("/groupmonitor", json.c_str());
+            // val is raw DPT16 bus data (ISO-8859-15); WS text frame needs UTF-8. Only
+            // one heap allocation, and only for Write/Response with a resolved DPT --
+            // not on every telegram.
+            std::string valUtf8;
+            if (val[0])
+            {
+                valUtf8.reserve(sizeof(val) * 2);
+                OpenKNX::Charset::encodeUtf8(valUtf8, val, strlen(val));
+            }
+
+            // _json keeps its capacity across calls (reset() only clears content), so
+            // building the message here does not allocate once warmed up.
+            _json.reset();
+            _json.beginObject()
+                .field("src", frame.humanSource())
+                .field("dst", frame.humanDestination())
+                .field("ga", ga)
+                .field("apci", apci)
+                .field("len", (uint32_t)len);
+            if (ga)
+                _json.field("addr", (uint32_t)addr); // numerische GA für Namens-Lookup im Browser
+            _json.field("dpt", dptStr)
+                .field("val", valUtf8)
+                .field("hex", hex)
+                .field("flags", flags)
+                .endObject();
+
+            openknxNetwork.webserver.sendWebsocketMessage("/groupmonitor", _json.c_str());
         }
 
     } // namespace Network
