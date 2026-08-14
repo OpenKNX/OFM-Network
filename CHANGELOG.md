@@ -1,6 +1,8 @@
 # Changes
 
-## 0.7.0
+## upcoming releases
+
+## 0.7.0: 2026-08-14
 
 * feature: Add a built-in **web server** (`OPENKNX_WEBSERVER`) with an overview page — available on both ESP32 and RP2040
 * feature: Add a browser-based **device console** (`OPENKNX_WEBCONSOLE`) — run console commands and view the log from the browser
