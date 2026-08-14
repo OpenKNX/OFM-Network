@@ -702,8 +702,14 @@ namespace OpenKNX
         void Module::handleOTA()
         {
             bool allowed = true;
-            if (ParamNET_OTAUpdate == 2) allowed = false;
-            if (ParamNET_OTAUpdate == 0) allowed = knx.progMode();
+            // An unconfigured device has no ETS params -> ParamNET_OTAUpdate reads erased param memory. Honouring
+            // it here can lock OTA out permanently (you would need ETS to enable the very mechanism you want to
+            // flash with). Only apply the ETS gate once configured; an unconfigured device keeps OTA open.
+            if (knx.configured())
+            {
+                if (ParamNET_OTAUpdate == 2) allowed = false;
+                if (ParamNET_OTAUpdate == 0) allowed = knx.progMode();
+            }
 
             if (_otaAllowed != allowed) // allowed changed
             {
