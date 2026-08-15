@@ -514,6 +514,17 @@ namespace OpenKNX
                     logError("OTA", "End error");
                 logIndentDown();
             });
+
+#if defined(OPENKNX_TELEGRAMJSON) && defined(OPENKNX_MQTT)
+            // setup() runs once, so registerReceivedFrame() cannot stack up (it appends
+            // to a vector). knx.start() comes later; the callback just stays idle until then.
+            if (configured && ParamNET_MQTT && ParamNET_MQTTTPRawData)
+            {
+                _telegramTopic = mqtt.devicePrefix() + "knx/tp/telegramm";
+                tpUart().registerReceivedFrame(
+                    [](TPUart::Frame &frame) { openknxNetwork.publishTelegram(frame); });
+            }
+#endif
         }
 
 
@@ -785,6 +796,13 @@ namespace OpenKNX
             checkLinkStatus();
             handleOTA();
 
+#ifdef OPENKNX_TELEGRAMJSON
+            // Independent of the webserver and of established(): the table lives on
+            // LittleFS, already mounted by the time any loop() runs. begin() is
+            // idempotent and self-logs, so no extra guard/flag needed here.
+            gatable.begin();
+#endif
+
 #ifdef OPENKNX_WEBSERVER
             if (ParamNET_HTTP || !knx.configured())
             {
@@ -797,10 +815,7 @@ namespace OpenKNX
 #ifdef OPENKNX_WEBFS
                     filemanager.setup();
 #endif
-#if defined(OPENKNX_WEBMONITOR) && (MASK_VERSION == 0x07B0)
-                    openknx.common.skipLooptimeWarning();
-                    gatable.begin();
-                    logInfoP("GA table: %u entries from /openknx_ga.tsv", (unsigned)gatable.count());
+#if defined(OPENKNX_TELEGRAMJSON) && defined(OPENKNX_WEBMONITOR)
                     groupmonitor.setup();
 #endif
                 }
@@ -824,6 +839,21 @@ namespace OpenKNX
             }
 #endif
         }
+
+#if defined(OPENKNX_TELEGRAMJSON) && defined(OPENKNX_MQTT)
+        void Module::publishTelegram(TPUart::Frame &frame)
+        {
+            // connected() first: while MQTT is down, decoding would be thrown away.
+            if (!frame.isFrame() || !mqtt.connected()) return;
+
+            _telegramJson.reset();
+            buildTelegramJson(frame, _telegramJson);
+
+            const std::string &json = _telegramJson.str();
+            // Queues and returns -- never blocks this callback, see MQTT::Module::publish().
+            mqtt.publish(_telegramTopic.c_str(), json.c_str(), json.size());
+        }
+#endif
 
         void Module::handleOTA()
         {

@@ -28,13 +28,15 @@ MQTT is only active at runtime when enabled in ETS **and** `OPENKNX_MQTT` is def
 ## Compile Flags
 
 ```
-OPENKNX_MQTT                    – enable MQTT (required)
-OPENKNX_MQTT_STATUS_TIME        – status publish interval in ms (default: 10000)
-OPENKNX_MQTT_TASK_STACK         – ESP32 FreeRTOS task stack size in bytes (default: 4096)
-OPENKNX_MQTT_BROKER_MAX_CLIENTS – max simultaneous broker clients (default: 5 ESP32, 3 RP2040)
+OPENKNX_MQTT                     – enable MQTT (required)
+OPENKNX_MQTT_STATUS_TIME         – status publish interval in ms (default: 10000)
+OPENKNX_MQTT_TASK_STACK          – ESP32 FreeRTOS task stack size in bytes (default: 4096)
+OPENKNX_MQTT_BROKER_MAX_CLIENTS  – max simultaneous broker clients (default: 5 ESP32, 3 RP2040)
 OPENKNX_MQTT_BROKER_MAX_RETAINED – max retained messages stored by broker (default: 32)
-OPENKNX_MQTT_BROKER_MAX_SUBS    – max subscriptions per broker client (default: 16)
-OPENKNX_MQTT_TXBUF_SIZE          – shared TX scratch buffer size in bytes, Broker and Client (default: 512)
+OPENKNX_MQTT_BROKER_MAX_SUBS     – max subscriptions per broker client (default: 16)
+OPENKNX_MQTT_MAX_QUEUE           – max messages waiting to be sent; entries are allocated on demand, so this is a count cap, not reserved memory (default: 32)
+OPENKNX_MQTT_TXBUF_MIN           – start size of the shared TX scratch buffer, Broker and Client; grows on demand (default: 512)
+OPENKNX_MQTT_TXBUF_MAX           – ceiling for that growth; larger messages are rejected (default: 2048, never below _MIN)
 ```
 
 ---
@@ -51,7 +53,7 @@ OPENKNX_MQTT_TXBUF_SIZE          – shared TX scratch buffer size in bytes, Bro
 | `ParamNET_MQTTPassword` | Password (max 20 chars) |
 | `ParamNET_MQTTCustomPrefix` | Enable custom device prefix |
 | `ParamNET_MQTTPrefix` | Custom prefix string (max 20 chars) |
-| `ParamNET_MQTTTPRawData` | Publish KNX TP raw frames (ESP32 TP-UART only, mask 0x07B0) |
+| `ParamNET_MQTTTPRawData` | Publish every KNX TP telegram as JSON (mask 0x07B0 only), Broker and Client mode alike |
 
 ---
 
@@ -74,9 +76,38 @@ The prefix is determined as follows (in order):
 | `openknx/<prefix>/status` | `1` | yes | Published every `OPENKNX_MQTT_STATUS_TIME` ms while connected |
 | `openknx/<prefix>/status` | `0` | yes | LWT (Last Will & Testament) — published by broker when device disconnects |
 | `openknx/<prefix>/uptime` | seconds | no | Seconds since boot, published alongside status |
-| `openknx/<prefix>/knxtp/raw` | binary | no | KNX TP raw frames (ESP32 TP-UART, requires `ParamNET_MQTTTPRawData`) |
+| `openknx/<prefix>/knx/tp/telegramm` | JSON | no | Every KNX TP telegram, requires `ParamNET_MQTTTPRawData` — see below |
 
----
+### `knx/tp/telegramm` Payload
+
+One JSON object per received TP telegram, built by the same decoder as `/groupmonitor` (`OpenKNX::Network::buildTelegramJson()`, see [`AGENTS.md`](AGENTS.md)):
+
+```json
+{"src":{"addr":4353,"text":"1.1.1"},"dst":{"addr":2307,"text":"1/1/3"},"ga":true,
+ "apci":"Write","len":1,"hex":"81","raw":"BC110109030081","value":{"dpt":"1.001","text":"1"},
+ "flags":{"transmitted":false,"addressed":true,"invalid":false,"extended":false,
+          "repeated":false,"filtered":false,"busy":false,"nack":false,"ack":true}}
+```
+
+| Field | Description |
+|-------|-------------|
+| `src.addr` / `dst.addr` | Raw 16-bit addresses — subscribe/filter on these |
+| `src.text` / `dst.text` | Same addresses formatted, **without** zero padding (`1.1.3`, not `01.01.003`). `dst.text` uses `/` for group addresses, `.` for individual ones |
+| `ga` | `true` if `dst` is a group address |
+| `apci` | `Read` / `Response` / `Write` / `other` for group telegrams, `-` otherwise |
+| `len` | APDU length |
+| `hex` | The APDU, `len` bytes starting at the second APCI octet. **Not a plain value**: for `len == 1` the value sits in the low 6 bits of that single byte, for `len > 1` it is the `len - 1` bytes after it |
+| `raw` | The complete telegram — control byte, addresses, APDU, CRC — for anyone who wants to decode it themselves |
+| `value` | **Omitted entirely** unless `/openknx_ga.tsv` resolves a DPT for `dst.addr` — without a DPT the payload can't be interpreted, so there is nothing to report |
+| `value.dpt` | `"m.sss"` |
+| `value.text` | Decoded value (UTF-8). Empty when the DPT is known but not among the formatted ones — `hex` is then the only representation |
+| `flags` | The nine TP-UART frame flags, individually |
+
+Fires on **every** telegram (group and individual; non-frames dropped via `isFrame()`), independent of Broker/Client mode.
+
+Nothing is written to the socket from the KNX receive path: the telegram is decoded and handed to `publish()`, which queues it and returns (see [Send Queue](#send-queue)). It goes out from the MQTT loop within a few milliseconds, in order.
+
+A telegram with a long APDU produces up to ~1.4 KB of JSON (`hex` up to 508 characters, `raw` up to 526), well past the 512-byte start size of the TX buffer — but that buffer grows on demand up to `OPENKNX_MQTT_TXBUF_MAX`, so no compile flag has to be touched for this feature. Only a message beyond that ceiling is rejected, with one log line.
 
 ## API
 
@@ -113,7 +144,7 @@ Wildcards `+` (single level) and `#` (multi level) follow MQTT 3.1.1 §4.7: `+` 
 On **ESP32**, `subscribe()` is mutex-protected and can be called from any task.  
 On **RP2040**, call only from the main Arduino loop (no lwIP callback context).
 
-In **Client mode**, subscribed callbacks are also triggered immediately when the device itself publishes to a matching topic (local echo). No separate API is required.
+In **Client mode**, subscribed callbacks are also triggered when the device itself publishes to a matching topic (local echo). No separate API is required. The echo fires when the message is actually sent, not when `publish()` returns — so it arrives a few milliseconds later, and on ESP32 in the MQTT task rather than the publishing one.
 
 ### Status
 
@@ -138,11 +169,21 @@ The broker/client loop runs in a dedicated **FreeRTOS task** (Core 0, `OPENKNX_M
 
 The broker/client loop runs in the main Arduino **`loop()`** (single-threaded, `NO_SYS=1`). The broker uses lwIP callbacks (`tcp_accept`, `tcp_recv`, `tcp_err`, `tcp_poll`) only for buffering incoming data — all MQTT protocol processing happens in `loop()`, never inside a callback.
 
+### Send Queue
+
+`publish()` and `publishP()` do **not** write to the socket — they copy the message into an outbound FIFO and return immediately, so they never block and are safe to call from timing-critical code. A `true` return means the message was accepted for sending, not that it was delivered.
+
+The actual send happens from the MQTT loop (the FreeRTOS task on ESP32, `loop()` on RP2040), in order. A send that fails — typically lwIP's `tcp_write()` reporting a full buffer under load — leaves its entry queued and is retried, so momentary back-pressure costs latency rather than data.
+
+Entries are allocated on demand and sized to the actual topic + payload, so an idle queue costs nothing; `OPENKNX_MQTT_MAX_QUEUE` (default 32) is a cap on the number of pending messages, not reserved memory. Messages are dropped only once that cap is reached — i.e. if sending cannot keep up over a sustained period — and the count is logged once per status interval.
+
 ### Shared TX Buffer
 
-`Broker` and `Client` both need a scratch buffer for outgoing packets, but `Module` only ever runs one of the two at a time (`ParamNET_MQTTMode`, see `cfgBroker()`). Rather than each owning its own, both use one shared buffer, `mqttTxBuf` (`OPENKNX_MQTT_TXBUF_SIZE`, declared in `Packet.h`) — a free function, not a member, so it's not duplicated per class either way.
+`Broker` and `Client` both need a scratch buffer for outgoing packets, but `Module` only ever runs one of the two at a time (`ParamNET_MQTTMode`, see `cfgBroker()`). Rather than each owning its own, both use one shared buffer, `mqttTxBuf` (`OPENKNX_MQTT_TXBUF_MIN`, declared in `Packet.h`) — a free function, not a member, so it's not duplicated per class either way.
 
-`mqttTxBuf` stays `nullptr` until MQTT is actually enabled at runtime (`ParamNET_MQTT`): `Module::setup()` allocates it once, from PSRAM if available, right before the first `Broker`/`Client::begin()` call, and never frees it — MQTT cannot be toggled off again without a restart. A firmware image that supports `OPENKNX_MQTT` but whose ETS project leaves it disabled therefore costs 0 bytes for this buffer, not `OPENKNX_MQTT_TXBUF_SIZE`.
+`mqttTxBuf` stays `nullptr` until MQTT is actually enabled at runtime (`ParamNET_MQTT`): `Module::setup()` allocates it, from PSRAM if available, right before the first `Broker`/`Client::begin()` call, and never frees it — MQTT cannot be toggled off again without a restart. A firmware image that supports `OPENKNX_MQTT` but whose ETS project leaves it disabled therefore costs 0 bytes for this buffer.
+
+The size is **not** fixed at compile time, because MQTT payloads differ far too much between installations for one number to fit them all. `mqttTxReserve(need)` grows the buffer in 128-byte steps up to `OPENKNX_MQTT_TXBUF_MAX` and never shrinks it, so it settles on the largest message this device actually sends and then stops allocating. `OPENKNX_MQTT_TXBUF_MIN` is only the start size. Two rules follow for anyone touching this code: pass **`mqttTxBufSize`** to the `build*()` functions, never a literal or `sizeof(mqttTxBuf)`; and call `mqttTxReserve()` only from the send path (`drainQueue()`, `Broker::routePublish()`) — `publish()` runs in arbitrary tasks and must not reallocate the buffer under the MQTT task.
 
 ### File Structure
 
@@ -169,11 +210,15 @@ QoS 2 inbound is accepted (PUBREC/PUBREL/PUBCOMP are exchanged) but the message 
 
 ### Client Features
 
-- Connection pooling with automatic reconnect and exponential backoff
+- Automatic reconnect, fixed 5 s retry (no backoff)
 - QoS 0 and QoS 1
 - Keep-alive with ping/pong
 - Last Will & Testament (LWT)
 - Local echo: `subscribe()` callbacks fire immediately on own publishes
+
+`Client::begin()` reports success as soon as the client is **set up** — a failed initial TCP connect is runtime state, not a setup error, and is retried from `Client::loop()` every 5 seconds. Reporting it as failure used to break the retry entirely: `Module::setup()` keeps `_initialized` false, `Module::loop()` returns before `Client::loop()`, and the reconnect timer armed in `begin()` never fires. What actually retried was `setup()` itself, at tick rate, printing its whole log block each time. For the same reason `_initialized` is now set even when `Broker::begin()` fails — an inactive broker is a no-op in `loop()`, whereas repeating setup() is not.
+
+The server may be a hostname or an IP address. On ESP32 `WiFiClient::connect()` resolves it; on RP2040 `tcpConnect()` goes through [`OpenKNX::Network::DNS::query()`](src/OpenKNX/Network/DNS.h) — the same asynchronous helper Ping and the Webclient use — and the client sits in `STATE_RESOLVING` until the callback arrives. Nothing blocks. Two details that state exists for: the 5 s retry in `loop()` must not fire a second lookup while one is in flight, and a result arriving from a superseded attempt is dropped via `_resolveId`. On a DNS cache hit the callback runs **inline**, still inside `tcpConnect()` — so the caller must not touch `_state` or `_reconnectTimer` after that call.
 
 ---
 

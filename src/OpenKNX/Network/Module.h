@@ -9,7 +9,9 @@
 #define OPENKNX_LEDFUNC_KNXIP_STATE 11
 #endif
 #include "OpenKNX/Network/Ping/Handler.h"
-#if defined(OPENKNX_WEBSERVER)
+#include "OpenKNX/Network/TelegramJson.h" // defines OPENKNX_TELEGRAMJSON
+// buildTelegramJson() converts the decoded value from Latin-15 to UTF-8.
+#if defined(OPENKNX_WEBSERVER) || defined(OPENKNX_TELEGRAMJSON)
     #ifndef OPENKNX_CHARSET
         #define OPENKNX_CHARSET
     #endif
@@ -25,7 +27,9 @@
 #endif
 #ifdef OPENKNX_WEBMONITOR
 #include "OpenKNX/Network/Webserver/GroupMonitor.h"
-#include "OpenKNX/Network/GATable.h"
+#endif
+#ifdef OPENKNX_TELEGRAMJSON
+#include "OpenKNX/Network/GATable.h" // DPT lookup for the decoded value
 #endif
 #ifdef OPENKNX_MQTT
 #include "OpenKNX/Network/MQTT/Module.h"
@@ -78,6 +82,13 @@ namespace OpenKNX::Led
 {
     extern uint32_t g_ipLedActivity;
 }
+
+#if MASK_VERSION == 0x07B0 || MASK_VERSION == 0x091A
+namespace TPUart
+{
+    class DataLinkLayer;
+}
+#endif
 
 typedef std::function<void(bool)> NetworkChangeCallback;
 
@@ -146,6 +157,12 @@ namespace OpenKNX
 #if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
             void setMulticastAddress(IPAddress address, bool rebootToTakeEffect);
 #endif
+#if MASK_VERSION == 0x07B0 || MASK_VERSION == 0x091A
+            // Abstracts the BAU accessor difference: a plain TP device (0x07B0)
+            // reaches its TP-UART via getDataLinkLayer(); a TP+IP router (0x091A)
+            // via getSecondaryDataLinkLayer() -- getDataLinkLayer() there is the IP side.
+            TPUart::DataLinkLayer &tpUart();
+#endif
 
 #ifdef DEVICE_DISPLAY_MODULE
             // On-device IP override (DeviceDisplay network-settings menu). Setters only mutate the in-RAM
@@ -183,8 +200,10 @@ namespace OpenKNX
 #ifdef OPENKNX_WEBFS
             OpenKNX::Network::FileManager filemanager;
 #endif
-#if defined(OPENKNX_WEBMONITOR) && (MASK_VERSION == 0x07B0)
+#if defined(OPENKNX_TELEGRAMJSON) && defined(OPENKNX_WEBMONITOR)
             OpenKNX::Network::GroupMonitor groupmonitor;
+#endif
+#ifdef OPENKNX_TELEGRAMJSON
             OpenKNX::Network::GATable gatable;
 #endif
 #ifdef OPENKNX_MQTT
@@ -203,6 +222,15 @@ namespace OpenKNX
             void SetIpProperty(uint8_t PropertyId, IPAddress IPAddress);
             uint8_t GetByteProperty(uint8_t PropertyId);
             void SetByteProperty(uint8_t PropertyId, uint8_t value);
+
+#if defined(OPENKNX_TELEGRAMJSON) && defined(OPENKNX_MQTT)
+            // ParamNET_MQTTTPRawData: every received TP telegram as JSON on
+            // <prefix>/knx/tp/telegramm. Lives here, not in MQTT::Module -- that one is
+            // the MQTT API and has no business knowing about KNX frames.
+            void publishTelegram(TPUart::Frame &frame); // TP-UART callback
+            std::string _telegramTopic;                 // absolute, built once in setup()
+            OpenKNX::Format::JSON::Writer _telegramJson; // reset() keeps its capacity
+#endif
 
             bool _powerSave = false;
             bool _ipShown = false;

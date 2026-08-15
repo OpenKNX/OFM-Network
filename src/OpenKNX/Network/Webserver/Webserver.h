@@ -7,7 +7,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <map>
 #include <string>
 #include <vector>
 
@@ -63,6 +62,7 @@ namespace OpenKNX
             std::string uri;
             WebSocketHandler onMessage;
             WebSocketConnectHandler onConnect;
+            std::vector<int> clients; // connected fds/slot indices for this uri
         };
 
         struct WebMenuItem
@@ -107,10 +107,15 @@ namespace OpenKNX
             void logRequest(const WebRequest& req, const WebResponse& res);
             void logWebsocket(const WebRequest& req, int statusCode = 101);
 
+            // Platform transport glue only (Webserver_RP2040.cpp / Webserver_ESP32.cpp) --
+            // no feature module calls these. const char* on purpose: the RP2040 side
+            // calls notifySocketMessage() from the per-WS-frame lwIP callback with a
+            // char[] already in hand, and const std::string& forced a std::string alloc
+            // on every frame just to satisfy the signature.
             bool handleRequest(WebRequest& req, WebResponse& res);
-            bool hasSocket(const std::string& uri) const;
-            void notifySocketConnect(const std::string& uri, int fd, bool connected);
-            void notifySocketMessage(const std::string& uri, int fd,
+            bool hasSocket(const char* uri) const;
+            void notifySocketConnect(const char* uri, int fd, bool connected);
+            void notifySocketMessage(const char* uri, int fd,
                                      uint8_t* data, int length, bool isBinary);
 
           protected:
@@ -128,10 +133,15 @@ namespace OpenKNX
             void setupRp2040();
 #endif
 
+            // Linear scan over _sockets -- a handful of registered WS routes at most,
+            // cheaper and smaller than a std::map keyed by uri. Client fds live inline
+            // on the matched WebSocketRoute (WebSocketRoute::clients).
+            WebSocketRoute* findSocketRoute(const char* uri);
+            const WebSocketRoute* findSocketRoute(const char* uri) const;
+
 #ifdef ARDUINO_ARCH_ESP32
             void* _server = nullptr;          // httpd_handle_t — opaque, kein esp_http_server.h im Header
-            mutable void* _wsLock = nullptr;  // recursive mutex guarding _socketClients + the WS session registry
-            std::map<std::string, std::vector<int>> _socketClients;
+            mutable void* _wsLock = nullptr;  // recursive mutex guarding WebSocketRoute::clients + the WS session registry
 
           public:
             void* serverHandle() const { return _server; }
@@ -139,7 +149,6 @@ namespace OpenKNX
             void wsStateUnlock() const;
 #elif defined(ARDUINO_ARCH_RP2040)
             void* _listenPcb = nullptr;
-            std::map<std::string, std::vector<int>> _socketClients;
 #endif
         };
 

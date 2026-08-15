@@ -6,8 +6,18 @@
 #include <stdint.h>
 #include <string.h>
 
-#ifndef OPENKNX_MQTT_TXBUF_SIZE
-#define OPENKNX_MQTT_TXBUF_SIZE 512
+// Start size of the shared TX buffer; it grows on demand up to _MAX.
+#ifndef OPENKNX_MQTT_TXBUF_MIN
+#define OPENKNX_MQTT_TXBUF_MIN 512
+#endif
+
+// Ceiling for that growth, never below the start size.
+#ifndef OPENKNX_MQTT_TXBUF_MAX
+#if OPENKNX_MQTT_TXBUF_MIN > 2048
+#define OPENKNX_MQTT_TXBUF_MAX OPENKNX_MQTT_TXBUF_MIN
+#else
+#define OPENKNX_MQTT_TXBUF_MAX 2048
+#endif
 #endif
 
 namespace OpenKNX
@@ -112,11 +122,17 @@ namespace OpenKNX
             // MQTT topic wildcard matching ('+' and '#')
             bool topicMatches(const char *pattern, const char *topic);
 
-            // Shared TX scratch buffer for Broker and Client -- Module runs only one
-            // of the two at a time (see Module::cfgBroker()), so one buffer covers
-            // both instead of each holding its own. Allocated once in Module::setup(),
-            // only if MQTT is actually enabled at runtime -- stays nullptr otherwise.
+            // Shared TX scratch buffer for Broker and Client -- only one of the two ever
+            // runs. nullptr until MQTT is enabled at runtime. Always pass mqttTxBufSize
+            // to the build*() functions, never a literal.
             extern uint8_t *mqttTxBuf;
+            extern size_t mqttTxBufSize;
+
+            // Grows to at least need, never shrinks, content not preserved. Send path only.
+            bool mqttTxReserve(size_t need);
+
+            // Worst case a PUBLISH serialises to: type + 4-byte varint + topic len + msg id.
+            inline size_t publishSize(size_t topicLen, size_t payloadLen) { return 9 + topicLen + payloadLen; }
 
             // Read big-endian uint16 from buffer
             inline uint16_t readU16(const uint8_t *p) { return (uint16_t)(p[0] << 8) | p[1]; }

@@ -1,6 +1,7 @@
 #if defined(KNX_IP_WIFI) || defined(KNX_IP_LAN)
 
 #include "OpenKNX/Network/GATable.h"
+#include "OpenKNX.h"
 #include <LittleFS.h>
 #include <algorithm>
 
@@ -14,8 +15,14 @@ namespace OpenKNX
             if (_loaded) return;
             _loaded = true;
 
+            openknx.common.skipLooptimeWarning(); // Parsen kann bei grosser Tabelle länger dauern
+
             File file = LittleFS.open("/openknx_ga.tsv", "r");
-            if (!file) return; // keine Tabelle → getDpt() liefert immer false
+            if (!file)
+            {
+                logInfo("GATable", "no /openknx_ga.tsv found, 0 entries");
+                return; // keine Tabelle → getDpt() liefert immer false
+            }
 
             // Zeilenweise on-the-fly parsen: nur die ersten drei Felder
             // (addr, dpt, subset) werden als Zahlen gelesen, der Rest der Zeile
@@ -83,6 +90,8 @@ namespace OpenKNX
             // Für die Binärsuche in getDpt() nach Adresse sortieren.
             std::sort(_index.begin(), _index.end(),
                       [](const GAEntry& a, const GAEntry& b) { return a.addr < b.addr; });
+
+            logInfo("GATable", "%u entries from /openknx_ga.tsv", (unsigned)_index.size());
         }
 
         bool GATable::getDpt(uint16_t addr, uint8_t& dpt, uint8_t& sub) const

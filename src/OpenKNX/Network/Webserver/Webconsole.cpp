@@ -85,8 +85,8 @@ namespace OpenKNX
                     openknx.console.submitLine(cmd); // divert to an active FTC console tunnel, else run locally (lets `ftc <pa> con` work from the web console)
             }
 
+            if (!openknxNetwork.webserver.hasClients("/console")) return;
             std::vector<int> clients = openknxNetwork.webserver.connectedClientFds("/console");
-            if (clients.empty()) return;
 
             uint32_t writePos = openknx.logger.ringWritePos();
 

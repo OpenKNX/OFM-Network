@@ -1,17 +1,11 @@
-#if defined(OPENKNX_WEBMONITOR) && (MASK_VERSION == 0x07B0) && (defined(KNX_IP_WIFI) || defined(KNX_IP_LAN))
+#include "OpenKNX/Network/TelegramJson.h" // defines OPENKNX_TELEGRAMJSON
+#if defined(OPENKNX_TELEGRAMJSON) && defined(OPENKNX_WEBMONITOR)
 
 #include "OpenKNX/Network/Webserver/GroupMonitor.h"
 #include "OpenKNX.h"
 #include "OpenKNX/Network/Module.h"
-#include "OpenKNX/Charset.hpp"
 #include "OpenKNX/Network/Webserver/Webserver.h"
 #include "webassets.h" // generiert von OGM-Common/scripts/pio/prepare.py aus web/assets/
-
-#include <knx/dptconvert.h> // KNX_Decode_Value, Dpt, KNXValue (bereits gelinkt)
-
-#include <cstdio>
-#include <cstring>
-#include <string>
 
 namespace OpenKNX
 {
@@ -25,9 +19,13 @@ namespace OpenKNX
             "<h1>Gruppenmonitor <span id='gm-status' class='gm-status gm-status-sm'>Verbinde&hellip;</span></h1>"
             "<div class='gm-bar'>"
             "<label><input type='checkbox' id='gm-scroll' checked> Autoscroll</label>"
+#if MASK_VERSION != 0x091A
+            // Not on a router: busmonitor mode takes the TP-UART out of normal
+            // processing, which on 0x091A would stop TP<->IP routing, not just monitoring.
             "<label title='Im Busmonitor-Modus werden keine KNX-Telegramme mehr verarbeitet!'>"
             "<input type='checkbox' id='gm-busmon'>"
             " <span class='gm-busmon-warn'>&#x26A0; Busmonitor</span></label>"
+#endif
             "<span class='gm-spacer'></span>"
             "<button type='button' id='gm-startstop'></button>"
             "<button type='button' id='gm-clear'>Leeren</button>"
@@ -68,86 +66,28 @@ namespace OpenKNX
             openknxNetwork.webserver.addRoute(WEB_GET, "/groupmonitor/state",
                                               [](WebRequest&, WebResponse& res) {
                                                   res.setContentType("application/json");
-                                                  bool mon = knx.bau().getDataLinkLayer()->getTPUart().isMonitoring();
+                                                  bool mon = openknxNetwork.tpUart().isMonitoring();
                                                   res.send(mon ? "{\"monitoring\":true}" : "{\"monitoring\":false}");
                                               });
 
             openknxNetwork.webserver.addSocket("/groupmonitor",
                                                [](int, WebSocketFrame* frame) {
                                                    if (!frame || frame->length == 0) return;
+#if MASK_VERSION != 0x091A
                                                    std::string cmd((const char*)frame->data, frame->length);
-                                                   auto& dll = knx.bau().getDataLinkLayer()->getTPUart();
+                                                   auto& dll = openknxNetwork.tpUart();
                                                    if (cmd == "busmonitor:on")
                                                        dll.startMonitoring();
                                                    else if (cmd == "busmonitor:off")
                                                        dll.reset();
+#endif
                                                },
                                                nullptr);
 
             // Paralleler Tap am KNX-Stack vorbei: jedes vom TP-UART empfangene Frame
             // landet im onFrame()-Callback (loop-Kontext, gleicher Task wie der Webserver).
-            knx.bau().getDataLinkLayer()->getTPUart().registerReceivedFrame(
+            openknxNetwork.tpUart().registerReceivedFrame(
                 [](TPUart::Frame& f) { openknxNetwork.groupmonitor.onFrame(f); });
-        }
-
-        // ── Wert-Dekodierung (knx-Stack) ────────────────────────────────────────────
-
-        // Dekodiert die Telegramm-Payload anhand des DPT über den knx-Stack in einen
-        // lesbaren Wert (Stack-Buffer, keine Heap-Strings). out bleibt leer bei
-        // unbekanntem/nicht unterstütztem DPT → Browser zeigt dann die Rohbytes.
-        static void decodeValue(uint8_t dpt, uint8_t sub, const char* d, uint16_t meta,
-                                uint8_t len, uint16_t total, char* out, size_t outLen)
-        {
-            out[0] = '\0';
-
-            uint8_t buf[16] = {};
-            size_t vlen;
-            if (len <= 1)
-            {
-                // ≤6-bit-Wert steckt im APCI-Low-Oktett (DPT 1/2/3)
-                if (meta < 1 || meta > total) return;
-                buf[0] = (uint8_t)d[meta - 1] & 0x3F;
-                vlen = 1;
-            }
-            else
-            {
-                // apduSize() kommt aus dem Längenfeld und kann bei verstümmelten Frames
-                // grösser sein als der Puffer.
-                vlen = (size_t)(len - 1);
-                if (vlen > sizeof(buf)) vlen = sizeof(buf);
-                if (meta >= total) return;
-                const size_t avail = (size_t)(total - meta);
-                if (vlen > avail) vlen = avail;
-                if (vlen == 0) return;
-                for (size_t i = 0; i < vlen; i++)
-                    buf[i] = (uint8_t)d[meta + i];
-            }
-
-            KNXValue v("");
-            Dpt type(dpt, sub);
-            if (!KNX_Decode_Value(buf, vlen, type, v)) return;
-
-            switch (dpt)
-            {
-                case 1: snprintf(out, outLen, "%u", (bool)v ? 1u : 0u); break;
-                case 5:
-                    if (sub == 1) // 5.001: Stack liefert roh 0–255 → Prozent
-                        snprintf(out, outLen, "%u%%", (unsigned)(((uint16_t)(uint8_t)v * 100 + 127) / 255));
-                    else
-                        snprintf(out, outLen, "%u", (unsigned)(uint8_t)v);
-                    break;
-                case 6: snprintf(out, outLen, "%d", (int)(int8_t)v); break;
-                case 7: snprintf(out, outLen, "%u", (unsigned)(uint16_t)v); break;
-                case 8: snprintf(out, outLen, "%d", (int)(int16_t)v); break;
-                case 9:
-                case 14: snprintf(out, outLen, "%.2f", (double)v); break;
-                case 12: snprintf(out, outLen, "%lu", (unsigned long)(uint32_t)v); break;
-                case 13: snprintf(out, outLen, "%ld", (long)(int32_t)v); break;
-                case 16: snprintf(out, outLen, "%s", (const char*)v); break;
-                case 17:
-                case 18: snprintf(out, outLen, "%u", (unsigned)(uint8_t)v); break;
-                default: out[0] = '\0'; break;
-            }
         }
 
         // ── Frame → JSON → Broadcast ────────────────────────────────────────────────
@@ -157,87 +97,10 @@ namespace OpenKNX
             if (!frame.isFrame()) return;
             if (!openknxNetwork.webserver.hasClients("/groupmonitor")) return;
 
-            const char* d = frame.data();
-            const uint16_t total = frame.size();
-            const uint8_t meta = frame.metadataSize(); // 8 (Standard) / 9 (Extended), inkl. CRC
-            const bool ga = frame.isGroupAddress();
-            const uint8_t len = frame.apduSize();      // Anzahl Payload-Bytes ab meta-1
-
-            // APCI-Typ nur für Gruppentelegramme sinnvoll.
-            // ASCII placeholder, not an em dash -- avoids clashing with val's Latin-15->UTF-8 conversion below.
-            const char* apci = "-";
-            bool hasValue = false;             // Write/Response tragen einen Wert
-            if (ga && total >= meta)
-            {
-                const uint16_t a = (((uint8_t)d[meta - 2] & 0x03) << 8) | (uint8_t)d[meta - 1];
-                switch (a & 0x03C0)
-                {
-                    case 0x000: apci = "Read"; break;
-                    case 0x040: apci = "Response"; hasValue = true; break;
-                    case 0x080: apci = "Write"; hasValue = true; break;
-                    default: apci = "other"; break;
-                }
-            }
-
-            // Wert über DPT (aus GA-Tabelle) dekodieren – nur Stack-Buffer, keine Heap-Strings.
-            const uint16_t addr = frame.destination();
-            char dptStr[12] = {};
-            char val[40] = {};
-            if (ga && hasValue)
-            {
-                uint8_t dptMain, dptSub;
-                if (openknxNetwork.gatable.getDpt(addr, dptMain, dptSub) && dptSub > 0)
-                {
-                    snprintf(dptStr, sizeof(dptStr), "%u.%03u", dptMain, dptSub);
-                    decodeValue(dptMain, dptSub, d, meta, len, total, val, sizeof(val));
-                }
-            }
-
-            char flags[10];
-            flags[0] = frame.isTransmitted() ? 'T' : '_';
-            flags[1] = frame.isAddressed()   ? 'D' : '_';
-            flags[2] = frame.isInvalid()     ? 'I' : '_';
-            flags[3] = frame.isExtended()    ? 'E' : '_';
-            flags[4] = frame.isRepeated()    ? 'R' : '_';
-            flags[5] = frame.isFiltered()    ? 'F' : '_';
-            flags[6] = frame.isBusy()        ? 'B' : '_';
-            flags[7] = frame.isNack()        ? 'N' : '_';
-            flags[8] = frame.isAck()         ? 'A' : '_';
-            flags[9] = '\0';
-
-            // Payload-Bytes (len Bytes ab meta-1) als Hex -- Stack-Buffer, kein Heap.
-            char hex[512] = {};
-            int hexLen = 0;
-            const uint16_t start = (meta >= 1) ? (meta - 1) : 0;
-            for (uint16_t i = 0; i < len && (start + i) < total && hexLen < (int)sizeof(hex) - 2; i++)
-                hexLen += snprintf(hex + hexLen, sizeof(hex) - hexLen, "%02X", (uint8_t)d[start + i]);
-
-            // val is raw DPT16 bus data (ISO-8859-15); WS text frame needs UTF-8. Only
-            // one heap allocation, and only for Write/Response with a resolved DPT --
-            // not on every telegram.
-            std::string valUtf8;
-            if (val[0])
-            {
-                valUtf8.reserve(sizeof(val) * 2);
-                OpenKNX::Charset::encodeUtf8(valUtf8, val, strlen(val));
-            }
-
             // _json keeps its capacity across calls (reset() only clears content), so
             // building the message here does not allocate once warmed up.
             _json.reset();
-            _json.beginObject()
-                .field("src", frame.humanSource())
-                .field("dst", frame.humanDestination())
-                .field("ga", ga)
-                .field("apci", apci)
-                .field("len", (uint32_t)len);
-            if (ga)
-                _json.field("addr", (uint32_t)addr); // numerische GA für Namens-Lookup im Browser
-            _json.field("dpt", dptStr)
-                .field("val", valUtf8)
-                .field("hex", hex)
-                .field("flags", flags)
-                .endObject();
+            OpenKNX::Network::buildTelegramJson(frame, _json);
 
             openknxNetwork.webserver.sendWebsocketMessage("/groupmonitor", _json.c_str());
         }
@@ -245,4 +108,4 @@ namespace OpenKNX
     } // namespace Network
 } // namespace OpenKNX
 
-#endif // OPENKNX_WEBMONITOR && MASK_VERSION == 0x07B0 && (KNX_IP_WIFI || KNX_IP_LAN)
+#endif // OPENKNX_TELEGRAMJSON && OPENKNX_WEBMONITOR
