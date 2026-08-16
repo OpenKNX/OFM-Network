@@ -210,6 +210,75 @@ void MyModule::buildDetailPage(WebResponse& res) {
 
 ---
 
+## Contributing a Page from Another Module
+
+A page does **not** have to live in OFM-Network. Any module — `OFM-*`, `OGM-*` or the OAM itself — can
+contribute one without a single line of code being added here.
+
+### When to register
+
+**Register once, from your own module's `setup()`.** Not from `loop()`, and *not* gated on
+`webserver.isRunning()`.
+
+`_routes`, `_menu`, `_stylesheets` and `_scripts` are plain vectors that are only ever appended to and
+are never cleared. `Webserver::setup()` adds its own entries and then starts the transport; the route
+list is walked when a **request arrives**, and the asset lists when a **page is rendered**. Registration
+is therefore fully decoupled from the server lifecycle: entries added long before the network is even
+up are in place the moment the server answers its first request.
+
+This also means you must not re-register on a link loss. The webserver is set up anew when the link
+returns, but your entries are still there — registering again would duplicate the route and the menu item.
+
+### The three steps
+
+```cpp
+// 1. In your module's setup(), once:
+openknxNetwork.webserver.addMenuItem("My Page", "/mypage", 120);
+openknxNetwork.webserver.addRoute(WEB_GET, "/mypage", handler);
+openknxNetwork.webserver.addRoute(WEB_GET, "/assets/mypage.css",
+    Webserver::Asset(WebAssets::mypage_css_mime, WebAssets::mypage_css_gz, sizeof(WebAssets::mypage_css_gz)));
+openknxNetwork.webserver.addStylesheet("/assets/mypage.css");
+```
+
+```
+2. Put mypage.css / mypage.js as readable source files in <your-module>/web/assets/.
+   prepare.py collects that folder from every built module, minifies + gzips it into
+   include/webassets.h, and the linker drops whatever the firmware never references.
+```
+
+```cpp
+// 3. Guard the whole unit so a build without networking still compiles:
+#if defined(OPENKNX_WEBSERVER) && (defined(KNX_IP_LAN) || defined(KNX_IP_WIFI))
+    #if defined(__has_include)
+        #if __has_include("OpenKNX/Network/Module.h")
+            #define MYMODULE_HAS_WEBPAGE 1
+        #endif
+    #endif
+#endif
+```
+
+The guard has to be two-fold: `Network/Module.h` wraps its **entire** content in `KNX_IP_LAN || KNX_IP_WIFI`,
+so on a build without networking `__has_include` still finds the header, it just resolves to nothing —
+and `openknxNetwork` stays undefined. Keying on `__has_include` alone breaks the link.
+
+### Two things worth knowing
+
+- **Asset order in `<head>`.** Assets registered before `Webserver::setup()` runs are emitted *before*
+  `base.css`. This only matters where your selectors compete with base.css at equal specificity; a
+  class-based selector (`.mypage-bar button`) always wins over base.css's bare element selectors.
+- **`main` is a flex column.** A block-level child stretches to the full page width. Use
+  `width: fit-content; align-self: start` for anything that should only be as wide as its content
+  (an image frame, a card).
+
+### Requests are not always on the loop task
+
+On **ESP32** route handlers run in the `esp_http_server` task, not in the KNX loop. Anything a handler
+touches that the loop also touches — I2C peripherals, widget lists, the settings store, flash — must be
+**queued in the handler and applied from your module's `loop()`**, never written directly. On RP2040 the
+handler already runs on the loop task, but code written this way is correct on both.
+
+---
+
 ## Layout Convention: `.container`
 
 `buildHeader()` emits only `<nav>` + `<main>` — **no** wrapping `<div class='container'>`.
