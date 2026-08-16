@@ -154,6 +154,13 @@ namespace OpenKNX
             std::string phyMode();
             void macAddress(uint8_t *addr);
             const char *hostName() const { return _hostName; }
+
+            // Connection age + reconnect history, in uptime() seconds (monotonic; millis() wraps at 49.7 d).
+            uint32_t netUptimeSec() const;      // since the link came up; 0 = link down
+            uint32_t netDowntimeSec() const;    // since the link went down; 0 = link up or never down
+            uint32_t netEstablishedSec() const; // since IP was established; 0 = not established
+            uint32_t netLastDowntimeSec() const { return _lastDowntimeSec; }
+            uint16_t netReconnects() const { return _reconnects; }
 #if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
             void setMulticastAddress(IPAddress address, bool rebootToTakeEffect);
 #endif
@@ -272,6 +279,14 @@ namespace OpenKNX
             bool _currentLinkState = false;
             uint32_t _lastLinkCheck = false;
             uint32_t _restartTimer = 0;
+
+            // uptime() seconds; up/down comes from _currentLinkState/_ipShown, not a zero stamp.
+            uint32_t _linkUpSinceSec = 0;      // last link-up edge
+            uint32_t _linkDownSinceSec = 0;    // last link-down edge
+            uint32_t _establishedSinceSec = 0; // moment "Network established" was reached
+            uint32_t _lastDowntimeSec = 0;     // length of the last outage
+            uint16_t _reconnects = 0;          // link-up edges after the first one
+            bool _linkEverDown = false;        // the first link-up is a connect, not a reconnect
 #if defined(KNX_IP_LAN) && (defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32))
             EthLinkManager _ethLink{*this}; // ETH link-speed override + auto-fallback ladder (W5500 LAN)
 #endif
@@ -320,6 +335,18 @@ namespace OpenKNX
             static constexpr uint32_t ETH_ESP_HEAL_INTERVAL_MAX_MS = 120000;
 #endif
 
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+            // Feed PHY link edges to lwIP; arduino-pico's W5500 driver doesn't, leaving DHCP on a stale lease.
+            void setLwipLinkState(bool up);
+#endif
+#ifdef OPENKNX_NETWORK_AUTOIP
+            // last address reported; it can change while the link stays up (AutoIP/late DHCP).
+            IPAddress _reportedIp;
+            bool _autoIpWaitLogged = false; // "no DHCP answer yet" said once per wait, not every tick
+            void checkIpAssignmentMethod();
+#endif
+            // Link-loss bookkeeping, shared by the normal down edge and the W5500 recovery.
+            void onLinkLost();
             void initPhy();
             void initIp();
             void loadSettings();

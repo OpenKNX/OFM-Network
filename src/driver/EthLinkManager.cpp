@@ -318,8 +318,14 @@ void EthLinkManager::tick(bool carrierUp, bool established)
         }
         else if (!_resting && carrierUp && (int32_t)(now - _stageDeadline) >= 0) // carrier up but no IP in time
         {
+#ifdef OPENKNX_NETWORK_AUTOIP
+            // AutoIP build: "no address yet" is expected (no DHCP server) and must not escalate. Escalating
+            // switches the PHY, and each carrier bounce resets dhcp->tries -> can lock a healthy link at 10M half.
+            _stageDeadline = now + ETH_STAGE_TIMEOUT_MS; // keep the window rolling, never fire on it
+#else
             logWarningP("%s: carrier up but no IP -> trying next speed", ethStageName(_stage));
             escalate = true;
+#endif
         }
         if (escalate)
         {

@@ -6,6 +6,15 @@
 
 #include "DNS.h"
 #include "Module.h"
+
+// ESP32's prebuilt IDF ships autoip.c compiled out, so a -D cannot enable AutoIP -- guard against
+// reporting a method the stack can't do. See doc/TODO-esp32-custom-idf.md. RP2040 builds lwIP from source.
+#if defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_NETWORK_AUTOIP)
+    #include <lwip/opt.h>
+    #if !LWIP_AUTOIP
+        #error "OPENKNX_NETWORK_AUTOIP requires an ESP-IDF built with CONFIG_LWIP_AUTOIP=y - see OFM-Network/doc/TODO-esp32-custom-idf.md"
+    #endif
+#endif
 #include "ModuleVersionCheck.h"
 #include "NtpTimeProvider.h"
 
@@ -222,8 +231,9 @@ namespace OpenKNX
                     uint8_t friendlyNameWrite[30] = {};
                     memcpy(friendlyNameWrite, _hostName, strlen(_hostName));
                     elements = 30;
-                    length = 0; // will update by write
-                    knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, elements, 1, friendlyNameWrite, 0);
+                    // length is an INPUT here: the bau discards the write if it is shorter than elements * ElementSize().
+                    length = sizeof(friendlyNameWrite);
+                    knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PID_FRIENDLY_NAME, elements, 1, friendlyNameWrite, length);
                 }
 
                 delete[] friendlyNameRead; // propertyValueRead() allocates the buffer, we have to free it
@@ -602,6 +612,73 @@ namespace OpenKNX
         // genuinely held this long, not on every brief establish during the ETH auto-fallback search / flapping.
         static constexpr uint32_t NET_INFO_STABLE_MS = 3000;
 
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+        // arduino-pico's W5500 driver never calls netif_set_link_up/down, so lwIP misses cable changes and
+        // DHCP stays on the stale lease. Feed both edges so dhcp_discover() re-runs and DHCP/AutoIP re-arm.
+        void Module::setLwipLinkState(bool up)
+        {
+            netif *intf = KNX_NETIF.getNetIf();
+            if (intf == nullptr) return;
+
+            ethernet_arch_lwip_begin();
+            if (up)
+                netif_set_link_up(intf);
+            else
+                netif_set_link_down(intf);
+            ethernet_arch_lwip_end();
+        }
+#endif
+
+#ifdef OPENKNX_NETWORK_AUTOIP
+        // AutoIP: lwIP self-assigns 169.254/16 when no DHCP answers. Report the method actually in use in
+        // PID_CURRENT_IP_ASSIGNMENT_METHOD (03_08_03 2.5.5: 8=AutoIP, 4=DHCP); driven by the address, not the edge.
+        void Module::checkIpAssignmentMethod()
+        {
+            if (_useStaticIP) return; // static/manual config is resolved in loadSettings()
+
+            const IPAddress ip = localIP();
+
+            // say it once; "link up, no address" is normal until the DHCP DISCOVERs time out (~2 min).
+            if (ip == IPAddress())
+            {
+                if (_currentLinkState && !_autoIpWaitLogged && netUptimeSec() >= 20)
+                {
+                    _autoIpWaitLogged = true;
+                    logInfoP("No DHCP answer yet - waiting, link-local fallback follows if none arrives");
+                }
+                return;
+            }
+            _autoIpWaitLogged = false;
+
+            if (ip == _reportedIp) return;
+            _reportedIp = ip;
+
+            const bool linkLocal = (ip[0] == 169 && ip[1] == 254);
+            SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, linkLocal ? 8 : 4);
+            logInfoP("IP-Address: %s (%s)", ip.toString().c_str(), linkLocal ? "AutoIP" : "DHCP");
+        }
+#endif
+
+        // Link-down housekeeping. Also called by the W5500 recovery, which bypasses checkLinkStatus() and
+        // would otherwise leave lwIP's link-up flag set and the DHCP/AutoIP handover unarmed.
+        void Module::onLinkLost()
+        {
+            // idempotent: both the down edge and recoverEth() call it; running twice would restart the outage timer.
+            if (!_currentLinkState) return;
+
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+            setLwipLinkState(false); // must run while the netif still exists (before any end())
+#endif
+            _currentLinkState = false;
+            _ipShown = false;
+            _ipStableSince = 0; // restart the establish debounce on link loss
+            _linkDownSinceSec = uptime();
+            _linkUpSinceSec = 0;
+            _establishedSinceSec = 0;
+            _linkEverDown = true;
+            loadCallbacks(false);
+        }
+
         void Module::checkIpStatus()
         {
             if (_ipShown || !established()) return;
@@ -609,27 +686,14 @@ namespace OpenKNX
             if (_ipStableSince == 0) _ipStableSince = millis();
             if ((uint32_t)(millis() - _ipStableSince) < NET_INFO_STABLE_MS) return;
 
+            _establishedSinceSec = uptime();
+
             logBegin();
             logInfoP("Network established");
             logIndentUp();
             loadCallbacks(true);
             logIndentDown();
             logEnd();
-
-#ifdef OPENKNX_NETWORK_AUTOIP
-            // AutoIP (RFC 3927) coop fallback: when no DHCP server answered, lwIP self-assigns a link-local
-            // 169.254.0.0/16 address after LWIP_DHCP_AUTOIP_COOP_TRIES DISCOVERs. Reflect the method actually IN
-            // USE in PID_CURRENT_IP_ASSIGNMENT_METHOD (03_08_03 2.5.5: 8=AutoIP, 4=DHCP) so ETS/ftc report it right.
-            // Evaluated here (IP is valid + link-stable), not in loadSettings() where the IP is not yet known; re-runs
-            // on each reconnect (_ipShown is cleared on link loss). Only the DHCP case is refined -- a static/manual
-            // config keeps the method already resolved in loadSettings().
-            if (!_useStaticIP)
-            {
-                IPAddress ip = localIP();
-                SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD,
-                                (ip[0] == 169 && ip[1] == 254) ? 8 : 4); // 8 = AutoIP link-local, 4 = DHCP lease
-            }
-#endif
 
             _ipShown = true;
         }
@@ -714,7 +778,22 @@ namespace OpenKNX
             // got link
             if (newLinkState && !_currentLinkState)
             {
-                logInfoP("Link connected");
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+                setLwipLinkState(true); // DHCP: REBOOTING (reclaims the lease) -> DISCOVER -> AutoIP
+#endif
+                _linkUpSinceSec = uptime();
+                if (_linkEverDown)
+                {
+                    _lastDowntimeSec = _linkUpSinceSec - _linkDownSinceSec;
+                    if (_reconnects < 0xFFFF) _reconnects++;
+                    logInfoP("Link connected (down %us, reconnect #%u)",
+                             (unsigned)_lastDowntimeSec, (unsigned)_reconnects);
+                }
+                else
+                {
+                    logInfoP("Link connected");
+                }
+                _linkDownSinceSec = 0;
                 // #if defined(KNX_IP_W5500)
                 // ethernet_arch_lwip_begin();
                 // netif_set_link_up(KNX_NETIF.getNetIf());
@@ -731,15 +810,7 @@ namespace OpenKNX
             // lost link
             else if (!newLinkState && _currentLinkState)
             {
-                _ipShown = false;
-                _ipStableSince = 0; // restart the establish debounce on link loss
-#if defined(KNX_IP_W5500)
-                // ethernet_arch_lwip_begin();
-                // netif_set_ipaddr(KNX_NETIF.getNetIf(), 0);
-                // netif_set_link_down(KNX_NETIF.getNetIf());
-                // ethernet_arch_lwip_end();
-#endif
-                loadCallbacks(false);
+                onLinkLost();
                 logInfoP("Link disconnected");
             }
 
@@ -747,6 +818,11 @@ namespace OpenKNX
             _lastLinkCheck = millis();
 
             if (_currentLinkState) checkIpStatus();
+
+#ifdef OPENKNX_NETWORK_AUTOIP
+            // every tick, not just the edge: AutoIP takes over ~1 min into the discover phase.
+            if (_currentLinkState) checkIpAssignmentMethod();
+#endif
 
             // set network bit for heartbeat
             if (established())
@@ -909,7 +985,8 @@ namespace OpenKNX
             data[2] = IPAddress[2];
             data[3] = IPAddress[3];
 
-            knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PropertyId, NoOfElem, 1, data, 0);
+            // length is the payload we pass; the bau rejects a write shorter than NoOfElem*ElementSize() (0 = silent drop).
+            knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PropertyId, NoOfElem, 1, data, sizeof(data));
         }
 
         uint8_t Module::GetByteProperty(uint8_t PropertyId)
@@ -930,7 +1007,8 @@ namespace OpenKNX
 
             data[0] = value;
 
-            knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PropertyId, NoOfElem, 1, data, 0);
+            // see SetIpProperty: the payload length is an INPUT the bau bounds the write against, not an output.
+            knx.bau().propertyValueWrite(OT_IP_PARAMETER, 0, PropertyId, NoOfElem, 1, data, sizeof(data));
         }
 
         void Module::registerCallback(NetworkChangeCallback cb)
@@ -1160,7 +1238,14 @@ namespace OpenKNX
 
             if (established())
             {
-                logInfoP(_useStaticIP ? "Using static IP" : "Using DHCP");
+                // 169.254 = DHCP gave up and lwIP self-assigned; "Using DHCP" would misreport it.
+                const IPAddress ip = localIP();
+                if (_useStaticIP)
+                    logInfoP("Using static IP");
+                else if (ip[0] == 169 && ip[1] == 254)
+                    logInfoP("Using AutoIP (no DHCP server answered)");
+                else
+                    logInfoP("Using DHCP");
                 logInfoP("IP-Address: %s", localIP().toString().c_str());
                 logInfoP("Netmask: %s", subnetMask().toString().c_str());
                 logInfoP("Gateway: %s", gatewayIP().toString().c_str());
@@ -1178,6 +1263,24 @@ namespace OpenKNX
 
             if (console)
             {
+                if (_currentLinkState)
+                {
+                    // counts from the carrier edge, shown even while disconnected (the DHCP/AutoIP wait state).
+                    logInfoP("Link-Uptime: %s", humanDuration(netUptimeSec()).c_str());
+                    // only when the IP arrived noticeably after the link (slow DHCP / late renew).
+                    const uint32_t established = netEstablishedSec();
+                    if (established > 0 && (netUptimeSec() - established) >= 5)
+                        logInfoP("IP established: %s", humanDuration(established).c_str());
+                }
+                else if (_linkEverDown)
+                {
+                    logInfoP("Down since: %s", humanDuration(netDowntimeSec()).c_str());
+                }
+
+                if (_reconnects > 0)
+                    logInfoP("Reconnects: %u (last down %s)", (unsigned)_reconnects,
+                             humanDuration(_lastDowntimeSec).c_str());
+
                 logIndentDown();
             }
             logEnd();
@@ -1239,6 +1342,21 @@ namespace OpenKNX
             return localIP() != IPAddress();
         }
 
+        uint32_t Module::netUptimeSec() const
+        {
+            return _currentLinkState ? (uptime() - _linkUpSinceSec) : 0;
+        }
+
+        uint32_t Module::netDowntimeSec() const
+        {
+            return (!_currentLinkState && _linkEverDown) ? (uptime() - _linkDownSinceSec) : 0;
+        }
+
+        uint32_t Module::netEstablishedSec() const
+        {
+            return _ipShown ? (uptime() - _establishedSinceSec) : 0;
+        }
+
         IPAddress Module::localIP()
         {
             return KNX_NETIF.localIP();
@@ -1267,6 +1385,15 @@ namespace OpenKNX
         {
             return "Auto";
         }
+
+#if MASK_VERSION == 0x07B0 || MASK_VERSION == 0x091A
+        TPUart::DataLinkLayer &Module::tpUart()
+        {
+            // a coupler (KNX_IS_ROUTER) keeps TP on the secondary link (its primary is IP); every other TP
+            // build on the primary. The interface (0x07B0 + tunnelling) is not a router -> getDataLinkLayer().
+            return KNX_TP_DLL->getTPUart();
+        }
+#endif
 
         void Module::savePower()
         {
@@ -1761,6 +1888,7 @@ namespace OpenKNX
         void Module::recoverEth()
         {
             controlKnxIp(false);
+            onLinkLost(); // before end(): the lwIP link-down has to reach a netif that still exists
             hwResetPhy();
             KNX_NETIF.end();
             _ethBadProbes = 0;
