@@ -217,6 +217,10 @@ Without `OPENKNX_WEBSERVER` no webserver code is compiled at all — no class, n
 | **ESP32** | FreeRTOS + esp-idf `httpd` | `Webserver_ESP32.cpp` |
 | **RP2040** | lwIP `NO_SYS=1`, single-threaded | `Webserver_RP2040.cpp` |
 
+### Access Log
+
+`logRequest()`/`logWebsocket()` log `>= 500` as error and `400–499` as warning unconditionally; everything below (2xx/3xx, WS `101`) only when the runtime toggle `Webserver::accessLog()` is on — off after boot, switched via console `webserver log`. Rationale: one page view is a request per asset, so a permanently-on 2xx log buries the console and costs serial time inside the loop on RP2040. See [README.Webserver.md § Access Log](README.Webserver.md#access-log).
+
 ### Character Encoding
 
 The webserver is UTF-8 end to end; the KNX bus and the device's storage (filenames) are ISO-8859-15. Mind the boundary — convert with `OpenKNX::Charset::encodeUtf8`/`decodeUtf8` (`OGM-Common/src/OpenKNX/Charset.hpp`) wherever a bus/filesystem string reaches the webserver. See [README.Webserver.md § Character Encoding](README.Webserver.md#character-encoding) for why and the concrete call sites.

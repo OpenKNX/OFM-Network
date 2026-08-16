@@ -837,6 +837,16 @@ namespace OpenKNX
                 return true;
             }
 
+#ifdef OPENKNX_WEBSERVER
+            else if (cmd == "webserver log")
+            {
+                bool enabled = !webserver.accessLog();
+                webserver.accessLog(enabled);
+                logInfoP("Webserver access log %s", enabled ? "enabled" : "disabled (4xx/5xx only)");
+                return true;
+            }
+#endif
+
 #ifdef KNX_IP_WIFI
             else if (cmd == "erase wifi")
             {
@@ -987,6 +997,9 @@ namespace OpenKNX
             // openknx.console.printHelpLine("net mc [address|reset]", "Get/Set multicast address");
 #endif
             openknx.console.printHelpLine("net reset", "Reset network adapter");
+#ifdef OPENKNX_WEBSERVER
+            openknx.console.printHelpLine("webserver log", "Toggle webserver access log (2xx/3xx)");
+#endif
 #ifdef OPENKNX_PING
             openknx.console.printHelpLine("ping x.x.x.x", "Ping an IP address");
 #endif

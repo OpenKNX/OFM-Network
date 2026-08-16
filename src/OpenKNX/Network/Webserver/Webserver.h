@@ -107,6 +107,10 @@ namespace OpenKNX
             void logRequest(const WebRequest& req, const WebResponse& res);
             void logWebsocket(const WebRequest& req, int statusCode = 101);
 
+            // Access-Log: 4xx/5xx immer, alles darunter nur mit aktiviertem Toggle
+            bool accessLog() const { return _accessLog; }
+            void accessLog(bool enabled) { _accessLog = enabled; }
+
             // Platform transport glue only (Webserver_RP2040.cpp / Webserver_ESP32.cpp) --
             // no feature module calls these. const char* on purpose: the RP2040 side
             // calls notifySocketMessage() from the per-WS-frame lwIP callback with a
@@ -126,6 +130,8 @@ namespace OpenKNX
             std::vector<std::string> _scripts;
 
           private:
+            bool _accessLog = false;
+
             void buildOverviewPage(WebResponse& res);
 #ifdef ARDUINO_ARCH_ESP32
             void setupEsp32();
