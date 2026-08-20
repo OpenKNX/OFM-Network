@@ -41,6 +41,17 @@ This allows first access to a freshly flashed or unconfigured device without ETS
 
 ---
 
+## Access Log
+
+Every request (and every WebSocket upgrade) passes through `Webserver::logRequest()` / `logWebsocket()`, but only failures are logged by default:
+
+- **`>= 500`** → `logError`, **`400–499`** → `logWarning` — always logged
+- **`< 400`** (2xx/3xx, WS `101`) → `logInfo`, only when the access log is enabled
+
+The toggle is runtime-only, off after boot: console command `webserver log`, API `webserver.accessLog()` / `webserver.accessLog(bool)`. Serving one page produces a request per asset, so leaving 2xx on permanently drowns the console — and on RP2040 every line costs serial time inside the loop.
+
+---
+
 ## Character Encoding
 
 Everything the webserver sends or receives is **UTF-8** — HTTP `Content-Type` charsets, `<meta charset>`, WebSocket text frames, JSON. Not a stylistic choice: several of these have no charset override at all — WebSocket text frames (RFC 6455) must be valid UTF-8 with no negotiation, `fetch().text()`/`.json()` decode as UTF-8 unconditionally per the Fetch spec regardless of `Content-Type`, and `encodeURIComponent()` always percent-encodes as UTF-8. `<meta charset>` also loses to the HTTP header when both are present, so the two must agree anyway. Serving ISO-8859-15 instead would only move the problem, not remove it — every WS/`fetch()` call site would still need its own decode step.

@@ -483,6 +483,9 @@ namespace OpenKNX
 
         void Webserver::logRequest(const WebRequest& req, const WebResponse& res)
         {
+            int statusCode = res.statusCode();
+            if (statusCode < 400 && !_accessLog) return;
+
             // Get remote address as string
             uint32_t remoteIp = req.getRemoteAddr();
             uint16_t remotePort = req.getRemotePort();
@@ -504,14 +507,18 @@ namespace OpenKNX
                 case WEB_DELETE: method = "DELETE"; break;
             }
 
-            // Get status string (just the code)
-            int statusCode = res.statusCode();
-
-            logInfo("Webserver", "%s %s - %s:%u - %d", method, req.getUri().c_str(), clientIp, remotePort, statusCode);
+            if (statusCode >= 500)
+                logError("Webserver", "%s %s - %s:%u - %d", method, req.getUri().c_str(), clientIp, remotePort, statusCode);
+            else if (statusCode >= 400)
+                logWarning("Webserver", "%s %s - %s:%u - %d", method, req.getUri().c_str(), clientIp, remotePort, statusCode);
+            else
+                logInfo("Webserver", "%s %s - %s:%u - %d", method, req.getUri().c_str(), clientIp, remotePort, statusCode);
         }
 
         void Webserver::logWebsocket(const WebRequest& req, int statusCode)
         {
+            if (statusCode < 400 && !_accessLog) return;
+
             // Get remote address as string
             uint32_t remoteIp = req.getRemoteAddr();
             uint16_t remotePort = req.getRemotePort();
@@ -523,7 +530,12 @@ namespace OpenKNX
             char clientIp[16];
             snprintf(clientIp, sizeof(clientIp), "%u.%u.%u.%u", a, b, c, d);
 
-            logInfo("Webserver", "WS %s - %s:%u - %d", req.getUri().c_str(), clientIp, remotePort, statusCode);
+            if (statusCode >= 500)
+                logError("Webserver", "WS %s - %s:%u - %d", req.getUri().c_str(), clientIp, remotePort, statusCode);
+            else if (statusCode >= 400)
+                logWarning("Webserver", "WS %s - %s:%u - %d", req.getUri().c_str(), clientIp, remotePort, statusCode);
+            else
+                logInfo("Webserver", "WS %s - %s:%u - %d", req.getUri().c_str(), clientIp, remotePort, statusCode);
         }
 
     } // namespace Network

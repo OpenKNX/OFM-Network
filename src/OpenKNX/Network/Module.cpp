@@ -1124,6 +1124,15 @@ namespace OpenKNX
                 return true;
             }
 #endif
+#ifdef OPENKNX_WEBSERVER
+            else if (cmd == "webserver log")
+            {
+                bool enabled = !webserver.accessLog();
+                webserver.accessLog(enabled);
+                logInfoP("Webserver access log %s", enabled ? "enabled" : "disabled (4xx/5xx only)");
+                return true;
+            }
+#endif
 
 #ifdef KNX_IP_WIFI
             else if (cmd == "erase wifi")
@@ -1312,6 +1321,9 @@ namespace OpenKNX
 #endif
             openknx.console.printHelpLine("net eth 10 [half|full]", "Force a fixed 10 Mbit link (default half)");
             openknx.console.printHelpLine("net eth 100 [half|full]", "Force a fixed 100 Mbit link (default half)");
+#endif
+#ifdef OPENKNX_WEBSERVER
+            openknx.console.printHelpLine("webserver log", "Toggle webserver access log (2xx/3xx)");
 #endif
 #ifdef OPENKNX_PING
             openknx.console.printHelpLine("ping x.x.x.x", "Ping an IP address");

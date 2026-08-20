@@ -98,6 +98,7 @@
               <Parameter Id="%AID%_P-%TT%01001" Name="WifiSSID"              ParameterType="%AID%_PT-WifiSSID"          Text="SSID"           Value="" />
               <Parameter Id="%AID%_P-%TT%01002" Name="WifiPassword"          ParameterType="%AID%_PT-WifiPassword"      Text="PSK"            Value="" />
               <Parameter Id="%AID%_P-%TT%01003" Name="MQTTCustomPrefix"      ParameterType="%AID%_PT-OnOffYesNo"        Text="Abweichender Gerätepräfix" Value="0"/>
+              <Parameter Id="%AID%_P-%TT%01004" Name="WifiAssistant"         ParameterType="%AID%_PT-CheckBox"          Text="WiFi-Assistent" Value="0" SuffixText="Mit WiFi-Adapter" />
             
               <!-- IP Config -->
               <Union SizeInBit="128"><!-- 16bytes-->
@@ -171,6 +172,7 @@
               <ParameterRef Id="%AID%_P-%TT%01001_R-%TT%0100100" RefId="%AID%_P-%TT%01001" />
               <ParameterRef Id="%AID%_P-%TT%01002_R-%TT%0100200" RefId="%AID%_P-%TT%01002" />
               <ParameterRef Id="%AID%_P-%TT%01003_R-%TT%0100300" RefId="%AID%_P-%TT%01003" />
+              <ParameterRef Id="%AID%_P-%TT%01004_R-%TT%0100400" RefId="%AID%_P-%TT%01004" />
               <ParameterRef Id="%AID%_UP-%TT%00001_R-%TT%0000101" RefId="%AID%_UP-%TT%00001" />
               <ParameterRef Id="%AID%_UP-%TT%00002_R-%TT%0000201" RefId="%AID%_UP-%TT%00002" />
               <ParameterRef Id="%AID%_UP-%TT%00034_R-%TT%0003401" RefId="%AID%_UP-%TT%00034" />
@@ -286,10 +288,10 @@ Geräte, die ausschließlich per TP angebunden sind, benötigen hier keine Konfi
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="" UIHint="HorizontalRuler" />
                 <ParameterSeparator Id="%AID%_PS-nnn" Text="Erweiterte Einstellung" UIHint="Headline" />
 
-                <!-- MQTT Custom Prefix / WiFi-Assistent (shared toggle) -->
+                <!-- WiFi-Assistent -->
                 <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000"><!-- Static 0 -->
                   <when test="!=%NET_WifiTool%"> <!-- default -->
-                    <ParameterRefRef RefId="%AID%_P-%TT%01003_R-%TT%0100300" IndentLevel="1" HelpContext="NET-WiFi-Assistent" />
+                    <ParameterRefRef RefId="%AID%_P-%TT%01004_R-%TT%0100400" IndentLevel="1" HelpContext="NET-WiFi-Assistent" />
                   </when>
                 </choose>
 
@@ -363,7 +365,7 @@ Geräte, die ausschließlich per TP angebunden sind, benötigen hier keine Konfi
               <!-- WiFi -->
               <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000"><!-- Static 0 -->
                 <when test="!=%NET_WifiTool%"> <!-- default -->
-                  <choose ParamRefId="%AID%_P-%TT%01003_R-%TT%0100300">
+                  <choose ParamRefId="%AID%_P-%TT%01004_R-%TT%0100400">
                     <when test="1">
                       <ParameterBlock Id="%AID%_PB-nnn" Name="WiFi" Text="WiFi-Assistent" Icon="wifi" HelpContext="NET-WiFi-Assistent">
                         <ParameterSeparator Id="%AID%_PS-nnn" Text="Dieser WiFi-Assistent ermöglicht das Übertragen von WiFi-Zugangsdaten auf das Gerät.
