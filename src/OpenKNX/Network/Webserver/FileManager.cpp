@@ -463,6 +463,11 @@ namespace OpenKNX
 
         void FileManager::setup()
         {
+            // Like Webconsole and GroupMonitor: setup() runs again when the server start
+            // fails and Module::loop() retries it, stacking menu, routes and assets.
+            if (_initialized) return;
+            _initialized = true;
+
             ensureFs();
 
             openknxNetwork.webserver.addMenuItem("Dateimanager", "/filemanager", 50);

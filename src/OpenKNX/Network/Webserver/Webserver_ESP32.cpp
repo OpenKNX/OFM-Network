@@ -20,12 +20,6 @@
 #define ESP32_WEB_CTRL_PORT 9080
 #endif
 
-// Gleichzeitige WS-Verbindungen; darüber hinaus HTTP 503. Jede belegt einen
-// httpd-Socketslot (max_open_sockets).
-#ifndef OPENKNX_WEBSOCKET_MAX
-#define OPENKNX_WEBSOCKET_MAX 3
-#endif
-
 // RX-Obergrenze pro Verbindung; grössere Frames trennen die Verbindung.
 #ifndef OPENKNX_WEBSOCKET_RX_CAP
 #define OPENKNX_WEBSOCKET_RX_CAP 2048
@@ -351,25 +345,6 @@ namespace OpenKNX
                         httpd_resp_sendstr(req, "No WebSocket handler registered for this URI");
                         return ESP_OK;
                     }
-                    // Reject when all WS slots are in use rather than holding sockets open.
-                    size_t active;
-                    {
-                        WsStateGuard guard(ws);
-                        active = g_wsSessions.size();
-                    }
-                    if (active >= OPENKNX_WEBSOCKET_MAX)
-                    {
-                        WebRequest wsReq;
-                        wsReq.uri = uri;
-                        wsReq.method = WEB_GET;
-                        wsReq.setRemoteAddr(remoteIpAddr);
-                        wsReq.setRemotePort(remotePort);
-                        ws->logWebsocket(wsReq, 503);
-                        httpd_resp_set_status(req, "503 Service Unavailable");
-                        httpd_resp_set_type(req, "text/plain");
-                        httpd_resp_sendstr(req, "WebSocket connection limit reached");
-                        return ESP_OK;
-                    }
 
                     WebRequest wsReq;
                     wsReq.uri = uri;
@@ -502,7 +477,10 @@ namespace OpenKNX
             config.uri_match_fn = httpd_uri_match_wildcard;
             config.ctrl_port = ESP32_WEB_CTRL_PORT;
             config.max_uri_handlers = 8; // 4 Methoden × Wildcard + Headroom
-            config.max_open_sockets = 7; // HTTP keep-alive + detached WS sockets (3 reserved internally)
+            // Shared pool for HTTP and WebSocket, the mix does not matter. httpd keeps 3
+            // more sockets internally; the rest of CONFIG_LWIP_MAX_SOCKETS (16) stays for
+            // NTP, MQTT, OTA and KNX-IP.
+            config.max_open_sockets = OPENKNX_WEBSERVER_MAX_CONN;
             config.lru_purge_enable = true; // free idle HTTP keep-alives so new WS upgrades find a slot
             config.recv_wait_timeout = 5;
             config.send_wait_timeout = 5;
@@ -533,7 +511,7 @@ namespace OpenKNX
 
         // ── Webserver lifecycle ─────────────────────────────────────────────
 
-        void Webserver::loop()
+        void Webserver::loopPlatform()
         {
             if (!_server) return;
 
@@ -545,9 +523,29 @@ namespace OpenKNX
             }
             if (sessions.empty()) return;
 
+            // Hand the socket back to httpd (which closes it), then clear the registry.
+            auto reap = [this](WsSession* sess) {
+                notifySocketConnect(sess->uri.c_str(), sess->fd, false);
+                httpd_req_async_handler_complete(sess->async);
+                {
+                    WsStateGuard guard(this);
+                    auto it = std::find(g_wsSessions.begin(), g_wsSessions.end(), sess);
+                    if (it != g_wsSessions.end()) g_wsSessions.erase(it);
+                }
+                delete sess;
+            };
+
             uint8_t tmp[512];
             for (WsSession* sess : sessions)
             {
+                // Check before receiving: dropClient() already reported onConnect(false),
+                // so parsing on would run a buffered command for a torn-down client.
+                if (sess->markedDead)
+                {
+                    reap(sess);
+                    continue;
+                }
+
                 bool dead = false;
 
                 // Drain whatever is available right now — fully non-blocking.
@@ -576,20 +574,8 @@ namespace OpenKNX
                 }
 
                 if (!dead && wsParseFrames(sess)) dead = true;
-                if (sess->markedDead) dead = true;
 
-                if (dead)
-                {
-                    // Socket zurück an httpd (schliesst ihn), dann Registry räumen
-                    notifySocketConnect(sess->uri.c_str(), sess->fd, false);
-                    httpd_req_async_handler_complete(sess->async);
-                    {
-                        WsStateGuard guard(this);
-                        auto it = std::find(g_wsSessions.begin(), g_wsSessions.end(), sess);
-                        if (it != g_wsSessions.end()) g_wsSessions.erase(it);
-                    }
-                    delete sess;
-                }
+                if (dead) reap(sess);
             }
         }
 
@@ -603,16 +589,18 @@ namespace OpenKNX
             return SIZE_MAX; // wsSendText() allokiert pro Frame auf dem Heap
         }
 
-        bool Webserver::sendToClient(const std::string& uri, int fd, const char* data, size_t len)
+        // Sends immediately, bypassing the queue -- only the drain calls this. Failed is
+        // cleaned up by the drain so both platforms behave alike.
+        WsSendResult Webserver::wsSendNow(const char*, int fd, const char* data, size_t len)
         {
-            if (!_server) return false;
-            WsSendResult r = wsSendText(fd, data, len);
-            if (r == WsSendResult::Failed)
-            {
-                notifySocketConnect(uri.c_str(), fd, false);
-                markSessionDead(this, fd);
-            }
-            return r == WsSendResult::Ok;
+            if (!_server) return WsSendResult::Failed;
+            return wsSendText(fd, data, len);
+        }
+
+        void Webserver::dropClient(const char* uri, int fd)
+        {
+            notifySocketConnect(uri, fd, false);
+            markSessionDead(this, fd);
         }
 
         // ── Shared WS state lock (recursive; also used from Webserver.cpp) ───
@@ -625,72 +613,6 @@ namespace OpenKNX
         void Webserver::wsStateUnlock() const
         {
             if (_wsLock) xSemaphoreGiveRecursive((SemaphoreHandle_t)_wsLock);
-        }
-
-        // ── Socket dispatch ─────────────────────────────────────────────────
-
-        // Pflegt nur WebSocketRoute::clients; die WsSession gehört Webserver::loop().
-        // Damit aus jedem Task aufrufbar und beim Entfernen idempotent.
-        void Webserver::notifySocketConnect(const char* uri, int fd, bool connected)
-        {
-            WebSocketRoute* r = findSocketRoute(uri);
-            if (r)
-            {
-                WsStateGuard guard(this);
-                if (connected)
-                    r->clients.push_back(fd);
-                else
-                    r->clients.erase(std::remove(r->clients.begin(), r->clients.end(), fd), r->clients.end());
-            }
-
-            // Fire the user callback outside the lock (it may call back into the webserver)
-            if (r && r->onConnect) r->onConnect(fd, connected);
-        }
-
-        void Webserver::notifySocketMessage(const char* uri, int fd,
-                                            uint8_t* data, int length, bool isBinary)
-        {
-            WebSocketRoute* r = findSocketRoute(uri);
-            if (r && r->onMessage)
-            {
-                WebSocketFrame frame{data, length, isBinary};
-                r->onMessage(fd, &frame);
-            }
-        }
-
-        // ── WS send — direct socket calls, safe from any task ───────────────
-
-        void Webserver::sendWebsocketMessage(const std::string& uri, const char* message, int fd)
-        {
-            if (!_server) return;
-            if (fd >= 0)
-            {
-                if (wsSendText(fd, message, strlen(message)) == WsSendResult::Failed)
-                {
-                    notifySocketConnect(uri.c_str(), fd, false);
-                    markSessionDead(this, fd);
-                }
-                return;
-            }
-            const WebSocketRoute* r = findSocketRoute(uri.c_str());
-            if (!r) return;
-
-            std::vector<int> clients;
-            {
-                WsStateGuard guard(this);
-                if (r->clients.empty()) return;
-                clients = r->clients; // snapshot under lock
-            }
-
-            size_t len = strlen(message);
-            for (int cfd : clients)
-            {
-                if (wsSendText(cfd, message, len) == WsSendResult::Failed)
-                {
-                    notifySocketConnect(uri.c_str(), cfd, false);
-                    markSessionDead(this, cfd);
-                }
-            }
         }
 
     } // namespace Network

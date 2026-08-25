@@ -24,6 +24,8 @@ namespace OpenKNX
             void handleDelete(WebRequest& req, WebResponse& res);
             void handleMkdir(WebRequest& req, WebResponse& res);
 
+            bool _initialized = false;
+
             bool ensureFs();
             static std::string sanitizePath(const std::string& raw);
             static std::string urlEncode(const std::string& s);

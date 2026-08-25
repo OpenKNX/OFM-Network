@@ -5,6 +5,9 @@
     const inp = document.getElementById('console-inp');
     const btn = document.getElementById('console-send');
     const MAX_LINES = 500;
+    // Each message is wrapped in *one* node so the cap really counts lines: without the
+    // wrapper it counted ANSI segments, and coloured output kept a fraction of the 500.
+    // pre-wrap sits on the container, so an extra inline element changes no wrapping.
 
     // Log-Zeilen kommen roh inkl. ANSI-Sequenzen an. Ausgabe nur über
     // textContent, nie als HTML.
@@ -42,7 +45,9 @@
             last = re.lastIndex;
         }
         emit(frag, text.slice(last), cls);
-        out.appendChild(frag);
+        const wrap = document.createElement('span');
+        wrap.appendChild(frag);
+        out.appendChild(wrap);
         trim();
     }
 
@@ -54,21 +59,19 @@
         trim();
     }
 
-    // Kein Auto-Reconnect: das hat Logausgaben verwürfelt und die Ursache von
-    // Verbindungsabbrüchen verschleiert.
-    let ws;
-    function connect() {
-        ws = new WebSocket('ws://' + location.host + '/console');
-        ws.onopen = () => { appendStatus('[verbunden]', 'green'); };
-        ws.onmessage = e => { appendOut(e.data); };
-        ws.onclose = () => { appendStatus('[Verbindung getrennt — Seite neu laden]', 'red'); };
-    }
-    connect();
+    // Der Socket kommt aus base.js und ist auf jeder Seite offen. Reconnect gibt
+    // es dort, deshalb hier ein sichtbarer Marker: eine Lücke im Log soll man
+    // sehen, statt sie stillschweigend hinzunehmen.
+    OpenKNX.on('log', function (line) { appendOut(line); });
+    OpenKNX.onState(function (state) {
+        if (state === 'open') appendStatus('[verbunden]', 'green');
+        else appendStatus('[Verbindung getrennt — Lücke im Log]', 'red');
+    });
 
     function send() {
-        const v = inp.value.trim();
-        inp.value = '';
-        if (ws && ws.readyState === 1) ws.send(v);
+        // Clear the field only once the command is actually out -- during a reconnect it
+        // would otherwise vanish without a word.
+        if (OpenKNX.send('cmd', inp.value.trim())) inp.value = '';
     }
 
     btn.onclick = send;

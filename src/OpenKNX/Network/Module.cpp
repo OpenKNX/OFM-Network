@@ -662,16 +662,26 @@ namespace OpenKNX
 #if defined(OPENKNX_TELEGRAMJSON) && defined(OPENKNX_WEBMONITOR)
                     groupmonitor.setup();
 #endif
+                    // Last, not in setup(): only now are all routes, menus and assets
+                    // registered. On ESP32 httpd serves from its own task, so a request
+                    // landing earlier could iterate a vector while it reallocates.
+                    webserver.start();
                 }
                 if (webserver.isRunning())
                 {
-                    webserver.loop();
+                    // Producer vor Transport: webserver.loop() entleert am Ende die
+                    // Sendequeue, was diese Module vorher gefüllt haben sollen. In
+                    // umgekehrter Reihenfolge ginge alles einen Tick später raus.
 #ifdef OPENKNX_WEBCONSOLE
                     webconsole.loop();
 #endif
 #ifdef OPENKNX_WEBFS
                     filemanager.loop();
 #endif
+#if defined(OPENKNX_TELEGRAMJSON) && defined(OPENKNX_WEBMONITOR)
+                    groupmonitor.loop();
+#endif
+                    webserver.loop();
                 }
             }
 #endif
