@@ -19,19 +19,9 @@ const std::string EthLinkManager::logPrefix()
 void EthLinkManager::logStatus()
 {
 #if defined(ARDUINO_ARCH_ESP32)
-    uint8_t m = 0xFF;
-    bool f = false;
-    Preferences p;
-    if (p.begin("ethlink", true))
-    {
-        m = p.getUChar("mode", 0xFF);
-        f = p.getBool("full", false);
-        p.end();
-    }
-    const char *s = (m == 0xFF) ? "auto (default, no override)"
-                    : (m == 0)  ? "auto-negotiation"
-                    : (m == 1)  ? (f ? "10 Mbit full-duplex" : "10 Mbit half-duplex")
-                                : (f ? "100 Mbit full-duplex" : "100 Mbit half-duplex");
+    const char *s = (_mode == 0xFF || _mode == 0) ? "auto-negotiation"
+                    : (_mode == 1)                ? (_full ? "10 Mbit full-duplex" : "10 Mbit half-duplex")
+                                                  : (_full ? "100 Mbit full-duplex" : "100 Mbit half-duplex");
     logInfoP("ETH link: %s", s);
 #elif defined(ARDUINO_ARCH_RP2040)
     W5500Phy::Status st = _phy.read();
@@ -42,7 +32,7 @@ void EthLinkManager::logStatus()
                                                     : (_full ? "100 Mbit full-duplex" : "100 Mbit half-duplex");
     logInfoP("Configured: %s", cfg);
 #endif
-    logInfoP("Usage: net eth <auto|10|100> [half|full]  (applied live, persisted)");
+    logInfoP("Usage: net eth <auto|10|100> [half|full]  (live only, until reboot - permanent: ETS LAN-Modus)");
 }
 
 // Live one-line link status for 'net' / showNetworkInformations: "ETH link: X Mbit Y-duplex (fixed/auto)".
@@ -61,7 +51,8 @@ void EthLinkManager::logLinkInfo()
 #endif
 }
 
-// 'net eth <auto|10|100> [half|full]': set the mode, persist it, and apply it LIVE (no reboot).
+// 'net eth <auto|10|100> [half|full]': apply the mode LIVE (no reboot). Deliberately NOT persisted -
+// ETS owns the link mode; the console is the bench tool for trying one out before setting it in ETS.
 bool EthLinkManager::setMode(uint8_t mode, bool full)
 {
     _mode = mode;
@@ -70,13 +61,6 @@ bool EthLinkManager::setMode(uint8_t mode, bool full)
     bool ok = true;
 
 #if defined(ARDUINO_ARCH_ESP32)
-    Preferences p; // persist for the next boot (applied before begin() via applyBeforeBegin)
-    if (p.begin("ethlink", false))
-    {
-        p.putUChar("mode", mode);
-        p.putBool("full", full);
-        p.end();
-    }
 #ifdef OPENKNX_ETH_AUTO_FALLBACK
     if (mode == 0) resetLadder(); // 'auto' -> fresh search; fixed -> ladder gated off via _mode
 #endif
@@ -88,39 +72,65 @@ bool EthLinkManager::setMode(uint8_t mode, bool full)
     if (mode == 0) _phy.setAutoNeg();
     else
         _phy.forceMode(speed100, full);
-    openknx.flash.save(); // persist the manual fixed mode (writeFlash)
 #endif
 
-    if (mode == 0) logInfoP("ETH link -> auto-negotiation (applied live%s)", ok ? "" : " - FAILED");
+    if (mode == 0) logInfoP("ETH link -> auto-negotiation (live, until reboot%s)", ok ? "" : " - FAILED");
     else
-        logInfoP("ETH link -> %s Mbit %s-duplex (applied live%s)", mode == 1 ? "10" : "100", full ? "full" : "half", ok ? "" : " - FAILED");
+        logInfoP("ETH link -> %s Mbit %s-duplex (live, until reboot%s)", mode == 1 ? "10" : "100", full ? "full" : "half", ok ? "" : " - FAILED");
     return ok;
 }
 
 // ---- fixed-mode apply ------------------------------------------------------------------------------
 
+// ETS "LAN-Modus" -> internal mode (1 = 10 Mbit, 2 = 100 Mbit, 0xFF = no opinion).
+// ETS enum values are 0 = Automatisch, 1 = 100 MBit/s, 3 = 10 MBit/s. "Automatisch" is treated as "no
+// opinion" so it falls through to OPENKNX_ETH_FORCE_SPEED / auto-negotiation instead of overriding them.
+static uint8_t etsLinkMode()
+{
+#ifdef ParamNET_LanMode
+    if (!knx.configured()) return 0xFF;
+    switch (ParamNET_LanMode)
+    {
+        case 1: return 2;
+        case 3: return 1;
+        default: return 0xFF;
+    }
+#else
+    return 0xFF; // product without the LAN-Modus parameter
+#endif
+}
+
 #if defined(ARDUINO_ARCH_ESP32)
-// Apply the effective ETH link mode BEFORE begin(): runtime override from NVS (console `net eth ...`)
-// wins, else the compile-time OPENKNX_ETH_FORCE_SPEED flag, else auto-negotiation.
+// Drops a link mode an older firmware persisted in NVS. The console is live-only now, so a leftover
+// value would silently outrank ETS. Erases once; afterwards the namespace stays empty.
+static void clearStaleLinkNvs()
+{
+    Preferences p;
+    if (!p.begin("ethlink", true)) return;
+    const bool stale = (p.getUChar("mode", 0xFF) != 0xFF);
+    p.end();
+    if (!stale) return;
+    if (p.begin("ethlink", false))
+    {
+        p.clear();
+        p.end();
+    }
+}
+#endif
+
+#if defined(ARDUINO_ARCH_ESP32)
+// Apply the effective ETH link mode BEFORE begin(): the ETS "LAN-Modus" wins, else the compile-time
+// OPENKNX_ETH_FORCE_SPEED flag, else auto-negotiation. The console ('net eth ...') is live-only, so a
+// reboot always returns to the ETS setting.
 void EthLinkManager::applyBeforeBegin()
 {
-    uint8_t mode = 0xFF; // 0xFF = no NVS override
+    clearStaleLinkNvs();
+    uint8_t mode = etsLinkMode(); // 0xFF = ETS says "Automatisch" -> no opinion
     bool full = false;
-    Preferences prefs;
-    if (prefs.begin("ethlink", true))
-    {
-        mode = prefs.getUChar("mode", 0xFF);
-        full = prefs.getBool("full", false);
-        prefs.end();
-    }
 
-    bool forced = false;
-    if (mode != 0xFF)
-    {
-        forced = (mode != 0); // 0 = explicit auto override
-    }
+    bool forced = (mode != 0xFF);
 #if defined(OPENKNX_ETH_FORCE_SPEED)
-    else
+    if (!forced)
     {
         forced = true;
         mode = (OPENKNX_ETH_FORCE_SPEED >= 100) ? 2 : 1;
@@ -138,12 +148,11 @@ void EthLinkManager::applyBeforeBegin()
         ETH.setLinkSpeed(mbit);
         ETH.setFullDuplex(full);
     }
-    else if (mode == 0)
+    else
     {
-        logInfoP("ETH: auto-negotiation (console override)");
-        ETH.setAutoNegotiation(true);
+        ETH.setAutoNegotiation(true); // clears a fixed mode left by an earlier begin() (wedge recovery)
+        mode = 0;
     }
-    // else: no override and no build flag -> leave driver default (auto-negotiation)
 
     _mode = mode;
     _full = full;
@@ -378,15 +387,21 @@ void EthLinkManager::resetLink()
 #endif
 }
 
-// Module hook: module flash has loaded -> re-apply a persisted MANUAL fixed mode (the auto-fallback stage is
-// NOT persisted; auto mode just re-searches from auto-negotiation).
+// Applies the ETS "LAN-Modus" to the PHY. Idempotent, so every W5500 bring-up can call it: boot, self-heal
+// re-begin and the startup-delay hook. "Automatisch" leaves the PHY (and the auto-fallback ladder) alone.
+void EthLinkManager::applyEtsMode()
+{
+    _mode = etsLinkMode(); // ETS is the only persistent source; a console override dies with the reboot
+    _full = false;         // ETS offers no duplex choice - forced means half-duplex (the safe W5500 default)
+    if (_mode == 1 || _mode == 2) applyFixedLive();
+}
+
+// Module hook: startup delay over. The mode was already applied right after the W5500 came up; this is the
+// safety net for a boot that came up degraded, plus the arming of the ladder's settle window.
 void EthLinkManager::onStartupDelay()
 {
-    if (_mode == 1 || _mode == 2)
-    {
-        applyFixedLive();
-        return;
-    } // manual fixed mode persists across reboot
+    applyEtsMode();
+    if (_mode == 1 || _mode == 2) return;
 #ifdef OPENKNX_ETH_AUTO_FALLBACK
     _settleUntil = millis() + ETH_SETTLE_MS; // give the initial auto-negotiation a moment before counting
 #endif
@@ -394,21 +409,19 @@ void EthLinkManager::onStartupDelay()
 
 uint16_t EthLinkManager::flashSize()
 {
-    return 3; // [version][mode][fullDuplex] - the auto-fallback stage is intentionally NOT persisted
+    return 3; // reserved - nothing is persisted any more, but the module's flash layout must not shift
 }
 
 void EthLinkManager::writeFlash()
 {
-    openknx.flash.writeByte(2); // format version
-    openknx.flash.writeByte(_mode);
-    openknx.flash.writeByte(_full ? 1 : 0);
+    openknx.flash.writeByte(3); // format version 3 = link mode comes from ETS, nothing stored here
+    openknx.flash.writeByte(0xFF);
+    openknx.flash.writeByte(0);
 }
 
-void EthLinkManager::readFlash(const uint8_t *data, uint16_t size)
+void EthLinkManager::readFlash(const uint8_t *, uint16_t)
 {
-    if (size < 3 || data[0] != 2) return; // unknown/old version -> keep defaults
-    _mode = data[1];                      // only the manual fixed mode persists across a reboot;
-    _full = (data[2] != 0);               // the auto-fallback stage is NOT restored (ladder re-searches from autoneg)
+    // nothing restored: a v2 fixed mode is dropped on purpose, ETS owns the link mode now
 }
 #endif // ARDUINO_ARCH_RP2040
 #endif

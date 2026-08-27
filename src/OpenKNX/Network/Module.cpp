@@ -414,7 +414,11 @@ namespace OpenKNX
 
             // Bounded W5500 bring-up (setSPISpeed + begin live inside tryBeginEth); on failure go degraded and
             // let loop()->ethSelfHeal() keep retrying a clean bring-up -- no reboot, no fatalError brick.
-            if (!beginEthWithRetry())
+            if (beginEthWithRetry())
+            {
+                _ethLink.applyEtsMode(); // ETS "LAN-Modus": apply it as soon as the PHY is reachable
+            }
+            else
             {
                 _ethDegraded = true;
                 logIndentUp();
@@ -1867,6 +1871,7 @@ namespace OpenKNX
             {
                 _ethDegraded = false;
                 _ipLedState = 0; // force checkLinkStatus() to re-evaluate the LED from the real link next cycle
+                _ethLink.applyEtsMode(); // the re-begin left the PHY at its default -> re-apply the ETS mode
                 logInfoP("W5500 recovered - network back online");
             }
         }

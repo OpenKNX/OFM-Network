@@ -3,8 +3,9 @@
 //   RP2040 -> W5500Phy   (raw W5500 PHYCFGR over SPI)
 //   ESP32  -> Esp32EthLink (esp_eth ioctl, stop/reconfigure/start)
 //
-// It owns the fixed-speed override (build flag OPENKNX_ETH_FORCE_SPEED / console `net eth`, persisted) and
-// the OPENKNX_ETH_AUTO_FALLBACK ladder. NetworkModule holds one instance, forwards its OpenKNX::Module hooks
+// It owns the fixed-speed override and the OPENKNX_ETH_AUTO_FALLBACK ladder. The mode comes from the ETS
+// parameter "LAN-Modus", else the build flag OPENKNX_ETH_FORCE_SPEED, else auto-negotiation; the console
+// `net eth` is a live-only override that is deliberately NOT persisted (a reboot returns to ETS). NetworkModule holds one instance, forwards its OpenKNX::Module hooks
 // (flash / startup-delay) and the ~2 Hz link tick here, and exposes it to NetworkConsole via ethLink().
 // Only compiled for W5500 LAN targets.
 #if defined(KNX_IP_LAN) && (defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32))
@@ -20,7 +21,7 @@ class EthLinkManager
   public:
     EthLinkManager(OpenKNX::Network::Module &module) : _module(module) {}
 
-    // Console `net eth`: show current mode (no arg) / set a mode live+persisted (auto|10|100, half|full).
+    // Console `net eth`: show current mode (no arg) / set one live (auto|10|100, half|full), until reboot.
     void logStatus();
     bool setMode(uint8_t mode, bool full); // mode: 0=auto, 1=10 Mbit, 2=100 Mbit
     void logLinkInfo();                    // one-line live link status for 'net' (X Mbit Y-duplex (fixed/auto))
@@ -31,7 +32,7 @@ class EthLinkManager
 #endif
 
 #if defined(ARDUINO_ARCH_ESP32)
-    void applyBeforeBegin(); // apply the persisted (NVS) / build-flag fixed mode BEFORE ETH.begin()
+    void applyBeforeBegin(); // apply the ETS / build-flag fixed mode BEFORE ETH.begin()
 #endif
 
 #if defined(ARDUINO_ARCH_RP2040)
@@ -39,8 +40,11 @@ class EthLinkManager
     // Raw VERSIONR read (0x04 = a present W5500). Used by NetworkModule's W5500 self-heal to classify a
     // failed begin(): 0x04 => chip present, only socket OPEN not ready (transient); else => no SPI comms.
     uint8_t chipVersion() { return _phy.chipVersion(); }
-    void onStartupDelay(); // Module hook: flash has loaded -> re-apply a persisted fixed mode
-    uint16_t flashSize();  // OpenKNX module-flash persistence (manual fixed mode only)
+    // Apply the ETS "LAN-Modus" live via the PHY. Called after every successful W5500 bring-up (boot,
+    // self-heal) and once more from the startup-delay hook; a no-op while ETS says "Automatisch".
+    void applyEtsMode();
+    void onStartupDelay(); // Module hook: startup delay over -> apply the ETS mode
+    uint16_t flashSize();  // OpenKNX module-flash slot (reserved, nothing persisted any more)
     void writeFlash();
     void readFlash(const uint8_t *data, uint16_t size);
 #endif
