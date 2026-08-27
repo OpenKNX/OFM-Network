@@ -3,6 +3,7 @@
 
 #include <lwip/tcp.h>
 #include <bearssl/bearssl.h>
+#include "OpenKNX/Crypto/TrustAnchor.h"
 #include "OpenKNX/Network/Webclient/Handler.h"
 #include "OpenKNX.h"
 
@@ -111,7 +112,8 @@ struct BrState
 {
     br_ssl_client_context   client;
     br_x509_minimal_context x509min; // required by br_ssl_client_init_full
-    NoVerifyX509            x509ins; // our always-accept validator
+    NoVerifyX509            x509ins; // always-accept validator, used only for VerifyMode::NONE
+    OpenKNX::Crypto::TrustAnchor ta;  // decoded root, used only for VerifyMode::CERTIFICATE
     uint8_t iobuf_in[4096 + 325];   // TLS record input buffer
     uint8_t iobuf_out[512 + 85];    // TLS record output buffer
 };
@@ -268,8 +270,35 @@ namespace OpenKNX
                 br_ssl_client_context &cl = s.brState->client;
                 br_ssl_client_init_full(&cl, &s.brState->x509min, nullptr, 0);
 
-                noVerifyX509Init(&s.brState->x509ins);
-                br_ssl_engine_set_x509(&cl.eng, &s.brState->x509ins.vtable);
+                if (s.verifyMode == VerifyMode::CERTIFICATE && s.verify != nullptr)
+                {
+                    uint32_t days = 0, seconds = 0;
+                    if (!s.brState->ta.fromPem(s.verify))
+                    {
+                        logError("Webclient", "certificate check: root certificate rejected (%d)",
+                                 s.brState->ta.lastError());
+                        psram_delete(s.brState);
+                        s.brState = nullptr;
+                        return false;
+                    }
+                    // BearSSL treats "no validation time" as a validation failure, so a device
+                    // without a valid clock must not pretend to have checked the chain.
+                    if (!OpenKNX::Crypto::TrustAnchor::currentTime(days, seconds))
+                    {
+                        logError("Webclient", "certificate check: no valid device time");
+                        psram_delete(s.brState);
+                        s.brState = nullptr;
+                        return false;
+                    }
+                    br_x509_minimal_init_full(&s.brState->x509min, s.brState->ta.anchor(), 1);
+                    br_x509_minimal_set_time(&s.brState->x509min, days, seconds);
+                    br_ssl_engine_set_x509(&cl.eng, &s.brState->x509min.vtable);
+                }
+                else
+                {
+                    noVerifyX509Init(&s.brState->x509ins);
+                    br_ssl_engine_set_x509(&cl.eng, &s.brState->x509ins.vtable);
+                }
 
                 br_ssl_engine_set_buffers_bidi(&cl.eng,
                     s.brState->iobuf_in,  sizeof(s.brState->iobuf_in),
@@ -284,11 +313,58 @@ namespace OpenKNX
                 return true;
             }
 
+
+#ifdef OPENKNX_SSL_STEP_PROFILE
+            /**
+             * @brief Stall profile of a single platformSslStep() call.
+             * Records how long one loop() pass is held up by the TLS engine; the summary is
+             * logged once the handshake completes. Compiled out unless the flag is set.
+             */
+            struct SslStepProfile
+            {
+                static uint32_t maxUs, sumUs, count, over2ms, stateAtMax;
+                uint32_t t0;
+                unsigned state = 0;
+                bool done = false;
+
+                SslStepProfile() : t0(micros()) {}
+                ~SslStepProfile()
+                {
+                    uint32_t dt = micros() - t0;
+                    if (dt > maxUs)
+                    {
+                        maxUs = dt;
+                        stateAtMax = state;
+                    }
+                    sumUs += dt;
+                    count++;
+                    if (dt > 2000) over2ms++;
+                    if (done)
+                    {
+                        logInfo("SslProfile", "handshake done: %u steps, max %u us (state 0x%02X), avg %u us, %u steps > 2 ms",
+                                count, maxUs, stateAtMax, count ? sumUs / count : 0, over2ms);
+                        maxUs = sumUs = count = over2ms = stateAtMax = 0;
+                    }
+                }
+            };
+            uint32_t SslStepProfile::maxUs = 0;
+            uint32_t SslStepProfile::sumUs = 0;
+            uint32_t SslStepProfile::count = 0;
+            uint32_t SslStepProfile::over2ms = 0;
+            uint32_t SslStepProfile::stateAtMax = 0;
+#endif
+
             int Handler::platformSslStep(Slot &s)
             {
+#ifdef OPENKNX_SSL_STEP_PROFILE
+                SslStepProfile _prof;
+#endif
                 if (!s.brState || s.tcpError) return -1;
                 br_ssl_engine_context &eng = s.brState->client.eng;
                 unsigned st = br_ssl_engine_current_state(&eng);
+#ifdef OPENKNX_SSL_STEP_PROFILE
+                _prof.state = st;
+#endif
 
                 if (st == BR_SSL_CLOSED)
                 {
@@ -297,7 +373,13 @@ namespace OpenKNX
                     return -1;
                 }
 
-                if (st & BR_SSL_SENDAPP) return 1; // Handshake complete
+                if (st & BR_SSL_SENDAPP)
+                {
+#ifdef OPENKNX_SSL_STEP_PROFILE
+                    _prof.done = true;
+#endif
+                    return 1; // Handshake complete
+                }
 
                 if ((st & BR_SSL_SENDREC) && s.tcpPcb)
                 {

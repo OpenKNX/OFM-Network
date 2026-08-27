@@ -15,6 +15,9 @@
         #error "OPENKNX_NETWORK_AUTOIP requires an ESP-IDF built with CONFIG_LWIP_AUTOIP=y - see OFM-Network/doc/TODO-esp32-custom-idf.md"
     #endif
 #endif
+#ifdef OPENKNX_SSL_STEP_PROFILE
+    #include <LittleFS.h>
+#endif
 #include "ModuleVersionCheck.h"
 #include "NtpTimeProvider.h"
 
@@ -1069,6 +1072,56 @@ namespace OpenKNX
             }
 #endif
 
+#ifdef OPENKNX_SSL_STEP_PROFILE
+            // Measurement helper for the TLS handshake stall (see doc/CONCEPT-OFM-EMail.md, V1).
+            // "net tls <host> [port] [cert]" -- "cert" validates against /tls-root.pem on LittleFS.
+            else if (cmd.compare(0, 8, "net tls ") == 0)
+            {
+                static std::string rootPem; // must outlive the request: the slot keeps a raw pointer
+                std::string arg = cmd.substr(8);
+                bool withCert = false;
+                size_t certPos = arg.find(" cert");
+                if (certPos != std::string::npos)
+                {
+                    withCert = true;
+                    arg = arg.substr(0, certPos);
+                }
+                uint16_t port = 443;
+                size_t sp = arg.find(' ');
+                if (sp != std::string::npos)
+                {
+                    port = (uint16_t)atoi(arg.substr(sp + 1).c_str());
+                    arg = arg.substr(0, sp);
+                }
+                if (arg.empty() || port == 0)
+                {
+                    logErrorP("net tls <host> [port] [cert]");
+                    return true;
+                }
+
+                std::string url = "https://" + arg + ":" + std::to_string(port) + "/";
+                auto req = webclient.get(url);
+                if (withCert)
+                {
+                    rootPem.clear();
+                    File f = LittleFS.open("/tls-root.pem", "r");
+                    if (!f)
+                    {
+                        logErrorP("net tls: /tls-root.pem not found");
+                        return true;
+                    }
+                    while (f.available())
+                        rootPem.push_back((char)f.read());
+                    f.close();
+                    req.verifyCertificate(rootPem.c_str());
+                }
+                logInfoP("net tls: %s, certificate check %s", url.c_str(), withCert ? "on" : "off");
+                req.ignoreBody().onDone([](const OpenKNX::Network::Webclient::Response &r) {
+                       logInfo("SslProfile", "request finished: success=%d status=%u", (int)r.success(), r.status());
+                   }).send();
+                return true;
+            }
+#endif
             else if (cmd == "net reset")
             {
                 resetNetwork();
