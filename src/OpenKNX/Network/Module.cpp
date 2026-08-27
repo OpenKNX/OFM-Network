@@ -427,7 +427,7 @@ namespace OpenKNX
 
         void Module::setup(bool configured)
         {
-#ifdef HAS_USB
+#ifdef OPENKNX_NETWORK_USB_EXCHANGE
             openknxUsbExchangeModule.onLoad("Network.txt", [this](UsbExchangeFile *file) { this->fillNetworkFile(file); });
 #ifdef KNX_IP_WIFI
             openknxUsbExchangeModule.onLoad("Wifi.txt", [this](UsbExchangeFile *file) { this->fillWifiFile(file); });
@@ -538,7 +538,7 @@ namespace OpenKNX
         }
 
 
-#ifdef HAS_USB
+#ifdef OPENKNX_NETWORK_USB_EXCHANGE
         void Module::fillNetworkFile(UsbExchangeFile *file)
         {
             writeLineToFile(file, "OpenKNX Network");

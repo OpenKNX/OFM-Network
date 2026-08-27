@@ -74,7 +74,14 @@
 #pragma warn "Unsupported platform"
 #endif
 
-#ifdef HAS_USB
+// The USB-exchange hooks are optional in two independent ways: a product may compile the module out
+// with OPENKNX_USB_EXCHANGE_IGNORE, or drop the library from lib/ entirely. Either one has to silence
+// them here -- HAS_USB alone only says the board has native USB, not that the module is around.
+#if defined(HAS_USB) && !defined(OPENKNX_USB_EXCHANGE_IGNORE) && __has_include("UsbExchangeModule.h")
+    #define OPENKNX_NETWORK_USB_EXCHANGE
+#endif
+
+#ifdef OPENKNX_NETWORK_USB_EXCHANGE
 #include "UsbExchangeModule.h"
 #endif
 
@@ -135,7 +142,7 @@ namespace OpenKNX
             void readWifiSettings();
 #endif
 
-#ifdef HAS_USB
+#ifdef OPENKNX_NETWORK_USB_EXCHANGE
             void fillNetworkFile(UsbExchangeFile *file);
 #ifdef KNX_IP_WIFI
             void fillWifiFile(UsbExchangeFile *file);
