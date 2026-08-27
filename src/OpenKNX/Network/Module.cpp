@@ -77,10 +77,10 @@ WiFiUDP Udp;
 #pragma warn "Unsupported platform"
 #endif
 
-// Total LAN packet counters for the DeviceDisplay net-speed widget (its only consumer). Global scope -- the
-// widget declares it `extern`. Bytes aren't available (lwIP MIB2 is off in the prebuilt core), so packets are
-// the honest whole-interface figure. Gated by DEVICE_DISPLAY_MODULE so non-display products don't compile it.
-#if defined(DEVICE_DISPLAY_MODULE) && defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+// Total LAN packet counters. Consumers: the DeviceDisplay net-speed widget (declares it `extern`) and the
+// `net` console output. Bytes aren't available (lwIP MIB2 is off in the prebuilt core), so packets are the
+// honest whole-interface figure. RP2040 + wired LAN only -- the ESP32 ETH class exposes no such counters.
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
 void openknxLanTraffic(uint32_t &rxPackets, uint32_t &txPackets)
 {
     rxPackets = KNX_NETIF.packetsReceived();
@@ -1265,6 +1265,16 @@ namespace OpenKNX
                 logInfoP("DNS: %s", nameServerIP().toString().c_str());
 #ifdef KNX_IP_LAN
                 _ethLink.logLinkInfo(); // "ETH link: X Mbit Y-duplex (fixed/auto)"
+#endif
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+                {
+                    // Whole-interface packet totals since boot. Compact units: the raw counters reach
+                    // eight digits within days on a busy segment.
+                    uint32_t rxPackets = 0, txPackets = 0;
+                    openknxLanTraffic(rxPackets, txPackets);
+                    logInfoP("Packets RX/TX: %s / %s", humanCount(rxPackets).c_str(),
+                             humanCount(txPackets).c_str());
+                }
 #endif
                 // logInfoP("Mode: %s", phyMode().c_str()); currently not supported
 

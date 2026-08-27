@@ -242,6 +242,13 @@ namespace OpenKNX
                                            : "<span class='gray'>–</span>");
                 row("Gateway", net ? openknxNetwork.gatewayIP().toString().c_str()
                                            : "<span class='gray'>–</span>");
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+                {
+                    uint32_t rxPackets = 0, txPackets = 0;
+                    openknxLanTraffic(rxPackets, txPackets);
+                    row("Pakete RX/TX", humanCount(rxPackets) + " / " + humanCount(txPackets));
+                }
+#endif
                 row("DNS", net ? openknxNetwork.nameServerIP().toString().c_str()
                                        : "<span class='gray'>–</span>");
                 page += "</tbody></table>";
