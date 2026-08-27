@@ -857,7 +857,9 @@ namespace OpenKNX
                         {
                             // sonst würde die abgeschnittene URI lautlos geroutet
                             const char resp414[] =
-                                "HTTP/1.1 414 URI Too Long\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                                "HTTP/1.1 414 URI Too Long\r\nContent-Type: text/plain\r\n"
+                                "Content-Length: 20\r\nConnection: close\r\n\r\n"
+                                "Anfragezeile zu lang"; // 20 ASCII bytes -- keep both in step
                             tcp_pcb* pcb = s->pcb;
                             tcp_write(pcb, resp414, sizeof(resp414) - 1, TCP_WRITE_FLAG_COPY);
                             tcp_output(pcb);

@@ -296,6 +296,22 @@ namespace OpenKNX
             return false;
         }
 
+        // Public face of the drive routing above -- see FileManager.h.
+        int FileManager::driveFromPath(const std::string& path, std::string& rel)
+        {
+            if (path.compare(0, 3, "sd/") == 0)  { rel = path.substr(2); return DSD; }
+            if (path.compare(0, 4, "efc/") == 0) { rel = path.substr(3); return DEFC; }
+            rel = (path.empty() || path[0] != '/') ? "/" + path : path;
+            return DINT;
+        }
+
+        bool FileManager::writeChunk(int drive, const char* path, uint32_t offset,
+                                     const uint8_t* data, size_t len)
+        {
+            return drvWriteChunk(drive, path, offset, data, len);
+        }
+
+
         static void drvSpace(int d, uint64_t& freeB, uint64_t& totalB)
         {
             freeB = 0;
@@ -489,6 +505,12 @@ namespace OpenKNX
 
             openknxNetwork.webserver.addRoute(WEB_POST, "/filemanager/mkdir",
                                               [this](WebRequest& req, WebResponse& res) { handleMkdir(req, res); });
+#ifdef OPENKNX_WEBCLIENT_TEST
+            openknxNetwork.webserver.addRoute(WEB_POST, "/filemanager/fetch",
+                                              [this](WebRequest& q, WebResponse& r) { handleFetch(q, r); });
+            openknxNetwork.webserver.addRoute(WEB_GET, "/filemanager/fetch/status",
+                                              [this](WebRequest& q, WebResponse& r) { handleFetchStatus(q, r); });
+#endif
         }
 
         // ── Verzeichnis-Listing ──────────────────────────────────────
@@ -640,6 +662,16 @@ namespace OpenKNX
                     "<input type='text' id='nd' placeholder='Ordnername'>"
                     "<button onclick='mkDir()'>Anlegen</button>"
                     "</div>";
+
+#ifdef OPENKNX_WEBCLIENT_TEST
+            // The device fetches the URL itself -- the file never travels through the browser.
+            html += "<h2>Von URL laden</h2>";
+            html += "<div class='fm-row'>"
+                    "<input type='text' id='fu' placeholder='https://...'>"
+                    "<button id='fb' onclick='fetchUrl()'>Laden</button>"
+                    "</div>"
+                    "<div class='fm-upload-status'><span id='fst'></span></div>";
+#endif
 
             html += "<h2>Datei hochladen</h2>";
 
@@ -846,6 +878,62 @@ namespace OpenKNX
         }
 
         // ── Mkdir ────────────────────────────────────────────────────
+
+#ifdef OPENKNX_WEBCLIENT_TEST
+        // "Load from URL" in the file manager. Arms the download and answers at once -- the transfer
+        // runs in the network loop, so the web server is never held up. The browser polls /fetch/status.
+        void FileManager::handleFetch(WebRequest& req, WebResponse& res)
+        {
+            int d = drvParse(req);
+            // The URL travels in the BODY: a real https link plus the encoded path overruns the
+            // request-line buffer of the RP2040 server (128 B) and the request dies as 414.
+            std::string url;
+            if (req.body() && req.bodyLength()) url.assign((const char*)req.body(), req.bodyLength());
+            std::string name = sanitizePath(req.getQueryParam("path"));
+            if (url.size() > FETCH_URL_MAX)
+            {
+                res.setStatus(400);
+                res.send("URL zu lang");
+                return;
+            }
+            if (url.empty() || name.empty())
+            {
+                res.setStatus(400);
+                res.send("URL und Ziel-Pfad erforderlich");
+                return;
+            }
+            if (!drvAvail(d) || (d == DINT && !ensureFs()))
+            {
+                res.setStatus(404);
+                res.send("Laufwerk nicht verfügbar");
+                return;
+            }
+            // Hand the drive back as a prefix so the module resolves it exactly like the console does.
+            std::string raw = (d == DSD) ? "sd" + name : (d == DEFC) ? "efc" + name : name;
+            res.setContentType("text/plain");
+            if (openknxNetwork.httpFetchStart(url, raw)) res.send("OK");
+            else
+            {
+                res.setStatus(409);
+                res.send(openknxNetwork.httpFetch().error.c_str());
+            }
+        }
+
+        void FileManager::handleFetchStatus(WebRequest& req, WebResponse& res)
+        {
+            const auto &f = openknxNetwork.httpFetch();
+            const char *st = f.state == Module::HttpFetch::State::RUNNING ? "running"
+                           : f.state == Module::HttpFetch::State::DONE    ? "done"
+                           : f.state == Module::HttpFetch::State::FAILED  ? "failed" : "idle";
+            char buf[256];
+            snprintf(buf, sizeof(buf),
+                     "{\"state\":\"%s\",\"bytes\":%u,\"status\":%u,\"hops\":%u,\"path\":\"%s\",\"error\":\"%s\"}",
+                     st, (unsigned)f.bytes, (unsigned)f.status, (unsigned)f.hops,
+                     f.path.c_str(), f.error.c_str());
+            res.setContentType("application/json");
+            res.send(buf);
+        }
+#endif
 
         void FileManager::handleMkdir(WebRequest& req, WebResponse& res)
         {

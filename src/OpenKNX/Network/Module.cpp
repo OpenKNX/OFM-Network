@@ -18,6 +18,9 @@
 #ifdef OPENKNX_SSL_STEP_PROFILE
     #include <LittleFS.h>
 #endif
+#ifdef OPENKNX_WEBCLIENT_TEST
+    #include "Webserver/FileManager.h" // drive routing for "http get" -- /flash, sd/, efc/
+#endif
 #include "ModuleVersionCheck.h"
 #include "NtpTimeProvider.h"
 
@@ -1259,6 +1262,20 @@ namespace OpenKNX
 // }
 #endif
 
+#ifdef OPENKNX_WEBCLIENT_TEST
+            // "http get <url> [path]" -- same job the web interface arms, see httpFetchStart().
+            else if (cmd.compare(0, 9, "http get ") == 0)
+            {
+                std::string arg = cmd.substr(9);
+                size_t sp = arg.find(' ');
+                std::string url = (sp == std::string::npos) ? arg : arg.substr(0, sp);
+                std::string raw = (sp == std::string::npos) ? "download.bin" : arg.substr(sp + 1);
+                if (url.empty()) { logErrorP("http get <url> [path]  (path: /flash, sd/, efc/)"); return true; }
+                if (!httpFetchStart(url, raw)) logErrorP("%s", _fetch.error.c_str());
+                return true;
+            }
+#endif
+
 #ifdef OPENKNX_PING
             else if (cmd.compare(0, 5, "ping ") == 0)
             {
@@ -1379,6 +1396,12 @@ namespace OpenKNX
             // openknx.console.printHelpLine("net mc [address|reset]", "Get/Set multicast address");
 #endif
             openknx.console.printHelpLine("net reset", "Reset network adapter");
+#ifdef OPENKNX_WEBCLIENT_TEST
+            openknx.console.printHelpLine("http get <url> [path]", "Download to /flash, sd/ or efc/ (test aid)");
+#endif
+#ifdef OPENKNX_SSL_STEP_PROFILE
+            openknx.console.printHelpLine("net tls <host> [port] [cert]", "TLS handshake stall measurement");
+#endif
 #ifdef KNX_IP_LAN
             openknx.console.printHelpLine("net eth", "Show the current ETH link mode");
 #ifdef OPENKNX_ETH_AUTO_FALLBACK
@@ -2124,6 +2147,72 @@ namespace OpenKNX
         void Module::ping(const std::string &host, std::function<void(IPAddress, bool)> callback, uint8_t retries, uint32_t timeoutMs)
         {
             _pingHandler.ping(host, callback, retries, timeoutMs);
+        }
+#endif
+
+#ifdef OPENKNX_WEBCLIENT_TEST
+        /**
+         * @brief Arm a URL download onto one of the drives. Returns immediately.
+         * @details The bytes are handed to FileManager::writeChunk offset by offset -- the same sink the
+         *          web upload feeds -- so nothing is buffered and the size is bounded by the drive, not
+         *          by RAM. Up to three redirects are followed, which a GitHub release link needs.
+         */
+        bool Module::httpFetchStart(const std::string &url, const std::string &rawPath)
+        {
+            if (_fetch.state == HttpFetch::State::RUNNING)
+            {
+                _fetch.error = "a download is already running";
+                return false;
+            }
+            if (url.empty())
+            {
+                _fetch = HttpFetch();
+                _fetch.state = HttpFetch::State::FAILED;
+                _fetch.error = "no url";
+                return false;
+            }
+
+            std::string rel;
+            int drive = FileManager::driveFromPath(rawPath, rel);
+            _fetch = HttpFetch();
+            _fetch.state = HttpFetch::State::RUNNING;
+            _fetch.drive = drive;
+            _fetch.path = rel;
+            _fetch.startedMs = millis();
+
+            _fetchArm = [this](std::string u) {
+                webclient.get(u)
+                    .maxBodySize(0) // stream: the body never sits in RAM
+                    .onData([this](const uint8_t *d, size_t n) {
+                        if (FileManager::writeChunk(_fetch.drive, _fetch.path.c_str(), _fetch.bytes, d, n))
+                            _fetch.bytes += n;
+                        else
+                            _fetch.error = "write failed";
+                    })
+                    .onDone([this](const OpenKNX::Network::Webclient::Response &r) {
+                        _fetch.status = r.status();
+                        if (r.status() >= 301 && r.status() <= 308 && _fetch.hops < 3)
+                        {
+                            std::string loc = r.header("Location");
+                            if (!loc.empty())
+                            {
+                                _fetch.hops++;
+                                logInfoP("redirect %u -> %s", (unsigned)_fetch.hops, loc.c_str());
+                                _fetchArm(loc);
+                                return;
+                            }
+                        }
+                        bool ok = r.success() && r.status() >= 200 && r.status() < 300 && _fetch.error.empty();
+                        _fetch.state = ok ? HttpFetch::State::DONE : HttpFetch::State::FAILED;
+                        if (!ok && _fetch.error.empty()) _fetch.error = "HTTP " + std::to_string(r.status());
+                        logInfoP("%s: HTTP %u, %u bytes, %u ms", _fetch.path.c_str(), (unsigned)r.status(),
+                                 (unsigned)_fetch.bytes, (unsigned)(millis() - _fetch.startedMs));
+                    })
+                    .send();
+            };
+            logInfoP("GET %s -> %s", url.c_str(), rawPath.c_str());
+            _fetchArm(url);
+            return true;
         }
 #endif
 

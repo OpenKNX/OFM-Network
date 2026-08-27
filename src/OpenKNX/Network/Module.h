@@ -224,7 +224,31 @@ namespace OpenKNX
             OpenKNX::Network::MQTT::Module mqtt;
 #endif
 #ifdef OPENKNX_WEBCLIENT
+#ifdef OPENKNX_WEBCLIENT_TEST
+            // One URL download at a time, shared by the console command and the web interface so the
+            // two cannot feed the same file from two directions. The transfer runs in webclient.loop();
+            // start() only arms it and returns, which is what keeps the web request non-blocking.
+            struct HttpFetch
+            {
+                enum class State : uint8_t { IDLE, RUNNING, DONE, FAILED };
+                State state = State::IDLE;
+                int drive = 0;               // FileManager drive id
+                std::string path;            // path on that drive
+                std::string error;           // reason when state == FAILED
+                uint32_t bytes = 0;
+                uint32_t startedMs = 0;
+                uint16_t status = 0;         // last HTTP status
+                uint8_t hops = 0;            // redirects followed
+            };
+            bool httpFetchStart(const std::string &url, const std::string &rawPath);
+            const HttpFetch &httpFetch() const { return _fetch; }
+#endif
+
             OpenKNX::Network::Webclient::Handler webclient;
+#ifdef OPENKNX_WEBCLIENT_TEST
+            HttpFetch _fetch;
+            std::function<void(std::string)> _fetchArm;
+#endif
 #endif
 
 #ifdef ARDUINO_ARCH_ESP32

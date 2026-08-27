@@ -71,3 +71,47 @@ async function mkDir() {
         });
     }
 };
+
+// Load a file straight from a URL onto the drive of the current tab. The device downloads it itself,
+// so nothing passes through the browser; the transfer is asynchronous and polled until it settles.
+// The URL goes in the request BODY -- as a query parameter it overruns the server's request-line buffer.
+async function fetchUrl() {
+    const url = document.getElementById('fu').value.trim();
+    const st = document.getElementById('fst');
+    const btn = document.getElementById('fb');
+    if (!url) { st.textContent = 'Erst eine URL eintragen.'; return; }
+    const base = currentDir === '/' ? '' : currentDir;
+    const name = url.split('?')[0].split('#')[0].split('/').pop() || 'download.bin';
+    btn.disabled = true;
+    st.textContent = name + ': wird angefordert \u2026';
+    try {
+        const r = await fetch('/filemanager/fetch?path=' + encodeURIComponent(base + '/' + name)
+                            + '&fs=' + currentFs,
+            { method: 'POST', body: url, headers: { 'Content-Type': 'text/plain' } });
+        if (!r.ok) {
+            // A rejected request may answer without a body (414 does) -- then the code is the message.
+            const msg = (await r.text()).trim();
+            st.textContent = 'Fehlgeschlagen: ' + (msg || ('HTTP ' + r.status));
+            btn.disabled = false;
+            return;
+        }
+    } catch (e) {
+        st.textContent = 'Fehlgeschlagen: ' + e.message;
+        btn.disabled = false;
+        return;
+    }
+    const poll = setInterval(async () => {
+        let s;
+        try { s = await (await fetch('/filemanager/fetch/status')).json(); } catch (e) { return; }
+        if (s.state === 'running') {
+            st.textContent = name + ': ' + s.bytes + ' B' + (s.hops ? ' (' + s.hops + 'x weitergeleitet)' : '');
+            return;
+        }
+        clearInterval(poll);
+        btn.disabled = false;
+        st.textContent = s.state === 'done'
+            ? name + ': ' + s.bytes + ' B geladen'
+            : 'Fehlgeschlagen: ' + (s.error || ('HTTP ' + s.status));
+        if (s.state === 'done') setTimeout(() => location.reload(), 800);
+    }, 700);
+}
