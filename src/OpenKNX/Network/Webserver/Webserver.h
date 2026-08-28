@@ -208,7 +208,8 @@ namespace OpenKNX
           private:
             bool _accessLog = false;
             bool _initialized = false;
-            uint32_t _startRetry = 0; // rate limit for the start retry from Module::loop()
+            uint32_t _startRetry = 0;    // last start attempt
+            uint32_t _startDelay = 1000; // backoff, doubles per failure up to 10 s
 
             WsTxQueue _txQueue;
             std::vector<WebUiHandler> _uiHandlers;

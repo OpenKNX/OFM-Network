@@ -402,9 +402,14 @@ namespace OpenKNX
         void Webserver::start()
         {
             if (isRunning()) return;
-            // Module::loop() retries every tick; a scarce PCB or heap is no faster for it.
-            if (!delayCheck(_startRetry, 1000)) return;
+
+            // Module::loop() retries every tick. The backoff matters for the log as much
+            // as for the attempt: the platform start reports every failure, so a fixed
+            // interval would turn a lasting shortage into one error line per interval.
+            if (!delayCheck(_startRetry, _startDelay)) return;
             _startRetry = millis();
+            _startDelay *= 2;
+            if (_startDelay > 10000) _startDelay = 10000;
 
             // No ring, no WS send path -- fail before the start so the retry covers both.
             if (!_txQueue.setup(OPENKNX_WEBSOCKET_TX_BUFFER, (uint32_t)maxWebsocketPayload()))
@@ -415,6 +420,8 @@ namespace OpenKNX
 #elif defined(ARDUINO_ARCH_RP2040)
             setupRp2040();
 #endif
+
+            if (isRunning()) _startDelay = 1000;
         }
 #endif // OPENKNX_WEBSERVER (setup)
 

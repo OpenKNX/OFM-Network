@@ -6,6 +6,7 @@
     const handlers = {};
     const stateCbs = [];
     let ws = null;
+    let state = null; // last state reported to the registrants, null = nothing yet
     let delay = 1000;
     let lastRx = 0;
     let pingAt = 0;   // wann zuletzt gefragt wurde, 0 = keine Frage offen
@@ -18,8 +19,12 @@
         ? function () { return performance.now(); }
         : function () { return Date.now(); };
 
-    function fire(state) {
-        stateCbs.forEach(function (cb) { try { cb(state); } catch (e) {} });
+    // Edge-triggered: with the network down every reconnect attempt fails again, and
+    // reporting that as a fresh event filled the console with one gap marker per try.
+    function fire(next) {
+        if (next === state) return;
+        state = next;
+        stateCbs.forEach(function (cb) { try { cb(next); } catch (e) {} });
     }
 
     function reconnect() {
@@ -87,7 +92,11 @@
             ws.send(key + ':' + (data === undefined ? '' : data));
             return true;
         },
-        onState: function (cb) { stateCbs.push(cb); if (ws && ws.readyState === 1) cb('open'); },
+        onState: function (cb) {
+            stateCbs.push(cb);
+            // A late registrant gets the current state, not the next change.
+            if (state) try { cb(state); } catch (e) {}
+        },
         get connected() { return !!ws && ws.readyState === 1; }
     };
     connect();

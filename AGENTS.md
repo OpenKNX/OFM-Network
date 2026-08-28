@@ -233,7 +233,9 @@ Two calls, and the split is load-bearing. `Module::loop()` runs
 - **The `_initialized` guard covers registration only.** `start()` must stay repeatable: a failed
   `tcp_listen()` (RP2040 with the default of 5 TCP PCBs) or `httpd_start()` is otherwise permanent and
   the device has no web interface until reboot. `Module::loop()` retries while `isRunning()` is false;
-  `start()` rate-limits itself to once a second so a tight retry does not turn into a log loop.
+  `start()` backs off from 1 s to 10 s per failure. The backoff is there for the log as much as for
+  the attempt — the platform start reports every failure, so a fixed interval would turn a lasting
+  PCB or heap shortage into one error line per interval. Capped at 10 s rather than the 30 s the browser uses: the failure clears when another service releases a PCB or some heap, and a device without a web interface for half a minute is worse than a few more log lines.
 - **Every feature `setup()` needs its own `_initialized` guard** for the same reason — on a retry they
   all run again, and without it menu entries, routes and asset tags stack up.
 - **The send queue is allocated in `start()`, before the platform start**, and a failure aborts the
@@ -284,6 +286,10 @@ openknxNetwork.webserver.ui.receiveMessage(cb);                // cb(key, data, 
   judging when that exceeds its interval. Answering happens in the network callback, which is fine here —
   `sendMessage()` only enqueues and does not allocate. Since `pong` is a broadcast it resets every
   other tab's timer too, so the rate stays at ~one ping per second however many pages are open.
+- **`onState()` is edge-triggered.** With the network down every reconnect attempt fails again, and
+  reporting each one as a fresh event filled the console with a gap marker per try — at the 30 s
+  backoff ceiling, forever. `fire()` therefore drops a repeat of the state already reported, and a
+  late registrant is handed the current state instead of waiting for the next change.
 - **The navigation carries the socket's own state** (`#ws-dot`/`#ws-text`, updated from
   `OpenKNX.onState()`), rendered server-side as "Verbinde…" because the page arrives over HTTP before
   the socket exists. Without JavaScript it stays that way, which is accurate — there is no connection.
