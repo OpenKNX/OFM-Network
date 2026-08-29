@@ -6,6 +6,11 @@
 
 #include "DNS.h"
 #include "Module.h"
+#ifdef DEVICE_DISPLAY_MODULE
+    #include "DeviceDisplay.h"
+    #include "Widgets/WidgetNetSpeed.h"
+    #include "Widgets/WidgetNetInfo.h"
+#endif
 
 // ESP32's prebuilt IDF ships autoip.c compiled out, so a -D cannot enable AutoIP -- guard against
 // reporting a method the stack can't do. See doc/TODO-esp32-custom-idf.md. RP2040 builds lwIP from source.
@@ -437,6 +442,7 @@ namespace OpenKNX
 
         void Module::setup(bool configured)
         {
+
 #ifdef OPENKNX_NETWORK_USB_EXCHANGE
             openknxUsbExchangeModule.onLoad("Network.txt", [this](UsbExchangeFile *file) { this->fillNetworkFile(file); });
 #ifdef KNX_IP_WIFI
@@ -843,6 +849,26 @@ namespace OpenKNX
 
         void Module::loop(bool configured)
         {
+#ifdef DEVICE_DISPLAY_MODULE
+            // The LAN-speed widget ships with this module because the packet counters live here.
+            // Registered from loop(), not setup(): this module is number 7 and DeviceDisplay is 10,
+            // so in setup() the widget manager has no display yet and the widget would be dropped.
+            if (!_netSpeedWidgetAdded && openknxDisplayModule.getWidgetManager() != nullptr)
+            {
+                _netSpeedWidgetAdded = true;
+                auto *netSpeed = new WidgetNetSpeed(10000, WidgetFlags::DefaultWidget);
+                netSpeed->setName("LAN-Speed");
+                if (!openknxDisplayModule.tryAddWidget(netSpeed))
+                    logDebugP("WidgetNetSpeed not registered (no display/manager)");
+
+                // Host, IP and link state also belong to this module, not to the system-info
+                // widget of OGM-Common, which must not reach into OFM-Network.
+                auto *netInfo = new WidgetNetInfo(10000, WidgetFlags::DefaultWidget);
+                netInfo->setName("Netzwerk");
+                if (!openknxDisplayModule.tryAddWidget(netInfo))
+                    logDebugP("WidgetNetInfo not registered (no display/manager)");
+            }
+#endif
             if (_restartTimer > 0 && delayCheck(_restartTimer, 2000))
             {
                 openknx.restart();
@@ -1755,7 +1781,10 @@ namespace OpenKNX
 
 #if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
         // Startup-delay hook -> EthLinkManager re-applies a persisted fixed link mode (flash now loaded).
-        void Module::processAfterStartupDelay() { _ethLink.onStartupDelay(); }
+        void Module::processAfterStartupDelay()
+        {
+            _ethLink.onStartupDelay();
+        }
         static constexpr uint16_t NET_ETHLINK_FLASH_SIZE = 3; // EthLink owns [version=2][mode][fullDuplex]; keep in sync with EthLinkManager::flashSize()
 #else
         static constexpr uint16_t NET_ETHLINK_FLASH_SIZE = 0; // no shared ETH-link block on this platform

@@ -274,6 +274,9 @@ namespace OpenKNX
             bool _ipShown = false;
             uint32_t _ipStableSince = 0; // link-established timestamp; debounces the "established" + IP-info output
             bool _useStaticIP = false;
+#ifdef DEVICE_DISPLAY_MODULE
+            bool _netSpeedWidgetAdded = false;
+#endif
             bool _useMDNS = false;
             bool _otaAllowed = false;
             bool _otaHandle = false;
