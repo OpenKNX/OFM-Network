@@ -2,6 +2,33 @@
 
 ## upcoming releases
 
+Everything below is on `ec/v1dev-ec` and has not been released upstream yet.
+
+**KNXnet/IP**
+* feature: KNX-IP status LED — green, orange or red for the state of the KNXnet/IP datalink, so a link problem is visible without a console. Reads the IP datalink on a `0x07B0` interface as well, not only on the router
+* fix: IP capabilities and the current assignment method are reported per 03_08_03 — ETS read values that did not describe how the device actually got its address
+* fix: the KNX multicast socket is rebound on an IP change and the link state reconciled, restored after the namespace refactor dropped it
+* fix: the RP2040 W5500 robustness layer was lost in the refactor and is restored
+* feature: AutoIP fallback, lwIP link state on the W5500, and connection-age plus reconnect statistics
+
+**Display widgets**
+* Feature: `WidgetNetSpeed` ships with this module now, where the packet counters live, instead of being copied into every product
+* Feature: `WidgetNetInfo` shows host name, IP with its assignment method, link state and link age -- taken off the system-info widget of OGM-Common, which had to reach into this module for them
+* Change: both register from `loop()`, not `setup()`: this module is number 7 and DeviceDisplay is 10, so in `setup()` there is no widget manager yet
+
+**Network configuration and diagnostics**
+* feature: the link mode comes from ETS instead of from flash — the mode set in the product now decides, so a device no longer keeps a mode that was written once and never changed
+* feature: whole-interface packet counters, so throughput and loss can be read per interface rather than guessed from the bus side
+* feature: the TLS chain is validated against a root certificate; the HTTPS client accepted any chain before
+* feature: a file can be downloaded from a URL straight onto the device, without a PC in between
+* feature: the USB-exchange hooks are optional, so a product without that module compiles without them
+
+**Post-merge audit**
+* fix: OTA gate, establish debounce, KNX-IP LED and OTA RX contention — four defects found by re-tracing the paths after the upstream merge
+* fix: `propertyValueRead` freed the buffer it allocated
+* doc: how to contribute a webserver page from another module
+
+
 ## 0.8.0: 2026-08-17
 
 * change: the **webserver access log** only prints failures by default — `4xx` as warning, `5xx` as error. Successful requests (`2xx`/`3xx`, WebSocket upgrades) are logged only after enabling them at runtime with the console command `webserver log`
