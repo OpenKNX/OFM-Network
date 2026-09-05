@@ -66,9 +66,18 @@ Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE, PIN_ETH_INT);
 Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE);
 #endif
 
+// Board identity for the mDNS TXT record, same fallback order the console uses for "Device / Name".
+#if defined(DEVICE_NAME)
+    #define OPENKNX_MDNS_HARDWARE DEVICE_NAME
+#elif defined(HARDWARE_NAME)
+    #define OPENKNX_MDNS_HARDWARE HARDWARE_NAME
+#endif
+
 // mDNS TXT state (file scope so the lwIP announce callback can read it). Idempotent re-registration keeps
 // slot+netif to del-before-add. See Module::registerOpenknxMdns().
-static char _openknxMdnsTxt[7][48]; // "key=value", <= 255 B per DNS TXT item
+// 64, not 48: "hardware=" plus a board name (DEVICE_NAME runs to ~45 chars) does not fit 48 and would
+// be truncated silently. Item cap is the DNS limit of 255 B, so 64 is free to choose.
+static char _openknxMdnsTxt[10][64]; // "key=value", <= 255 B per DNS TXT item
 static uint8_t _openknxMdnsTxtCount = 0;
 static s8_t _openknxMdnsSlot = -1;
 static struct netif *_openknxMdnsNetif = nullptr;
@@ -470,6 +479,15 @@ namespace OpenKNX
                 MDNS.addServiceTxt("openknx", "tcp", "ota", _otaPortString);
                 MDNS.addServiceTxt("openknx", "tcp", "configured", knx.configured() ? "1" : "0");
                 MDNS.addServiceTxt("openknx", "tcp", "otamode", otaModeStr());
+                // Which application, and on which board -- lets a scanner name the device and warn before
+                // a wrong image is pushed over the network.
+                MDNS.addServiceTxt("openknx", "tcp", "product", openknx.info.firmwareName().c_str());
+                // The KNX order number (PID_ORDER_INFO, what ETS shows) is the stable identity: the
+                // display name carries a build suffix, this one does not. Tools compare on THIS.
+                MDNS.addServiceTxt("openknx", "tcp", "order", MAIN_OrderNumber);
+#ifdef OPENKNX_MDNS_HARDWARE
+                MDNS.addServiceTxt("openknx", "tcp", "hardware", OPENKNX_MDNS_HARDWARE);
+#endif
 #else
                 registerOpenknxMdns(); // RP2040: register via lwIP (SimpleMDNS.addServiceTxt broken); reused by checkLinkStatus()
 #endif
@@ -2388,7 +2406,13 @@ namespace OpenKNX
             snprintf(_openknxMdnsTxt[4], sizeof(_openknxMdnsTxt[4]), "ota=%s", _otaPortString);
             snprintf(_openknxMdnsTxt[5], sizeof(_openknxMdnsTxt[5]), "configured=%u", knx.configured() ? 1u : 0u);
             snprintf(_openknxMdnsTxt[6], sizeof(_openknxMdnsTxt[6]), "otamode=%s", otaModeStr());
-            _openknxMdnsTxtCount = 7;
+            snprintf(_openknxMdnsTxt[7], sizeof(_openknxMdnsTxt[7]), "product=%s", openknx.info.firmwareName().c_str());
+            snprintf(_openknxMdnsTxt[8], sizeof(_openknxMdnsTxt[8]), "order=%s", MAIN_OrderNumber);
+            _openknxMdnsTxtCount = 9;
+#ifdef OPENKNX_MDNS_HARDWARE
+            snprintf(_openknxMdnsTxt[9], sizeof(_openknxMdnsTxt[9]), "hardware=%s", OPENKNX_MDNS_HARDWARE);
+            _openknxMdnsTxtCount = 10;
+#endif
 
             struct netif *n = netif_default ? netif_default : netif_list; // active iface (DHCP default; first at boot)
             if (n != nullptr)
