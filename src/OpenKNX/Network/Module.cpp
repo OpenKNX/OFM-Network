@@ -2002,9 +2002,9 @@ namespace OpenKNX
 #if defined(PIN_ETH_RES)
             pinMode(PIN_ETH_RES, OUTPUT);
             digitalWrite(PIN_ETH_RES, LOW);
-            delay(2); // datasheet: RSTn low >= 500us
+            delay(ETH_RESET_LOW_MS); // datasheet 5.5.1: RSTn low >= 500us
             digitalWrite(PIN_ETH_RES, HIGH);
-            delay(60); // PLL lock + internal reset done before we touch SPI
+            delay(ETH_RESET_SETTLE_MS); // PLL lock done before we touch SPI
 #endif
         }
 
@@ -2012,8 +2012,13 @@ namespace OpenKNX
         // ready (transient, retry helps); anything else = not answering on SPI (wiring/power/dead).
         bool Module::tryBeginEth()
         {
-            hwResetPhy();
+            hwResetPhy(); // blocking pulse: boot only, before the KNX stack runs
+            return beginEthAfterReset();
+        }
 
+        // The bring-up without the RSTn pulse, so the stepped self-heal can own the pulse timing itself.
+        bool Module::beginEthAfterReset()
+        {
             KNX_NETIF.setSPISpeed(OPENKNX_NET_SPI_SPEED);
             if (KNX_NETIF.begin()) return true;
 
@@ -2023,6 +2028,15 @@ namespace OpenKNX
             else
                 logErrorP("W5500 not answering on SPI (VERSIONR=0x%02X, expected 0x04)", ver);
             return false;
+        }
+
+        // Retry spacing. A transient hiccup clears within the first few tries; a chip that RSTn cannot reach
+        // never clears, and hammering it every 5s only costs bus time and log noise.
+        uint32_t Module::healIntervalMs() const
+        {
+            if (_healFailures < ETH_HEAL_FAST_TRIES) return ETH_HEAL_INTERVAL_MS;
+            if (_healFailures < ETH_HEAL_SLOW_TRIES) return ETH_HEAL_INTERVAL_SLOW_MS;
+            return ETH_HEAL_INTERVAL_MAX_MS;
         }
 
         // Boot bring-up: a few attempts with backoff (worst case well within the active 16s watchdog window).
@@ -2054,16 +2068,50 @@ namespace OpenKNX
                 _ipLedState = 3;
             }
 
-            if (!delayCheckMillis(_lastEthHeal, ETH_HEAL_INTERVAL_MS)) return;
-            _lastEthHeal = millis();
-
-            logInfoP("W5500 self-heal: retrying bring-up...");
-            if (tryBeginEth())
+            switch (_healStep)
             {
-                _ethDegraded = false;
-                _ipLedState = 0; // force checkLinkStatus() to re-evaluate the LED from the real link next cycle
-                _ethLink.applyEtsMode(); // the re-begin left the PHY at its default -> re-apply the ETS mode
-                logInfoP("W5500 recovered - network back online");
+                case HealStep::Wait:
+                {
+                    if (!delayCheckMillis(_lastEthHeal, healIntervalMs())) return;
+                    _lastEthHeal = millis();
+                    logInfoP("W5500 self-heal: retrying bring-up (attempt %u)...", (unsigned)(_healFailures + 1));
+#if defined(PIN_ETH_RES)
+                    pinMode(PIN_ETH_RES, OUTPUT);
+                    digitalWrite(PIN_ETH_RES, LOW);
+                    _healAt = millis() + ETH_RESET_LOW_MS;
+                    _healStep = HealStep::ResetLow;
+#else
+                    _healAt = millis();
+                    _healStep = HealStep::ResetSettle;
+#endif
+                    return;
+                }
+
+                case HealStep::ResetLow:
+                    if ((int32_t)(millis() - _healAt) < 0) return; // wrap-safe deadline
+#if defined(PIN_ETH_RES)
+                    digitalWrite(PIN_ETH_RES, HIGH);
+#endif
+                    _healAt = millis() + ETH_RESET_SETTLE_MS;
+                    _healStep = HealStep::ResetSettle;
+                    return;
+
+                case HealStep::ResetSettle:
+                {
+                    if ((int32_t)(millis() - _healAt) < 0) return;
+                    _healStep = HealStep::Wait;
+                    if (!beginEthAfterReset())
+                    {
+                        if (_healFailures < 0xFFFF) _healFailures++;
+                        return;
+                    }
+                    _ethDegraded = false;
+                    _healFailures = 0;
+                    _ipLedState = 0;         // force checkLinkStatus() to re-evaluate the LED from the real link
+                    _ethLink.applyEtsMode(); // the re-begin left the PHY at its default -> re-apply the ETS mode
+                    logInfoP("W5500 recovered - network back online");
+                    return;
+                }
             }
         }
 
@@ -2112,6 +2160,8 @@ namespace OpenKNX
             KNX_NETIF.end();
             _ethBadProbes = 0;
             _lastEthHeal = 0;    // let ethSelfHeal() attempt an immediate first re-begin
+            _healFailures = 0;   // a fresh wedge gets the fast retries again
+            _healStep = HealStep::Wait;
             _ethDegraded = true; // loop() -> ethSelfHeal(): bounded re-begin
         }
 

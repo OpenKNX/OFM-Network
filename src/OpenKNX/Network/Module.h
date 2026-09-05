@@ -339,7 +339,9 @@ namespace OpenKNX
             void hwResetPhy();           // pulse PIN_ETH_RES (RSTn low >=500us) + settle before any SPI access
             bool tryBeginEth();          // one clean bring-up: HW reset + KNX_NETIF.begin(), VERSIONR-classify on fail
             bool beginEthWithRetry();    // boot: tryBeginEth() up to ETH_BEGIN_TRIES with backoff
-            void ethSelfHeal();          // loop(): throttled tryBeginEth() while _ethDegraded, clears it on success
+            void ethSelfHeal();          // loop(): stepped, non-blocking bring-up retry while _ethDegraded
+            bool beginEthAfterReset();   // setSPISpeed + begin() + VERSIONR classification (no RSTn pulse)
+            uint32_t healIntervalMs() const; // retry spacing, widens with _healFailures
             void checkEthHealth();       // loop(): periodic VERSIONR probe; recoverEth() on repeated failure
             void recoverEth();           // runtime: HW-reset -> safe end() -> hand to ethSelfHeal() (no reboot/brick)
             static constexpr uint8_t ETH_BEGIN_TRIES = 4;
@@ -347,6 +349,28 @@ namespace OpenKNX
             static constexpr uint32_t ETH_HEAL_INTERVAL_MS = 5000;
             static constexpr uint32_t ETH_HEALTH_INTERVAL_MS = 5000;
             static constexpr uint8_t ETH_BAD_PROBE_LIMIT = 3;
+            // RSTn pulse shape, shared by the blocking boot path and the stepped self-heal. Datasheet 5.5.1:
+            // TRC (reset cycle) >= 500us, TPL (RSTn to internal PLL lock) <= 1ms -- both are generous here.
+            static constexpr uint16_t ETH_RESET_LOW_MS = 2;
+            static constexpr uint16_t ETH_RESET_SETTLE_MS = 60;
+
+            // The self-heal used to burn ETH_RESET_LOW_MS + ETH_RESET_SETTLE_MS inside one loop() pass, every
+            // 5s, forever. On a chip that cannot be healed by RSTn at all that starved the TPUart RX path
+            // (bus protocol errors) and chopped up the console. It now steps through the pulse across loop
+            // passes and widens the retry spacing the longer the chip stays dead.
+            enum class HealStep : uint8_t
+            {
+                Wait,        // between attempts
+                ResetLow,    // RSTn low, waiting out ETH_RESET_LOW_MS
+                ResetSettle, // RSTn released, waiting out ETH_RESET_SETTLE_MS
+            };
+            HealStep _healStep = HealStep::Wait;
+            uint32_t _healAt = 0;      // millis() of the next step
+            uint16_t _healFailures = 0; // consecutive failed bring-ups (drives the backoff)
+            static constexpr uint32_t ETH_HEAL_INTERVAL_SLOW_MS = 30000;
+            static constexpr uint32_t ETH_HEAL_INTERVAL_MAX_MS = 120000;
+            static constexpr uint16_t ETH_HEAL_FAST_TRIES = 3;  // a transient hiccup heals within these
+            static constexpr uint16_t ETH_HEAL_SLOW_TRIES = 10; // then 30s, then 120s
 
             // ---- console PHY diagnostics ('net phy ...') ----
             // 'reset' and 'pin' both drive RSTn for far longer than a loop() pass may block, so they run as a
