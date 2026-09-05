@@ -34,10 +34,10 @@ static constexpr uint8_t PHYCFGR_DPX_FULL = 1 << 2; // status: 1 = full duplex
 static constexpr uint8_t PHYCFGR_SPD_100 = 1 << 1;  // status: 1 = 100 Mbit
 static constexpr uint8_t PHYCFGR_LNK = 1 << 0;      // status: 1 = link up
 
-uint8_t W5500Phy::readReg(uint8_t block, uint16_t addr)
+uint8_t W5500Phy::readReg(uint8_t block, uint16_t addr, uint32_t hz)
 {
     lockBegin();
-    _spi->beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
+    _spi->beginTransaction(SPISettings(hz, MSBFIRST, SPI_MODE0));
     digitalWrite(_cs, LOW);
     _spi->transfer((addr & 0xFF00) >> 8);
     _spi->transfer(addr & 0x00FF);
@@ -49,10 +49,10 @@ uint8_t W5500Phy::readReg(uint8_t block, uint16_t addr)
     return v;
 }
 
-void W5500Phy::writeReg(uint8_t block, uint16_t addr, uint8_t val)
+void W5500Phy::writeReg(uint8_t block, uint16_t addr, uint8_t val, uint32_t hz)
 {
     lockBegin();
-    _spi->beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
+    _spi->beginTransaction(SPISettings(hz, MSBFIRST, SPI_MODE0));
     digitalWrite(_cs, LOW);
     _spi->transfer((addr & 0xFF00) >> 8);
     _spi->transfer(addr & 0x00FF);
@@ -63,9 +63,9 @@ void W5500Phy::writeReg(uint8_t block, uint16_t addr, uint8_t val)
     lockEnd();
 }
 
-uint8_t W5500Phy::chipVersion()
+uint8_t W5500Phy::chipVersion(uint32_t hz)
 {
-    return readReg(BLOCK_COMMON, REG_VERSIONR);
+    return readReg(BLOCK_COMMON, REG_VERSIONR, hz);
 }
 
 W5500Phy::Status W5500Phy::read()

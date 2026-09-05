@@ -25,6 +25,10 @@ class W5500Phy
         bool fullDuplex; // true = full, false = half
     };
 
+    // Default SPI clock for our own register access. Well below the W5500's guaranteed 33.3 MHz
+    // (datasheet 5.5.4) so a raw probe never fails for signal-integrity reasons.
+    static constexpr uint32_t SPI_HZ_DEFAULT = 8000000;
+
     W5500Phy(SPIClass &spi, int csPin) : _spi(&spi), _cs(csPin) {}
 
     // --- PHY link mode (PHYCFGR 0x002E) ---
@@ -42,14 +46,15 @@ class W5500Phy
     bool fullDuplex() { return read().fullDuplex; }
 
     // --- health / identification ---
-    uint8_t chipVersion(); // VERSIONR (0x0039); a present W5500 returns 0x04
+    uint8_t chipVersion(uint32_t hz = SPI_HZ_DEFAULT); // VERSIONR (0x0039); a present W5500 returns 0x04
     bool present() { return chipVersion() == 0x04; }
 
     // --- generic register access (under the driver's lwIP lock) ---
     // Lets future features reach any W5500 register without extending this class.
     // block: 0x00 = common register block; socket blocks per datasheet. addr: register address.
-    uint8_t readReg(uint8_t block, uint16_t addr);
-    void writeReg(uint8_t block, uint16_t addr, uint8_t val);
+    // hz lets a diagnostic read the chip at a slower clock than the driver runs at.
+    uint8_t readReg(uint8_t block, uint16_t addr, uint32_t hz = SPI_HZ_DEFAULT);
+    void writeReg(uint8_t block, uint16_t addr, uint8_t val, uint32_t hz = SPI_HZ_DEFAULT);
 
   private:
     void applyOpmdc(uint8_t opmdc); // write OPMD|opmdc, then pulse the PHY reset bit

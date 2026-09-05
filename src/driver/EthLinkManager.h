@@ -40,6 +40,8 @@ class EthLinkManager
     // Raw VERSIONR read (0x04 = a present W5500). Used by NetworkModule's W5500 self-heal to classify a
     // failed begin(): 0x04 => chip present, only socket OPEN not ready (transient); else => no SPI comms.
     uint8_t chipVersion() { return _phy.chipVersion(); }
+    // Raw PHY access for the console diagnostics ('net phy'): version at a chosen clock, PHYCFGR, link.
+    W5500Phy &phy() { return _phy; }
     // Apply the ETS "LAN-Modus" live via the PHY. Called after every successful W5500 bring-up (boot,
     // self-heal) and once more from the startup-delay hook; a no-op while ETS says "Automatisch".
     void applyEtsMode();
