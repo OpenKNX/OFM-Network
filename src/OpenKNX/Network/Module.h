@@ -133,6 +133,7 @@ namespace OpenKNX
             void showInformations() override;
             bool processCommand(const std::string cmd, bool debugKo);
             void showHelp() override;
+            void showNetworkHelp(); // 'net ?': every 'net ...' subcommand (the main help only points here)
             void showNetworkInformations(bool console = false);
 
             bool processFunctionProperty(uint8_t objectIndex, uint8_t propertyId, uint8_t length, uint8_t *data, uint8_t *resultData, uint8_t &resultLength) override;
@@ -346,6 +347,36 @@ namespace OpenKNX
             static constexpr uint32_t ETH_HEAL_INTERVAL_MS = 5000;
             static constexpr uint32_t ETH_HEALTH_INTERVAL_MS = 5000;
             static constexpr uint8_t ETH_BAD_PROBE_LIMIT = 3;
+
+            // ---- console PHY diagnostics ('net phy ...') ----
+            // 'reset' and 'pin' both drive RSTn for far longer than a loop() pass may block, so they run as a
+            // state machine. While one is active the self-heal and the health probe are skipped: nothing else
+            // may touch RSTn or the SPI bus, or the measurement is worthless.
+            enum class PhyTool : uint8_t
+            {
+                None,
+                ResetLow,    // RSTn held low, waiting for _phyToolAt
+                ResetSettle, // RSTn released, waiting out the PLL settle
+                PinToggle    // 1 Hz square wave on RSTn for the DMM
+            };
+            PhyTool _phyTool = PhyTool::None;
+            uint32_t _phyToolAt = 0;       // millis() of the next state step
+            uint32_t _phyToolEnd = 0;      // PinToggle: end of the toggle window
+            uint16_t _phyToolLowMs = 0;    // ResetLow: how long RSTn is held low
+            uint8_t _phyToolVerBefore = 0; // VERSIONR read before the pulse, for the before/after line
+            bool _phyToolLevel = false;    // PinToggle: current RSTn level
+            bool phyToolActive() const { return _phyTool != PhyTool::None; }
+            void phyToolLoop();                     // loop(): drive the state machine, hand back via recoverEth()
+            void phyToolStartReset(uint16_t lowMs); // 'net phy reset [ms]'
+            void phyToolStartPin(uint16_t seconds); // 'net phy pin [s]'
+            void showPhyStatus();                   // 'net phy'
+            void phyToolAbort();                    // give up a running diagnostic (power save / OTA)
+            uint8_t readVersionLocked(uint32_t hz); // VERSIONR under the lwIP lock (never race the SPI pump)
+            static constexpr uint32_t PHY_TOOL_SETTLE_MS = 200; // >> TPL (1 ms, datasheet 5.5.1)
+            static constexpr uint16_t PHY_TOOL_RESET_MS_DEFAULT = 100;
+            static constexpr uint16_t PHY_TOOL_RESET_MS_MAX = 1000;
+            static constexpr uint16_t PHY_TOOL_PIN_S_DEFAULT = 30;
+            static constexpr uint16_t PHY_TOOL_PIN_S_MAX = 120;
 #endif
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
             // RP2040 mDNS via the lwIP API directly (SimpleMDNS.addServiceTxt is broken on arduino-pico ->
