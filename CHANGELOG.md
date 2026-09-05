@@ -17,6 +17,7 @@ Everything below is on `ec/v1dev-ec` and has not been released upstream yet.
 * Change: both register from `loop()`, not `setup()`: this module is number 7 and DeviceDisplay is 10, so in `setup()` there is no widget manager yet
 
 **Network configuration and diagnostics**
+* feature: mDNS announces the product, the KNX order number and the board — a scanner can name a device instead of showing a bare serial, and a tool can tell before an upload whether the image belongs to it
 * feature: the link mode comes from ETS instead of from flash — the mode set in the product now decides, so a device no longer keeps a mode that was written once and never changed
 * feature: whole-interface packet counters, so throughput and loss can be read per interface rather than guessed from the bus side
 * feature: the TLS chain is validated against a root certificate; the HTTPS client accepted any chain before
