@@ -22,6 +22,12 @@ Everything below is on `ec/v1dev-ec` and has not been released upstream yet.
 * feature: the TLS chain is validated against a root certificate; the HTTPS client accepted any chain before
 * feature: a file can be downloaded from a URL straight onto the device, without a PC in between
 * feature: the USB-exchange hooks are optional, so a product without that module compiles without them
+* feature: `net ?` lists every `net ...` subcommand this build has; the main console help only points at it instead of listing them all
+* feature: `net phy` reads the W5500 out over SPI -- VERSIONR, PHYCFGR, the RSTn pin and the SPI clock; `net phy ver` re-reads VERSIONR at 1 MHz to separate a silent chip from a marginal clock; `net phy reset [ms]` pulses RSTn and reports VERSIONR before and after; `net phy pin [s]` puts a 1 Hz square wave on RSTn so a meter can show whether the pulse reaches the chip. RP2040 only -- on ESP32 the SPI bus belongs to `esp_eth`
+* feature: when the W5500 stops answering at runtime, the log records how long it had lived, the link age, the packet counters and the reconnect count, so a failure that takes hours can be correlated with load afterwards
+* fix: the W5500 self-heal no longer blocks the loop -- the retry spent 62 ms of `delay()` in a single pass every 5 s, which starved the TPUart receive path (KNX bus protocol errors) and chopped up the console for as long as the chip stayed down; the RSTn pulse is stepped across loop passes now
+* change: the self-heal retry spacing widens with the failure count -- 5 s for the first three attempts, 30 s up to the tenth, 120 s after that, instead of retrying every 5 s forever on a chip that RSTn cannot revive
+* doc: the W5500 and LAN8720A datasheets are in `doc/datasheets/`, indexed with revision, vendor URL and the pages the driver depends on
 
 **Post-merge audit**
 * fix: OTA gate, establish debounce, KNX-IP LED and OTA RX contention — four defects found by re-tracing the paths after the upstream merge
