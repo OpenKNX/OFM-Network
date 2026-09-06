@@ -29,6 +29,8 @@ Everything below is on `ec/v1dev-ec` and has not been released upstream yet.
 * fix: the W5500 self-heal no longer blocks the loop -- the retry spent 62 ms of `delay()` in a single pass every 5 s, which starved the TPUart receive path (KNX bus protocol errors) and chopped up the console for as long as the chip stayed down; the RSTn pulse is stepped across loop passes now
 * change: the self-heal retry spacing widens with the failure count -- 5 s for the first three attempts, 30 s up to the tenth, 120 s after that, instead of retrying every 5 s forever on a chip that RSTn cannot revive
 * doc: the W5500 and LAN8720A datasheets are in `doc/datasheets/`, indexed with revision, vendor URL and the pages the driver depends on
+* fix: a single garbled PHYCFGR read no longer takes the network down -- the link check acted on one read, and a garbled one produced a link-down edge that dropped the DHCP binding and closed every open tunnel, leaving the device without an address until a reboot while the PHY never lost carrier. A change is now accepted only after three consecutive reads agree, and the whole 500 ms tick derives from one reading instead of re-reading the register for each decision
+* feature: link up but no address is no longer waited out -- a DHCP renew after 60 s, then a re-initialisation of the interface after 180 s, which is what a warm reboot does for the network without restarting the device. Both stages log, so the fault is recorded without a console attached; AutoIP (169.254/16) counts as no address, and a segment that never had a DHCP server is left alone
 
 **Post-merge audit**
 * fix: OTA gate, establish debounce, KNX-IP LED and OTA RX contention — four defects found by re-tracing the paths after the upstream merge
