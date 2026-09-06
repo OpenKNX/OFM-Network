@@ -312,6 +312,16 @@ namespace OpenKNX
             char *_mDNSDeviceServiceName = nullptr;
             char *_mDNSDeviceServiceNameTXT = nullptr;
             bool _currentLinkState = false;
+            bool linkCarrier(); // carrier for the link edge logic, debounced where the read can glitch
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+            // The carrier comes from a PHYCFGR read over the same SPI bus the driver uses. A single garbled
+            // read was taken at face value and tore the lwIP link down, which drops the DHCP binding -- the
+            // device then sat without an address until a reboot while the PHY never lost carrier.
+            // checkEthHealth() debounces VERSIONR for exactly this reason; this path did not.
+            bool _carrierStable = false; // accepted carrier state
+            uint8_t _carrierSamples = 0; // consecutive reads disagreeing with _carrierStable
+            static constexpr uint8_t LINK_DEBOUNCE_SAMPLES = 3; // 3 x 500ms tick -> 1.5s to accept a change
+#endif
             uint32_t _lastLinkCheck = false;
             uint32_t _ipFaultSince = 0; // millis() the IP network first looked unreachable; 0 = it does not
             bool _ipFaultReported = false; // last value written to the IP-fault bit; edge-only, keeps the 2 Hz tick allocation-free

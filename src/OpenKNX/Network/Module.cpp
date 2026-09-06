@@ -649,9 +649,29 @@ namespace OpenKNX
         // genuinely held this long, not on every brief establish during the ETH auto-fallback search / flapping.
         static constexpr uint32_t NET_INFO_STABLE_MS = 3000;
 
+        // Carrier for the link edge logic. On RP2040 + W5500 the read is a PHYCFGR fetch over the SPI bus the
+        // driver shares, so a change is only accepted once LINK_DEBOUNCE_SAMPLES consecutive reads agree.
+        // Everywhere else the platform reports the link from an event and needs no debounce.
+        bool Module::linkCarrier()
+        {
+            const bool raw = connected();
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+            if (raw == _carrierStable)
+            {
+                _carrierSamples = 0; // agreement resets the run: only CONSECUTIVE disagreement counts
+                return _carrierStable;
+            }
+            if (++_carrierSamples < LINK_DEBOUNCE_SAMPLES) return _carrierStable;
+            _carrierSamples = 0;
+            _carrierStable = raw;
+#endif
+            return raw;
+        }
+
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
         // arduino-pico's W5500 driver never calls netif_set_link_up/down, so lwIP misses cable changes and
         // DHCP stays on the stale lease. Feed both edges so dhcp_discover() re-runs and DHCP/AutoIP re-arm.
+
         void Module::setLwipLinkState(bool up)
         {
             netif *intf = KNX_NETIF.getNetIf();
@@ -767,8 +787,10 @@ namespace OpenKNX
             // Honest KNX-IP-Status LED (func 11): reflects the KNXnet/IP datalink, separate from the physical-link LED below.
             checkKnxIpStatus();
 
-            // Get current network state
-            bool establishedState = established();
+            // One carrier read per tick, debounced where it can glitch; everything below derives from it
+            // instead of re-reading PHYCFGR, so a single garbled read cannot flip half the tick's decisions.
+            const bool carrier = linkCarrier();
+            const bool establishedState = carrier && (localIP() != IPAddress());
 
             checkKnxIpDeviceState(establishedState);
 
@@ -778,11 +800,7 @@ namespace OpenKNX
             controlKnxIp(establishedState);
 #endif
 
-            bool newLinkState;
-            if (establishedState)
-                newLinkState = true;
-            else
-                newLinkState = connected();
+            const bool newLinkState = establishedState || carrier;
 
 #if defined(KNX_IP_LAN) && defined(OPENKNX_ETH_AUTO_FALLBACK)
             _ethLink.tick(newLinkState, establishedState); // ~2 Hz link tick; walks the auto-fallback ladder
@@ -793,7 +811,7 @@ namespace OpenKNX
             _mdnsWasEstablished = establishedState;
 #endif
 
-            if (newLinkState && established())
+            if (newLinkState && establishedState)
             {
                 if (_ipLedState != 1)
                 {
