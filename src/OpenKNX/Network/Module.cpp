@@ -672,6 +672,60 @@ namespace OpenKNX
         // arduino-pico's W5500 driver never calls netif_set_link_up/down, so lwIP misses cable changes and
         // DHCP stays on the stale lease. Feed both edges so dhcp_discover() re-runs and DHCP/AutoIP re-arm.
 
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+        // Carrier up, no usable address. lwIP has been seen to stay there after a link-down/up, so escalate
+        // rather than wait: renew the lease, then re-initialise the interface. Gated on an address having
+        // existed in this session, so a segment without a DHCP server is left alone instead of churned.
+        void Module::checkIpWatchdog(bool carrier)
+        {
+            if (_useStaticIP) return;
+
+            const IPAddress ip = localIP();
+            // 169.254/16 is lwIP's AutoIP fallback -- reachable, but not on the LAN this device belongs to.
+            const bool usable = (ip != IPAddress()) && !(ip[0] == 169 && ip[1] == 254);
+            if (usable)
+            {
+                _hadIpEver = true;
+                _noIpSince = 0;
+                _noIpStage = 0;
+                return;
+            }
+            if (!carrier || !_hadIpEver)
+            {
+                _noIpSince = 0;
+                _noIpStage = 0;
+                return;
+            }
+
+            const uint32_t now = millis();
+            if (_noIpSince == 0)
+            {
+                _noIpSince = now ? now : 1; // 0 marks "no fault pending", so never store it as a timestamp
+                return;
+            }
+            const uint32_t downMs = now - _noIpSince;
+
+            if (_noIpStage == 0 && downMs >= NO_IP_RENEW_MS)
+            {
+                _noIpStage = 1;
+                netif *intf = KNX_NETIF.getNetIf();
+                if (intf == nullptr) return;
+                logInfoP("No address for %us with the link up -> DHCP renew", (unsigned)(downMs / 1000));
+                ethernet_arch_lwip_begin();
+                dhcp_renew(intf);
+                ethernet_arch_lwip_end();
+                return;
+            }
+
+            if (_noIpStage == 1 && downMs >= NO_IP_REBIND_MS)
+            {
+                _noIpStage = 2; // terminal: no further escalation until an address arrives
+                logErrorP("Still no address after %us -> re-initialising the network interface", (unsigned)(downMs / 1000));
+                recoverEth(); // detach KNX-IP, reset the PHY, end the driver; the self-heal begins again
+            }
+        }
+#endif
+
         void Module::setLwipLinkState(bool up)
         {
             netif *intf = KNX_NETIF.getNetIf();
@@ -898,6 +952,9 @@ namespace OpenKNX
 
             _currentLinkState = newLinkState;
             _lastLinkCheck = millis();
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+            checkIpWatchdog(carrier);
+#endif
 
             if (_currentLinkState) checkIpStatus();
 

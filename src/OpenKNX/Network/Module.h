@@ -321,6 +321,16 @@ namespace OpenKNX
             bool _carrierStable = false; // accepted carrier state
             uint8_t _carrierSamples = 0; // consecutive reads disagreeing with _carrierStable
             static constexpr uint8_t LINK_DEBOUNCE_SAMPLES = 3; // 3 x 500ms tick -> 1.5s to accept a change
+
+            // Link up but no usable address: escalate instead of waiting forever. Renew first (no
+            // interruption), then re-initialise the interface -- what a warm reboot does for the network,
+            // without restarting the device.
+            void checkIpWatchdog(bool carrier);
+            uint32_t _noIpSince = 0; // millis() the "carrier up, no usable address" state began (0 = none)
+            uint8_t _noIpStage = 0;  // 0 = nothing done yet, 1 = renewed, 2 = interface re-initialised
+            bool _hadIpEver = false; // gate: a network without a DHCP server must not be churned
+            static constexpr uint32_t NO_IP_RENEW_MS = 60000;
+            static constexpr uint32_t NO_IP_REBIND_MS = 180000;
 #endif
             uint32_t _lastLinkCheck = false;
             uint32_t _ipFaultSince = 0; // millis() the IP network first looked unreachable; 0 = it does not
