@@ -735,6 +735,31 @@ namespace OpenKNX
             _ipShown = true;
         }
 
+        // 03_08_03 3.5.3 p.20: the IP-fault bit of PID_KNXNETIP_DEVICE_STATE is set once communication to the
+        // IP network has failed for five seconds and cleared when it resumes. established() is the accurate
+        // source (physical link up AND an address assigned); the current IP address alone would miss a cable
+        // pull on a static configuration. Read-modify-write so the KNX-fault bit the stack owns is preserved,
+        // and only on a change so the evented M_PropInfo.ind fires on the edge, not every 500 ms.
+        void Module::checkKnxIpDeviceState(bool established)
+        {
+            const uint32_t now = millis();
+
+            if (established)
+                _ipFaultSince = 0;
+            else if (_ipFaultSince == 0)
+                _ipFaultSince = now ? now : 1; // 0 marks "no fault pending", so never store it as a timestamp
+
+            const bool fault = (_ipFaultSince != 0) && (now - _ipFaultSince >= 5000);
+            if (fault == _ipFaultReported)
+                return; // edge only: GetByteProperty() allocates, and this runs twice a second
+            _ipFaultReported = fault;
+
+            const uint8_t current = GetByteProperty(PID_KNXNETIP_DEVICE_STATE);
+            const uint8_t next = fault ? (uint8_t)(current | 0x02) : (uint8_t)(current & ~0x02);
+            if (next != current)
+                SetByteProperty(PID_KNXNETIP_DEVICE_STATE, next);
+        }
+
         void Module::checkLinkStatus()
         {
             if (!delayCheckMillis(_lastLinkCheck, 500)) return;
@@ -744,6 +769,8 @@ namespace OpenKNX
 
             // Get current network state
             bool establishedState = established();
+
+            checkKnxIpDeviceState(establishedState);
 
 #ifdef ARDUINO_ARCH_ESP32
             // Fängt einen Link-Flap auf, nach dem GOT_IP ausbleibt. Nur ESP32: RP2040 hat

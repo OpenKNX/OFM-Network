@@ -313,6 +313,8 @@ namespace OpenKNX
             char *_mDNSDeviceServiceNameTXT = nullptr;
             bool _currentLinkState = false;
             uint32_t _lastLinkCheck = false;
+            uint32_t _ipFaultSince = 0; // millis() the IP network first looked unreachable; 0 = it does not
+            bool _ipFaultReported = false; // last value written to the IP-fault bit; edge-only, keeps the 2 Hz tick allocation-free
             uint32_t _restartTimer = 0;
 
             // uptime() seconds; up/down comes from _currentLinkState/_ipShown, not a zero stamp.
@@ -446,6 +448,7 @@ namespace OpenKNX
             void handleOTA();
             void controlKnxIp(bool state);
             void checkKnxIpStatus(); // drives the KNX-IP-Status LED (func 11): green=KNXnet/IP running, orange=link up but KNX-IP down, red=no link
+            void checkKnxIpDeviceState(bool established); // feeds the IP-fault bit of PID_KNXNETIP_DEVICE_STATE
             bool knxIpEnabled();     // is the KNXnet/IP datalink layer currently enabled?
 #if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
             void processAfterStartupDelay() override; // EthLinkManager re-applies the persisted fixed link mode
