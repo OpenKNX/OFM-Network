@@ -143,13 +143,16 @@ namespace OpenKNX
         {
             logInfoP("Reset network adapter");
             logIndentUp();
-            controlKnxIp(false);
+            _ipShown = false; // let checkIpStatus() rebuild the KNXnet/IP endpoint after the bounce
+            _ipStableSince = 0;
 
-#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
-            _ethLink.resetLink(); // bounce the W5500 PHY (cable re-plug): no reboot, no driver end()/begin()
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
+            // PHY bounce only. No controlKnxIp(false): this path returns before the re-enable below.
+            _ethLink.resetLink();
             logIndentDown();
             return;
 #endif
+            controlKnxIp(false);
 #if defined(ARDUINO_ARCH_ESP32) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_AUTO_FALLBACK)
             _ethLink.resetLadder(); // restart the auto-fallback search (the re-init below re-links at autoneg)
 #endif
@@ -188,6 +191,13 @@ namespace OpenKNX
             ETH_SPI_INTERFACE.setSCK(PIN_ETH_SCK);
             ETH_SPI_INTERFACE.setCS(PIN_ETH_SS);
             logDebugP("Ethernet SPI GPIO: RX/MISO: %d, TX/MOSI: %d, SCK/SCLK: %d, CSn/SS: %d", PIN_ETH_MISO, PIN_ETH_MOSI, PIN_ETH_SCK, PIN_ETH_SS);
+            // The raw probe runs before KNX_NETIF.begin(), so mux the bus and drive CS here.
+            ETH_SPI_INTERFACE.begin();
+            pinMode(PIN_ETH_SS, OUTPUT);
+            digitalWrite(PIN_ETH_SS, HIGH);
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
+            _ethLink.phy().driverClock(OPENKNX_NET_SPI_SPEED);
+#endif
 #endif
 
             logIndentDown();
@@ -509,10 +519,10 @@ namespace OpenKNX
             ArduinoOTA.onStart([&]() {
                 _otaActive = true; // display OTA overlay takes over (SYSTEM priority)
                 _otaPercent = 0;
-#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
                 phyToolAbort(); // loop() returns before the state machine while OTA runs
 #endif
-#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
                 setEthOtaPump(true); // hand W5500 RX to the async IRQ pump so the blocking OTA read isn't loop-starved
 #endif
                 if (ArduinoOTA.getCommand() == U_FLASH)
@@ -522,7 +532,7 @@ namespace OpenKNX
             });
             ArduinoOTA.onEnd([&]() {
                 _otaActive = false;
-#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
                 setEthOtaPump(false); // restore the main-loop RX pump (defensive: a restart below could be deferred)
 #endif
                 _otaPercent = 100;
@@ -545,7 +555,7 @@ namespace OpenKNX
             });
             ArduinoOTA.onError([&](ota_error_t error) {
                 _otaActive = false; // release the display overlay so normal operation resumes
-#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
                 setEthOtaPump(false); // restore the main-loop RX pump -- device keeps running after an OTA error
 #endif
                 logIndentUp();
@@ -655,7 +665,7 @@ namespace OpenKNX
         bool Module::linkCarrier()
         {
             const bool raw = connected();
-#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
             if (raw == _carrierStable)
             {
                 _carrierSamples = 0; // agreement resets the run: only CONSECUTIVE disagreement counts
@@ -672,7 +682,7 @@ namespace OpenKNX
         // arduino-pico's W5500 driver never calls netif_set_link_up/down, so lwIP misses cable changes and
         // DHCP stays on the stale lease. Feed both edges so dhcp_discover() re-runs and DHCP/AutoIP re-arm.
 
-#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
         // Carrier up, no usable address. lwIP has been seen to stay there after a link-down/up, so escalate
         // rather than wait: renew the lease, then re-initialise the interface. Gated on an address having
         // existed in this session, so a segment without a DHCP server is left alone instead of churned.
@@ -784,6 +794,7 @@ namespace OpenKNX
             _ipShown = false;
             _ipStableSince = 0; // restart the establish debounce on link loss
             _linkDownSinceSec = uptime();
+            _lastLinkUptimeSec = _linkUpSinceSec ? (_linkDownSinceSec - _linkUpSinceSec) : 0;
             _linkUpSinceSec = 0;
             _establishedSinceSec = 0;
             _linkEverDown = true;
@@ -798,6 +809,15 @@ namespace OpenKNX
             if ((uint32_t)(millis() - _ipStableSince) < NET_INFO_STABLE_MS) return;
 
             _establishedSinceSec = uptime();
+
+            // A multicast membership does not survive every link change; 03_08_02 Core 4.2 requires the
+            // server to stay discoverable. The BAU knows whether it owns an endpoint.
+            if (!knx.bau().networkChanged(_linkEverDown))
+            {
+                logErrorP("KNXnet/IP endpoint down: multicast join failed - device is not discoverable");
+                _ipStableSince = 0; // leaves _ipShown false: the next tick tries again
+                return;
+            }
 
             logBegin();
             logInfoP("Network established");
@@ -846,11 +866,14 @@ namespace OpenKNX
             const bool carrier = linkCarrier();
             const bool establishedState = carrier && (localIP() != IPAddress());
 
-            checkKnxIpDeviceState(establishedState);
+            // 03_08_03 3.5.3: the IP-fault bit means "IP network cannot be accessed" -- a link with an
+            // address but no KNXnet/IP endpoint is exactly that, so it has to feed this too.
+            checkKnxIpDeviceState(establishedState && knxIpEnabled());
 
 #ifdef ARDUINO_ARCH_ESP32
             // Fängt einen Link-Flap auf, nach dem GOT_IP ausbleibt. Nur ESP32: RP2040 hat
-            // keine Events und damit keine Lücke.
+            // keine Events und damit keine Lücke. Flankengesteuert: level-triggered würde bei einem
+            // scheiternden Join zweimal pro Sekunde den kompletten Socket-Aufbau wiederholen.
             controlKnxIp(establishedState);
 #endif
 
@@ -952,7 +975,7 @@ namespace OpenKNX
 
             _currentLinkState = newLinkState;
             _lastLinkCheck = millis();
-#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
             checkIpWatchdog(carrier);
 #endif
 
@@ -999,7 +1022,7 @@ namespace OpenKNX
 
             if (_powerSave) return;
 
-#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
             if (!_otaActive) pumpEthernet(); // drive W5500 RX + lwIP timers from the main loop (INT off);
                                              // while _otaActive the async IRQ pump owns RX (see setEthOtaPump)
 #endif
@@ -1007,7 +1030,7 @@ namespace OpenKNX
             // checkLinkStatus, and the ping/DNS/webclient loops below) so they don't contend for the SPI bus +
             // lwIP lock in the windows between flash commits. The device is dedicated to the update anyway.
             if (_otaActive) return;
-#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
             if (phyToolActive())
             {
                 phyToolLoop(); // 'net phy reset|pin' owns RSTn and the SPI bus until it is done
@@ -1213,7 +1236,7 @@ namespace OpenKNX
                 return true;
             }
 
-#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
             // 'net phy [ver|reset [ms]|pin [s]]' -- W5500 SPI/RSTn diagnostics.
             else if (cmd == "net phy" || cmd.compare(0, 8, "net phy ") == 0)
             {
@@ -1221,14 +1244,15 @@ namespace OpenKNX
                 while (!arg.empty() && arg[0] == ' ')
                     arg.erase(0, 1);
 
-                if (arg.empty())
-                {
-                    showPhyStatus();
-                    return true;
-                }
+                // Before the no-arg branch: showPhyStatus() reads SPI and would misreport during a toggle.
                 if (phyToolActive())
                 {
                     logErrorP("net phy: a diagnostic is still running");
+                    return true;
+                }
+                if (arg.empty())
+                {
+                    showPhyStatus();
                     return true;
                 }
 
@@ -1243,6 +1267,13 @@ namespace OpenKNX
                 long value = param.empty() ? 0 : atol(param.c_str());
                 if (value < 0) value = 0;
                 if (value > 0xFFFF) value = 0xFFFF;
+
+                // loop() returns before phyToolLoop() while either flag is set: RSTn would stay driven.
+                if ((sub == "reset" || sub == "pin") && (_otaActive || _powerSave))
+                {
+                    logErrorP("net phy: refused while %s is active", _otaActive ? "OTA" : "power save");
+                    return true;
+                }
 
                 if (sub == "ver")
                     logInfoP("VERSIONR: 0x%02X at 1 MHz (expected 0x04)", readVersionLocked(1000000));
@@ -1631,11 +1662,13 @@ namespace OpenKNX
             openknx.console.printHelpLine("net eth 10 [half|full]", "Force a fixed 10 Mbit link (default half)");
             openknx.console.printHelpLine("net eth 100 [half|full]", "Force a fixed 100 Mbit link (default half)");
 #endif
-#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
             openknx.console.printHelpLine("net phy", "W5500 status: VERSIONR, PHYCFGR, RSTn pin, SPI clock");
             openknx.console.printHelpLine("net phy ver", "Read VERSIONR at 1 MHz (rules out SPI signal quality)");
             openknx.console.printHelpLine("net phy reset [ms]", "Pulse RSTn (default 100ms) and report VERSIONR before/after");
             openknx.console.printHelpLine("net phy pin [s]", "Toggle RSTn at 1 Hz (default 30s) to measure at the chip");
+#elif defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_ETH_W5500)
+            openknx.console.printHelpLine("net phy", "W5500 status (not available on ESP32: esp_eth owns the SPI bus)");
 #endif
         }
 
@@ -1718,7 +1751,7 @@ namespace OpenKNX
 
         void Module::savePower()
         {
-#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
             phyToolAbort(); // loop() stops here from now on
 #endif
             _powerSave = true;
@@ -1913,8 +1946,13 @@ namespace OpenKNX
 
         void Module::controlKnxIp(bool enable)
         {
+#if MASK_VERSION == 0x091A || MASK_VERSION == 0x07B0 || MASK_VERSION == 0x57B0
+            // Compared against the OBSERVED state, never against an intent flag: an intent that drifts from
+            // reality never heals, while this retries exactly when the datalink is not where it should be.
+            if (enable == knxIpEnabled()) return;
+#endif
             // NOTE: deliberately NOT extended to 0x07B0. On the interface controlKnxIp has always been a no-op
-            // (Bau07B0IP owns the IP datalink lifecycle); toggling it with the link state is untested and could
+            // (Bau07B0IP owns it); the endpoint is rebuilt by networkChanged() on the link edge instead.
             // tear down a live tunnel on a link flap. Router masks only.
 #if MASK_VERSION == 0x091A
             knx.bau().getPrimaryDataLinkLayer()->enabled(enable);
@@ -1975,7 +2013,7 @@ namespace OpenKNX
             }
         }
 
-#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
         // Startup-delay hook -> EthLinkManager re-applies a persisted fixed link mode (flash now loaded).
         void Module::processAfterStartupDelay()
         {
@@ -1999,7 +2037,7 @@ namespace OpenKNX
         // Write order MUST match read order: EthLink bytes first (unchanged), then the override block.
         void Module::writeFlash()
         {
-#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
             _ethLink.writeFlash();
 #endif
 #ifdef DEVICE_DISPLAY_MODULE
@@ -2009,7 +2047,7 @@ namespace OpenKNX
 
         void Module::readFlash(const uint8_t *data, const uint16_t size)
         {
-#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
             _ethLink.readFlash(data, size); // tolerates a shorter/older blob (keeps its own defaults)
 #endif
 #ifdef DEVICE_DISPLAY_MODULE
@@ -2115,7 +2153,7 @@ namespace OpenKNX
         }
 #endif // DEVICE_DISPLAY_MODULE
 
-#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
         // Hardware-reset the W5500 via RSTn. NOT the driver's end() (busy-waits forever on a stuck chip -> brick).
         void Module::hwResetPhy()
         {
@@ -2139,6 +2177,15 @@ namespace OpenKNX
         // The bring-up without the RSTn pulse, so the stepped self-heal can own the pulse timing itself.
         bool Module::beginEthAfterReset()
         {
+            // Wiznet5500::begin() -> setSn_CR() spins unbounded on a silent chip; probe before entering.
+            const uint8_t probe = _ethLink.chipVersion();
+            if (probe != 0x04)
+            {
+                logErrorP("W5500 not answering on SPI (VERSIONR=0x%02X, expected 0x04)", probe);
+                return false;
+            }
+
+            KNX_NETIF.end(); // clears a _started left behind when recoverEth() had to skip it; no-op otherwise
             KNX_NETIF.setSPISpeed(OPENKNX_NET_SPI_SPEED);
             if (KNX_NETIF.begin()) return true;
 
@@ -2227,6 +2274,7 @@ namespace OpenKNX
                     }
                     _ethDegraded = false;
                     _healFailures = 0;
+                    controlKnxIp(true); // recoverEth() disabled it; nothing else re-enables it on RP2040
                     _ipLedState = 0;         // force checkLinkStatus() to re-evaluate the LED from the real link
                     _ethLink.applyEtsMode(); // the re-begin left the PHY at its default -> re-apply the ETS mode
                     logInfoP("W5500 recovered - network back online");
@@ -2247,23 +2295,30 @@ namespace OpenKNX
             // comes back garbage, and a healthy chip is mis-classified "dead" -> KNX-IP teardown.
             ethernet_arch_lwip_begin();
             const uint8_t ver = _ethLink.chipVersion();
+            // A wedged MACRAW socket keeps VERSIONR and the PHY link healthy, so probe Sn_SR too.
+            const uint8_t sr = (ver == 0x04) ? _ethLink.phy().readReg(W5500_BLOCK_SOCKET0, W5500_REG_SN_SR) : 0;
             ethernet_arch_lwip_end();
-            if (ver == 0x04)
+            if (ver == 0x04 && sr == W5500_SOCK_MACRAW)
             {
                 _ethBadProbes = 0;
                 return;
             }
             if (++_ethBadProbes < ETH_BAD_PROBE_LIMIT) return;
 
-            logErrorP("W5500 stopped responding at runtime (VERSIONR=0x%02X != 0x04) after %u probes -> clean recovery", ver, _ethBadProbes);
+            if (ver != 0x04)
+                logErrorP("W5500 stopped responding at runtime (VERSIONR=0x%02X != 0x04) after %u probes -> clean recovery", ver, _ethBadProbes);
+            else
+                logErrorP("W5500 socket 0 wedged at runtime (Sn_SR=0x%02X != 0x42) after %u probes -> clean recovery", sr, _ethBadProbes);
             // Post-mortem context, host-side counters only -- the chip is silent, reading its registers
             // now would print noise. Answers "how long did it live and under what load".
 #if defined(KNX_IP_LAN)
             {
                 uint32_t rxPackets = 0, txPackets = 0;
                 openknxLanTraffic(rxPackets, txPackets);
-                logErrorP("  uptime %s, link up %s, packets RX/TX %s / %s, reconnects %u",
-                          humanDuration(millis() / 1000).c_str(), humanDuration(netUptimeSec()).c_str(),
+                // netUptimeSec() is 0 once the link is booked down; onLinkLost() retains the duration.
+                const uint32_t linkUpSec = _currentLinkState ? netUptimeSec() : _lastLinkUptimeSec;
+                logErrorP("  uptime %s, link was up %s, packets RX/TX %s / %s, reconnects %u",
+                          humanDuration(uptime()).c_str(), humanDuration(linkUpSec).c_str(),
                           humanCount(rxPackets).c_str(), humanCount(txPackets).c_str(), (unsigned)_reconnects);
             }
 #endif
@@ -2274,10 +2329,18 @@ namespace OpenKNX
         // returns immediately (that unbounded wait is the old brick), end(), then hand to ethSelfHeal().
         void Module::recoverEth()
         {
-            controlKnxIp(false);
-            onLinkLost(); // before end(): the lwIP link-down has to reach a netif that still exists
+            // Reset the PHY FIRST: controlKnxIp(false) leaves the IGMP group on router masks, and that Leave
+            // is a real frame through sendFrame(), which busy-waits unbounded on a wedged chip. After the
+            // reset Sn_SR reads SOCK_CLOSED and both that wait and end()'s return at once.
+            openknx.common.skipLooptimeWarning(); // hwResetPhy() blocks 62ms; the ESP32 twin does the same
             hwResetPhy();
-            KNX_NETIF.end();
+            // Everything below can transmit or poll the chip unbounded: controlKnxIp(false) emits an IGMP
+            // Leave through sendFrame(), end() spins twice (setSn_CR, Sn_SR). Both only on a chip that
+            // answers; a stale _started is cleared by beginEthAfterReset() once it is back.
+            const bool chipAnswers = (_ethLink.chipVersion() == 0x04);
+            if (chipAnswers) controlKnxIp(false);
+            onLinkLost(); // before end(): the lwIP link-down has to reach a netif that still exists
+            if (chipAnswers) KNX_NETIF.end();
             _ethBadProbes = 0;
             _lastEthHeal = 0;    // let ethSelfHeal() attempt an immediate first re-begin
             _healFailures = 0;   // a fresh wedge gets the fast retries again
@@ -2297,13 +2360,22 @@ namespace OpenKNX
             return ver;
         }
 
+        // Socket 0 status under the lwIP lock. Same locking as the VERSIONR probe.
+        uint8_t Module::readSocketStatusLocked()
+        {
+            ethernet_arch_lwip_begin();
+            const uint8_t sr = _ethLink.phy().readReg(W5500_BLOCK_SOCKET0, W5500_REG_SN_SR);
+            ethernet_arch_lwip_end();
+            return sr;
+        }
+
         // 'net phy': everything that can be asked without disturbing the link.
         void Module::showPhyStatus()
         {
             constexpr uint8_t BLOCK_COMMON = 0x00;
             constexpr uint16_t REG_PHYCFGR = 0x002E;
 
-            const uint8_t ver = readVersionLocked(W5500Phy::SPI_HZ_DEFAULT);
+            const uint8_t ver = readVersionLocked(0);
             ethernet_arch_lwip_begin();
             const uint8_t phycfgr = _ethLink.phy().readReg(BLOCK_COMMON, REG_PHYCFGR);
             ethernet_arch_lwip_end();
@@ -2320,10 +2392,17 @@ namespace OpenKNX
 #else
             logInfoP("RSTn: not wired on this board");
 #endif
-            logInfoP("SPI: %lu Hz driver, %lu Hz probe", (unsigned long)OPENKNX_NET_SPI_SPEED,
-                     (unsigned long)W5500Phy::SPI_HZ_DEFAULT);
-            logInfoP("State: %s, %u consecutive bad probes", _ethDegraded ? "degraded (self-heal running)" : "up",
-                     (unsigned)_ethBadProbes);
+            logInfoP("SPI: %lu Hz driver (probes use the same)", (unsigned long)_ethLink.phy().driverClock());
+            if (ver == 0x04)
+            {
+                const uint8_t sr = readSocketStatusLocked();
+                logInfoP("Sn_SR: 0x%02X (%s)", sr, sr == W5500_SOCK_MACRAW ? "socket 0 in MACRAW" : "socket not open");
+            }
+            // checkEthHealth() does not run while degraded, so _ethBadProbes stays 0 there.
+            if (_ethDegraded)
+                logInfoP("State: degraded, %u failed bring-ups", (unsigned)_healFailures);
+            else
+                logInfoP("State: up, %u consecutive bad probes", (unsigned)_ethBadProbes);
         }
 
         // 'net phy reset [ms]': RSTn low for ms, settle, then VERSIONR before/after. Detaches the stack
@@ -2334,7 +2413,7 @@ namespace OpenKNX
             if (lowMs == 0) lowMs = PHY_TOOL_RESET_MS_DEFAULT;
             if (lowMs > PHY_TOOL_RESET_MS_MAX) lowMs = PHY_TOOL_RESET_MS_MAX;
 
-            _phyToolVerBefore = readVersionLocked(W5500Phy::SPI_HZ_DEFAULT);
+            _phyToolVerBefore = readVersionLocked(0);
             _phyToolLowMs = lowMs;
             logInfoP("PHY reset: VERSIONR before 0x%02X, RSTn low %ums -- the network drops now",
                      _phyToolVerBefore, (unsigned)lowMs);
@@ -2404,7 +2483,7 @@ namespace OpenKNX
 
                 case PhyTool::ResetSettle:
                 {
-                    const uint8_t after = readVersionLocked(W5500Phy::SPI_HZ_DEFAULT);
+                    const uint8_t after = readVersionLocked(0);
                     logInfoP("PHY reset: VERSIONR 0x%02X -> 0x%02X after %ums low + %ums settle (%s)",
                              _phyToolVerBefore, after, (unsigned)_phyToolLowMs, (unsigned)PHY_TOOL_SETTLE_MS,
                              after == 0x04 ? "chip answers" : "chip still silent");
@@ -2532,7 +2611,7 @@ namespace OpenKNX
         }
 #endif
 
-#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
         // Drive W5500 RX + lwIP timers from the main loop (the driver is built INT-less here). Idle the
         // framework async timer on the first pass (not in setup(), which would strand boot-time DHCP).
         void Module::pumpEthernet()

@@ -34,10 +34,17 @@ static constexpr uint8_t PHYCFGR_DPX_FULL = 1 << 2; // status: 1 = full duplex
 static constexpr uint8_t PHYCFGR_SPD_100 = 1 << 1;  // status: 1 = 100 Mbit
 static constexpr uint8_t PHYCFGR_LNK = 1 << 0;      // status: 1 = link up
 
+// endTransaction() only unmasks interrupts; it does not restore the clock.
+void W5500Phy::restoreDriverClock()
+{
+    _spi->beginTransaction(SPISettings(_driverHz, MSBFIRST, SPI_MODE0));
+    _spi->endTransaction();
+}
+
 uint8_t W5500Phy::readReg(uint8_t block, uint16_t addr, uint32_t hz)
 {
     lockBegin();
-    _spi->beginTransaction(SPISettings(hz, MSBFIRST, SPI_MODE0));
+    _spi->beginTransaction(SPISettings(hz ? hz : _driverHz, MSBFIRST, SPI_MODE0));
     digitalWrite(_cs, LOW);
     _spi->transfer((addr & 0xFF00) >> 8);
     _spi->transfer(addr & 0x00FF);
@@ -45,6 +52,7 @@ uint8_t W5500Phy::readReg(uint8_t block, uint16_t addr, uint32_t hz)
     uint8_t v = _spi->transfer(0x00);
     digitalWrite(_cs, HIGH);
     _spi->endTransaction();
+    if (hz && hz != _driverHz) restoreDriverClock();
     lockEnd();
     return v;
 }
@@ -52,7 +60,7 @@ uint8_t W5500Phy::readReg(uint8_t block, uint16_t addr, uint32_t hz)
 void W5500Phy::writeReg(uint8_t block, uint16_t addr, uint8_t val, uint32_t hz)
 {
     lockBegin();
-    _spi->beginTransaction(SPISettings(hz, MSBFIRST, SPI_MODE0));
+    _spi->beginTransaction(SPISettings(hz ? hz : _driverHz, MSBFIRST, SPI_MODE0));
     digitalWrite(_cs, LOW);
     _spi->transfer((addr & 0xFF00) >> 8);
     _spi->transfer(addr & 0x00FF);
@@ -60,6 +68,7 @@ void W5500Phy::writeReg(uint8_t block, uint16_t addr, uint8_t val, uint32_t hz)
     _spi->transfer(val);
     digitalWrite(_cs, HIGH);
     _spi->endTransaction();
+    if (hz && hz != _driverHz) restoreDriverClock();
     lockEnd();
 }
 
