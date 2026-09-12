@@ -5,6 +5,7 @@
 #include "Esp32EthLink.h"
 #include <ETH.h>
 #include <Preferences.h>
+#include <nvs.h>
 #endif
 
 // Keep the same prefix as the module ("Network") so console/log output is unchanged after the extraction.
@@ -105,6 +106,13 @@ static uint8_t etsLinkMode()
 // value would silently outrank ETS. Erases once; afterwards the namespace stays empty.
 static void clearStaleLinkNvs()
 {
+    // Probe with the raw NVS call, not Preferences::begin(): on a device that never carried the old
+    // firmware the namespace does not exist, and the Arduino wrapper logs that normal state as an ERROR
+    // on every boot. nvs_open returns the same answer without the noise.
+    nvs_handle_t probe = 0;
+    if (nvs_open("ethlink", NVS_READONLY, &probe) != ESP_OK) return; // nothing was ever stored
+    nvs_close(probe);
+
     Preferences p;
     if (!p.begin("ethlink", true)) return;
     const bool stale = (p.getUChar("mode", 0xFF) != 0xFF);

@@ -6,6 +6,17 @@
 
 #include "DNS.h"
 #include "Module.h"
+
+// Periodic IGMP re-report (see Module::refreshMulticastMembership). Both platforms build lwIP, but the
+// call has to be made differently: RP2040 under the arduino-pico lwIP lock, ESP32 from the tcpip task.
+#if defined(KNX_IP_LAN)
+    #include <lwip/igmp.h>
+    #include <lwip/netif.h>
+    #ifdef ARDUINO_ARCH_ESP32
+        #include <esp_netif.h>
+        #include <lwip/tcpip.h>
+    #endif
+#endif
 #ifdef DEVICE_DISPLAY_MODULE
     #include "DeviceDisplay.h"
     #include "Widgets/WidgetNetSpeed.h"
@@ -854,6 +865,69 @@ namespace OpenKNX
                 SetByteProperty(PID_KNXNETIP_DEVICE_STATE, next);
         }
 
+        // A host announces its multicast membership when it joins, and after that only when a querier
+        // asks. Behind a switch with IGMP snooping but no querier nobody ever asks, the switch ages the
+        // port out of the group, and the device silently stops receiving SEARCH_REQUEST -- it still
+        // answers unicast, so it looks alive while being undiscoverable. MEASURED: 3 min 14 s after the
+        // link came up, on a TP-Link with snooping on. Re-announcing costs a few bytes a minute and makes
+        // the device independent of whether anything in the network asks.
+        //
+        // igmp_report_groups() schedules a delayed report (0..500 ms) for every group ON THIS NETIF that
+        // is an idle member -- ours and anyone else's, the lwIP mDNS responder's 224.0.0.251 among them.
+        // It skips the allsystems group, and it does NOT leave first, which a rejoin would: a Leave is
+        // exactly what prunes the group on a snooping switch.
+        // linkEstablished is the caller's already-debounced state: reading the carrier back here would be
+        // a second, undebounced PHYCFGR access per tick, against the one-carrier-read-per-tick rule that
+        // checkLinkStatus() states.
+        void Module::refreshMulticastMembership(bool linkEstablished)
+        {
+#if !defined(KNX_IP_LAN)
+            // WiFi builds compile this module too, but the lwIP headers above are pulled for LAN only and
+            // the netif is reached differently there. Not covered yet -- a no-op instead of a build break.
+            (void)linkEstablished;
+            return;
+#else
+            if (NET_IGMP_REPORT_MS == 0) return; // switched off for this product
+
+            if (!linkEstablished)
+            {
+                // Re-arm while down: ESP32's netif_set_down() frees the group list, so a report right after
+                // link-up finds only the skipped allsystems group and would waste a whole interval. The
+                // link-change announcement is the KNX stack's own join; this timer is for the steady state.
+                _lastIgmpReport = millis();
+                return;
+            }
+            if (!delayCheckMillis(_lastIgmpReport, NET_IGMP_REPORT_MS)) return;
+
+            // The stamp is set only where the report was actually handed over: setting it up front let a
+            // dropped dispatch buy a full interval of silence with nothing sent.
+#if defined(ARDUINO_ARCH_RP2040)
+            netif *intf = KNX_NETIF.getNetIf();
+            if (intf == nullptr) return;
+            // Wrapped by the arduino-pico core (lib/core_wrap.txt), so it takes the lwIP lock itself --
+            // as does the knx stack's igmp_leavegroup(), so the two cannot race on the group list.
+            igmp_report_groups(intf);
+            _lastIgmpReport = millis();
+#elif defined(ARDUINO_ARCH_ESP32)
+            // esp_netif hides the lwIP netif; only its index is public, and netif_get_by_index() is a
+            // lwIP call like the report itself -- so both happen inside the tcpip task, not on this one.
+            // The index cannot dangle, but it can alias: netif->num is recycled, so a report may land on
+            // whichever netif took that number. Costs a stray re-report, nothing more.
+            const int idx = esp_netif_get_netif_impl_index(KNX_NETIF.netif());
+            if (idx <= 0) return;
+            // try_, not tcpip_callback(): the latter posts with sys_mbox_post() and BLOCKS this task until
+            // the tcpip thread drains a full mailbox. On a 2 Hz tick in a module every product links that
+            // is not acceptable; the non-blocking variant returns ERR_MEM instead and we retry next tick.
+            const err_t posted = tcpip_try_callback([](void *arg) {
+                netif *n = netif_get_by_index((u8_t)(uintptr_t)arg);
+                if (n != nullptr) igmp_report_groups(n);
+            }, (void *)(uintptr_t)idx);
+            if (posted != ERR_OK) return; // queue or msg pool exhausted: keep the throttle armed, retry next tick
+            _lastIgmpReport = millis();
+#endif
+#endif
+        }
+
         void Module::checkLinkStatus()
         {
             if (!delayCheckMillis(_lastLinkCheck, 500)) return;
@@ -869,6 +943,8 @@ namespace OpenKNX
             // 03_08_03 3.5.3: the IP-fault bit means "IP network cannot be accessed" -- a link with an
             // address but no KNXnet/IP endpoint is exactly that, so it has to feed this too.
             checkKnxIpDeviceState(establishedState && knxIpEnabled());
+
+            refreshMulticastMembership(establishedState); // reuses this tick's debounced state
 
 #ifdef ARDUINO_ARCH_ESP32
             // Fängt einen Link-Flap auf, nach dem GOT_IP ausbleibt. Nur ESP32: RP2040 hat

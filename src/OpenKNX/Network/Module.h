@@ -8,6 +8,12 @@
 #ifndef OPENKNX_LEDFUNC_KNXIP_STATE
 #define OPENKNX_LEDFUNC_KNXIP_STATE 11
 #endif
+
+// Interval of the periodic IGMP re-report (Module::refreshMulticastMembership). Has to stay well under a
+// snooping switch's group timer; 3:14 was measured on a TP-Link. Override per product, 0 switches it off.
+#ifndef NET_IGMP_REPORT_MS
+#define NET_IGMP_REPORT_MS 60000
+#endif
 #include "OpenKNX/Network/Ping/Handler.h"
 #include "OpenKNX/Network/TelegramJson.h" // defines OPENKNX_TELEGRAMJSON
 // buildTelegramJson() converts the decoded value from Latin-15 to UTF-8.
@@ -336,6 +342,7 @@ namespace OpenKNX
             static constexpr uint32_t NO_IP_REBIND_MS = 180000;
 #endif
             uint32_t _lastLinkCheck = false;
+            uint32_t _lastIgmpReport = 0;
             uint32_t _ipFaultSince = 0; // millis() the IP network first looked unreachable; 0 = it does not
             bool _ipFaultReported = false; // last value written to the IP-fault bit; edge-only, keeps the 2 Hz tick allocation-free
             uint32_t _restartTimer = 0;
@@ -473,6 +480,7 @@ namespace OpenKNX
             void initIp();
             void loadSettings();
             void checkLinkStatus();
+            void refreshMulticastMembership(bool linkEstablished); // periodic IGMP re-report; see the comment at the definition
             void checkIpStatus();
             void loadCallbacks(bool state);
             void handleMDNS();
