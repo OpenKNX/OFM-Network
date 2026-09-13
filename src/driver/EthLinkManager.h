@@ -74,7 +74,14 @@ class EthLinkManager
     static constexpr uint8_t ETH_FLAP_THRESHOLD = 4;        // this many carrier flaps -> escalate a stage
     static constexpr uint32_t ETH_STABLE_MS = 5000;         // ESTABLISHED (link+IP) this long -> lock the stage
     static constexpr uint32_t ETH_SETTLE_MS = 4000;         // ignore flaps this long after we changed the mode
+#ifdef OPENKNX_NETWORK_AUTOIP
+    // AutoIP hands out an address only after its probe and announce sequence, so the window has to outlast
+    // that -- a shorter one escalates on a link that is merely waiting. A link that produces nothing at all
+    // within it is dead either way and still steps down.
+    static constexpr uint32_t ETH_STAGE_TIMEOUT_MS = 45000;
+#else
     static constexpr uint32_t ETH_STAGE_TIMEOUT_MS = 15000; // carrier up but no IP this long -> escalate (dead link)
+#endif
     static constexpr uint32_t ETH_UNLOCK_MS = 4000;         // established lost this long on a locked link -> restart
     uint8_t _stage = 0;                                     // 0=autoneg,1=100F,2=100H,3=10F,4=10H
     bool _locked = false;                                   // converged to a stable (established) stage

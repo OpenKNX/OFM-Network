@@ -671,22 +671,33 @@ namespace OpenKNX
         static constexpr uint32_t NET_INFO_STABLE_MS = 3000;
 
         // Carrier for the link edge logic. On RP2040 + W5500 the read is a PHYCFGR fetch over the SPI bus the
-        // driver shares, so a change is only accepted once LINK_DEBOUNCE_SAMPLES consecutive reads agree.
-        // Everywhere else the platform reports the link from an event and needs no debounce.
+        // driver shares, so a garbled read has to be absorbed. It is debounced DOWNWARDS ONLY: a corrupt read
+        // shows up as "not linked", which is what must not drop DHCP, while a read that says "linked" cannot
+        // be that kind of glitch. Debouncing both directions kept the accepted state at its initial false for
+        // good on a link that flaps faster than the window, and the fallback ladder, which only acts on carrier
+        // edges, then never saw one. Everywhere else the platform reports the link from an event.
         bool Module::linkCarrier()
         {
             const bool raw = connected();
 #if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
-            if (raw == _carrierStable)
+            if (raw)
             {
-                _carrierSamples = 0; // agreement resets the run: only CONSECUTIVE disagreement counts
-                return _carrierStable;
+                _carrierSamples = 0;
+                _carrierStable = true;
+                return true;
             }
-            if (++_carrierSamples < LINK_DEBOUNCE_SAMPLES) return _carrierStable;
+            if (!_carrierStable)
+            {
+                _carrierSamples = 0;
+                return false;
+            }
+            if (++_carrierSamples < LINK_DEBOUNCE_SAMPLES) return true; // still counted as up while in doubt
             _carrierSamples = 0;
-            _carrierStable = raw;
-#endif
+            _carrierStable = false;
+            return false;
+#else
             return raw;
+#endif
         }
 
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
