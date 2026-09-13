@@ -9,10 +9,10 @@
 #define OPENKNX_LEDFUNC_KNXIP_STATE 11
 #endif
 
-// Interval of the periodic IGMP re-report (Module::refreshMulticastMembership). Has to stay well under a
-// snooping switch's group timer; 3:14 was measured on a TP-Link. Override per product, 0 switches it off.
+// Interval of the periodic IGMP re-report, OPT-IN: 0 = off. Only earns its keep behind a snooping switch
+// without a querier; set it per product, well under the switch's group timer (3:14 seen on a TP-Link).
 #ifndef NET_IGMP_REPORT_MS
-#define NET_IGMP_REPORT_MS 60000
+#define NET_IGMP_REPORT_MS 0
 #endif
 #include "OpenKNX/Network/Ping/Handler.h"
 #include "OpenKNX/Network/TelegramJson.h" // defines OPENKNX_TELEGRAMJSON
