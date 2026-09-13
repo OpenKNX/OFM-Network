@@ -4,6 +4,13 @@
     padding: 0;
 }
 
+/* Keep the browser from resizing text on its own: mobile Safari inflates long paragraphs to compensate
+   for a scaled-down layout, which made a .8em help text render larger than the .88em table above it. */
+html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
 button, input, select, textarea {
     font-family: inherit;
     font-size: inherit;
@@ -249,4 +256,48 @@ main a:hover {
 
 .container {
     max-width: 960px;
+}
+
+/* Narrow window (phone): the sidebar stacks on top, the device block moves to a fixed footer.
+   Mostly overrides of wide-layout properties; body's padding-bottom and the fixed .nav-footer are new,
+   because the footer leaves the flow here and the content has to clear it. */
+@media (max-width: 640px) {
+    body {
+        flex-direction: column;
+        padding-bottom: 56px; /* keeps content clear of the fixed footer below */
+    }
+
+    nav {
+        width: auto;
+        min-width: 0;
+        height: auto;
+        position: static;
+        box-shadow: 0 3px 4px rgba(0, 0, 0, .18);
+    }
+
+    .menu-container {
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+        margin: 6px 0;
+    }
+
+    nav a.menu {
+        width: auto;
+        padding: 10px 14px;
+    }
+
+    .nav-footer {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 2; /* above nav (1), so main scrolls underneath */
+        background: #000;
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 6px 18px;
+        padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); /* clears the iPhone home bar */
+    }
 }

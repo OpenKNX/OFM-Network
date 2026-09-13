@@ -39,6 +39,10 @@ namespace OpenKNX
             std::string html =
                 "<!DOCTYPE html><html><head>"
                 "<meta charset='utf-8'>"
+                // Without this a phone browser lays the page out on a ~980 px virtual viewport and scales
+                // the result down, so no max-width media query ever matches and every responsive rule is
+                // dead on exactly the devices it was written for.
+                "<meta name='viewport' content='width=device-width,initial-scale=1'>"
                 "<title>OpenKNX</title>";
 
             std::string buster = "?v=" + std::to_string(BUILD_TIMESTAMP);
