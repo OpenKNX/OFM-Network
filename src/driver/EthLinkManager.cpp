@@ -106,9 +106,7 @@ static uint8_t etsLinkMode()
 // value would silently outrank ETS. Erases once; afterwards the namespace stays empty.
 static void clearStaleLinkNvs()
 {
-    // Probe with the raw NVS call, not Preferences::begin(): on a device that never carried the old
-    // firmware the namespace does not exist, and the Arduino wrapper logs that normal state as an ERROR
-    // on every boot. nvs_open returns the same answer without the noise.
+    // Raw nvs_open, not Preferences::begin(): that logs a missing namespace as an ERROR every boot.
     nvs_handle_t probe = 0;
     if (nvs_open("ethlink", NVS_READONLY, &probe) != ESP_OK) return; // nothing was ever stored
     nvs_close(probe);
