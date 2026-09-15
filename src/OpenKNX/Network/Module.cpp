@@ -234,7 +234,6 @@ namespace OpenKNX
                     // do nothing
                     break;
                 case ARDUINO_EVENT_ETH_START:
-                case ARDUINO_EVENT_WIFI_AP_START:
                     logDebugP("Event: Start");
                     // The hostname must be set after the interface is started, but needs
                     // to be set before DHCP, so set it from the event handler thread.
@@ -290,7 +289,7 @@ namespace OpenKNX
 #ifdef ARDUINO_ARCH_ESP32
 #ifdef KNX_IP_WIFI
             KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP);
-            KNX_NETIF.mode(WIFI_AP_STA);
+            KNX_NETIF.mode(WIFI_STA);
             KNX_NETIF.setAutoReconnect(true);
             if (strlen(_wifiSSID) > 0)
                 KNX_NETIF.begin(_wifiSSID, _wifiPassphrase);
