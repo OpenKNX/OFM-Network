@@ -1,6 +1,8 @@
 # Changes
 
-## upcoming releases
+## 0.8.1: 2026-09-15
+
+* fix (ESP32, security): a WiFi device no longer opens an **unsecured access point** (`ESP_xxxxxx`, 192.168.4.1) alongside its client connection. The interface ran in combined AP+STA mode without the AP ever being configured, so anyone in range could connect without credentials and reach the web interface, console and OTA. The device now runs as a plain WiFi client (#23)
 
 * feature: The web interface now keeps **one WebSocket open on every page** (`/openknx/ws`) instead of one per feature. Values that change on the device — programming mode, KNX address, network data, free memory — update live, without reloading. The programming-mode button in the navigation switches over the socket; without JavaScript the previous form post still works
 * change: `OPENKNX_WEBSERVER_MAX_CONN` is one flag for both platforms now (ESP32 7, RP2040 6) and limits the sum of HTTP and WebSocket connections; the mix is free, so a slot goes to whoever asks first. The separate WebSocket cap on ESP32 is gone — it reduced the number of possible visitors to guard a state that resolves itself on the next page reload
