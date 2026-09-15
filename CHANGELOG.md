@@ -1,6 +1,8 @@
 # Changes
 
-## upcoming releases
+## 0.8.1: 2026-09-15
+
+* fix (ESP32, security): a WiFi device no longer opens an **unsecured access point** (`ESP_xxxxxx`, 192.168.4.1) alongside its client connection. The interface ran in combined AP+STA mode without the AP ever being configured, so anyone in range could connect without credentials and reach the web interface, console and OTA. The device now runs as a plain WiFi client (#23)
 
 ## 0.8.0: 2026-08-17
 
