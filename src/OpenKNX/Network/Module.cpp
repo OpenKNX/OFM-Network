@@ -224,6 +224,21 @@ namespace OpenKNX
             memcpy(_hostName + 8, openknx.info.humanSerialNumber().c_str() + 5, 8);
             logTraceP("Default hostname: %s", _hostName);
 
+#if !defined(ParamNET_HostAddress) || !defined(ParamNET_SubnetMask) || !defined(ParamNET_GatewayAddress) || !defined(ParamNET_NameserverAddress) || !defined(ParamNET_StaticIP) || defined(OPENKNX_NETWORK_USEIPPROP)
+            // Read outside knx.configured(): the address lives on the KNXnet/IP parameter object, which no
+            // table load state touches, while configured() also demands the address, association and group
+            // object tables. Gated on it, a master reset with erase code 06h (reset links) took a statically
+            // addressed device to DHCP -- a link reset must not move the device.
+            logInfoP("Read ip settings from properties");
+            _useStaticIP = GetByteProperty(PID_IP_ASSIGNMENT_METHOD) == 1; // see 2.5.6 of 03_08_03
+            if (_useStaticIP)
+            {
+                _staticGatewayIP = GetIpProperty(PID_DEFAULT_GATEWAY);
+                _staticSubnetMask = GetIpProperty(PID_SUBNET_MASK);
+                _staticLocalIP = GetIpProperty(PID_IP_ADDRESS);
+            }
+#endif
+
             if (knx.configured())
             {
                 // custom hostname
@@ -235,17 +250,9 @@ namespace OpenKNX
                 }
 #endif
 
-#if !defined(ParamNET_HostAddress) || !defined(ParamNET_SubnetMask) || !defined(ParamNET_GatewayAddress) || !defined(ParamNET_NameserverAddress) || !defined(ParamNET_StaticIP) || defined(OPENKNX_NETWORK_USEIPPROP)
-
-                logInfoP("Read ip settings from properties");
-                _useStaticIP = GetByteProperty(PID_IP_ASSIGNMENT_METHOD) == 1; // see 2.5.6 of 03_08_03
-                if (_useStaticIP)
-                {
-                    _staticGatewayIP = GetIpProperty(PID_DEFAULT_GATEWAY);
-                    _staticSubnetMask = GetIpProperty(PID_SUBNET_MASK);
-                    _staticLocalIP = GetIpProperty(PID_IP_ADDRESS);
-                }
-#else
+#if defined(ParamNET_HostAddress) && defined(ParamNET_SubnetMask) && defined(ParamNET_GatewayAddress) && defined(ParamNET_NameserverAddress) && defined(ParamNET_StaticIP) && !defined(OPENKNX_NETWORK_USEIPPROP)
+                // The parameter form stays inside configured(): ETS parameters exist only with a loaded
+                // application program.
                 logInfoP("Read ip settings from parameters");
                 _useStaticIP = ParamNET_StaticIP;
                 if (_useStaticIP)
