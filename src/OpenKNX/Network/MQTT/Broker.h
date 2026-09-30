@@ -74,7 +74,7 @@ namespace OpenKNX
                 // Per-connection state
                 struct Conn
                 {
-                    bool active = false;
+                    volatile bool active = false; // RP2040: read by the accept IRQ
                     bool connected = false; // CONNECT received and accepted
                     char clientId[24] = {};
                     uint32_t lastActivity = 0;
@@ -88,7 +88,11 @@ namespace OpenKNX
 #if defined(ARDUINO_ARCH_ESP32)
                     void *wifiClient = nullptr; // WiFiClient*
 #elif defined(ARDUINO_ARCH_RP2040)
-                    void *pcb = nullptr; // tcp_pcb*
+                    // Set by the IRQ: pcb on accept (slot then !active until loop()
+                    // opens it) and nullptr on error; rxPbuf/rxClosed on receive.
+                    struct tcp_pcb *volatile pcb = nullptr;
+                    struct pbuf *rxPbuf = nullptr;
+                    volatile bool rxClosed = false;
 #endif
                 };
 
@@ -126,13 +130,11 @@ namespace OpenKNX
                 void readConn(Conn &c);
 #elif defined(ARDUINO_ARCH_RP2040)
                 void *_listenPcb = nullptr; // tcp_pcb*
-                static Broker *_instance;
                 static err_t lwipAccept(void *arg, struct tcp_pcb *newPcb, err_t err);
                 static err_t lwipRecv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err);
                 static void lwipErr(void *arg, err_t err);
-                static err_t lwipPoll(void *arg, struct tcp_pcb *pcb);
-                Conn *findConnByPcb(void *pcb);
-                void readConn(Conn &c, struct pbuf *p);
+                void openConn(Conn &c);
+                bool readConn(Conn &c); // true: peer gone, everything buffered read
 #endif
             };
 

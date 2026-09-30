@@ -56,10 +56,10 @@ namespace OpenKNX
                 do
                 {
                     if (consumed >= len) return false;
+                    if (consumed == 4) return false; // malformed: at most 4 bytes
                     byte = data[consumed++];
                     value += (byte & 0x7F) * multiplier;
                     multiplier <<= 7;
-                    if (multiplier > 0x200000) return false; // malformed
                 }
                 while (byte & 0x80);
                 return true;

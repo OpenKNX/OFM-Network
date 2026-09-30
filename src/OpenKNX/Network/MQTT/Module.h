@@ -86,7 +86,7 @@ namespace OpenKNX
                 Broker _broker;
 
                 // Send queue: publishing inline would block (ESP32) or drop under load
-                // (RP2040) -- see AGENTS.md. One block per entry, header + topic + payload.
+                // (RP2040) -- see README.MQTT.md. One block per entry, header + topic + payload.
                 struct QueueEntry
                 {
                     QueueEntry *next;

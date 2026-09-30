@@ -14,6 +14,7 @@
 #elif defined(ARDUINO_ARCH_RP2040)
 #include "OpenKNX/Network/DNS.h"
 #include <lwip/tcp.h>
+#include <lwip_wrap.h> // LWIPMutex: makes the ethernet IRQ defer
 #endif
 
 namespace OpenKNX
@@ -120,8 +121,7 @@ namespace OpenKNX
                 {
                     case STATE_DISCONNECTED:
                         // Reconnect timer elapsed → attempt a fresh connection.
-                        // Cleared first: tcpConnect() can fail inline (DNS cache hit) and
-                        // re-arm the timer itself, which must not be overwritten here.
+                        // Cleared first: a failing tcpConnect() re-arms it.
                         if (_reconnectTimer && delayCheck(_reconnectTimer, 5000))
                         {
                             _reconnectTimer = 0;
@@ -140,22 +140,24 @@ namespace OpenKNX
                         return;
 
                     case STATE_CONNECTING:
-#if defined(ARDUINO_ARCH_RP2040)
-                        // lwIP: connection result arrives via callback — nothing to poll here
-                        return;
-#elif defined(ARDUINO_ARCH_ESP32)
                         if (tcpConnected())
                         {
                             _state = STATE_CONNECTED;
                             sendConnect();
                         }
+#if defined(ARDUINO_ARCH_RP2040)
+                        else if (!_pcb) // lwipErr: refused or unreachable
+                        {
+                            logError("MQTT", "connect to %s:%u failed", _host, _port);
+                            reconnect();
+                        }
+#endif
                         else if (delayCheck(_lastActivity, 5000))
                         {
                             logError("MQTT", "connect timeout");
                             reconnect();
                         }
                         return;
-#endif
 
                     case STATE_CONNECTED:
                         // Waiting for CONNACK — enforce timeout
@@ -187,9 +189,8 @@ namespace OpenKNX
                         return;
                 }
 
-                // Read incoming data
-                uint8_t tmp[256];
-                int n = tcpRead(tmp, sizeof(tmp));
+                // Never read more than fits: the rest stays in the socket, unacknowledged.
+                int n = tcpRead(_rxBuf + _rxLen, RX_BUF_SIZE - _rxLen);
                 if (n < 0)
                 {
                     logError("MQTT", "socket error - reconnecting");
@@ -200,14 +201,13 @@ namespace OpenKNX
 
                 _lastActivity = millis();
 
-                // Append to reassembly buffer
-                if (_rxLen + (size_t)n > RX_BUF_SIZE)
+                if (_rxSkip)
                 {
-                    logError("MQTT", "RX overflow - reconnecting");
-                    reconnect();
-                    return;
+                    const size_t drop = ((size_t)n < _rxSkip) ? (size_t)n : _rxSkip;
+                    _rxSkip -= drop;
+                    n -= (int)drop;
+                    if (n) memmove(_rxBuf, _rxBuf + drop, n);
                 }
-                memcpy(_rxBuf + _rxLen, tmp, n);
                 _rxLen += n;
 
                 // Parse complete packets
@@ -224,6 +224,25 @@ namespace OpenKNX
                 }
                 _rxLen -= offset;
                 if (offset && _rxLen) memmove(_rxBuf, _rxBuf + offset, _rxLen);
+
+                // Full without a complete packet: skip that one packet -- a reconnect
+                // would just receive the same retained message again.
+                if (_rxLen == RX_BUF_SIZE)
+                {
+                    uint32_t remaining;
+                    size_t hdr;
+                    if (!readVarInt(_rxBuf + 1, _rxLen - 1, remaining, hdr))
+                    {
+                        logError("MQTT", "malformed packet - reconnecting");
+                        reconnect();
+                        return;
+                    }
+                    const size_t total = 1 + hdr + remaining;
+                    logWarning("MQTT", "incoming packet of %u B exceeds the %u B buffer, dropped",
+                               (unsigned)total, (unsigned)RX_BUF_SIZE);
+                    _rxSkip = total - _rxLen;
+                    _rxLen = 0;
+                }
             }
 
             // ----------------------------------------------------------------
@@ -274,6 +293,7 @@ namespace OpenKNX
                 tcpDisconnect();
                 _state = STATE_DISCONNECTED;
                 _rxLen = 0;
+                _rxSkip = 0;
                 _subscribedUpTo = 0;
                 armReconnectTimer();
                 ++_reconnectCount;
@@ -413,16 +433,17 @@ namespace OpenKNX
             // ----------------------------------------------------------------
 #elif defined(ARDUINO_ARCH_RP2040)
 
-            Client *Client::_instance = nullptr;
+            // The lwIP callbacks run in the ethernet IRQ and only hand over: data into
+            // _rxPbuf, the outcome into _tcpUp/_rxClosed/_pcb. The state machine, packet
+            // parsing and subscription callbacks run in loop(), every pcb access under
+            // LWIPMutex so the IRQ cannot free the pcb in between.
 
             bool Client::tcpConnect(const char *host, uint16_t /*port*/)
             {
                 tcpDisconnect(); // free any previous pcb (e.g. repeated begin())
-                _instance = this;
                 _state = STATE_RESOLVING;
                 _lastActivity = millis();
 
-                // May call back inline on a cache hit, so nothing must touch _state after this
                 const uint16_t id = ++_resolveId;
                 OpenKNX::Network::DNS::query(host, [this, id](IPAddress ip) {
                     if (id != _resolveId || _state != STATE_RESOLVING) return;
@@ -441,6 +462,13 @@ namespace OpenKNX
                     return;
                 }
 
+                ip_addr_t addr;
+                IP_ADDR4(&addr, ip[0], ip[1], ip[2], ip[3]);
+
+                _state = STATE_CONNECTING;
+                _lastActivity = millis();
+
+                LWIPMutex lock;
                 struct tcp_pcb *pcb = tcp_new();
                 if (!pcb)
                 {
@@ -448,22 +476,16 @@ namespace OpenKNX
                     armReconnectTimer();
                     return;
                 }
-                _pcb = pcb;
-
                 tcp_arg(pcb, this);
                 tcp_recv(pcb, lwipRecv);
                 tcp_err(pcb, lwipErr);
-                tcp_poll(pcb, lwipPoll, 4); // ~2 s
-
-                ip_addr_t addr;
-                IP_ADDR4(&addr, ip[0], ip[1], ip[2], ip[3]);
-
-                _state = STATE_CONNECTING;
-                _lastActivity = millis();
+                _pcb = pcb;
                 if (tcp_connect(pcb, &addr, _port, lwipConnected) != ERR_OK)
                 {
-                    tcp_abort(pcb);
                     _pcb = nullptr;
+                    tcp_arg(pcb, nullptr);
+                    tcp_err(pcb, nullptr);
+                    tcp_abort(pcb);
                     _state = STATE_DISCONNECTED;
                     armReconnectTimer();
                 }
@@ -471,33 +493,51 @@ namespace OpenKNX
 
             void Client::tcpDisconnect()
             {
-                if (_pcb)
+                LWIPMutex lock;
+                if (_rxPbuf)
                 {
-                    tcp_arg((struct tcp_pcb *)_pcb, nullptr);
-                    tcp_recv((struct tcp_pcb *)_pcb, nullptr);
-                    tcp_err((struct tcp_pcb *)_pcb, nullptr);
-                    tcp_close((struct tcp_pcb *)_pcb);
-                    _pcb = nullptr;
+                    // Otherwise tcp_close() sends RST and drops the queued DISCONNECT
+                    if (_pcb) tcp_recved((struct tcp_pcb *)_pcb, _rxPbuf->tot_len);
+                    pbuf_free(_rxPbuf);
+                    _rxPbuf = nullptr;
                 }
+                _tcpUp = false;
+                _rxClosed = false;
+
+                struct tcp_pcb *pcb = (struct tcp_pcb *)_pcb;
+                _pcb = nullptr;
+                if (!pcb) return;
+                tcp_arg(pcb, nullptr);
+                tcp_recv(pcb, nullptr);
+                tcp_err(pcb, nullptr);
+                if (tcp_close(pcb) != ERR_OK) tcp_abort(pcb);
             }
 
             bool Client::tcpConnected()
             {
-                return _pcb != nullptr;
+                return _pcb && _tcpUp;
             }
 
-            int Client::tcpRead(uint8_t *, size_t)
+            int Client::tcpRead(uint8_t *buf, size_t maxLen)
             {
-                // Data arrives via lwipRecv callback and is fed directly into _rxBuf
-                return 0;
+                LWIPMutex lock;
+                // Buffered data first, even after FIN or an error.
+                if (!_rxPbuf) return (_pcb && !_rxClosed) ? 0 : -1;
+                if (maxLen > 0xFFFF) maxLen = 0xFFFF;
+                const u16_t n = pbuf_copy_partial(_rxPbuf, buf, (u16_t)maxLen, 0);
+                _rxPbuf = pbuf_free_header(_rxPbuf, n);
+                // Acknowledged only once consumed: a slow loop closes the window instead of losing data.
+                if (_pcb) tcp_recved((struct tcp_pcb *)_pcb, n);
+                return n;
             }
 
             bool Client::tcpWrite(const uint8_t *data, size_t len)
             {
+                LWIPMutex lock;
                 if (!_pcb) return false;
-                err_t err = tcp_write((struct tcp_pcb *)_pcb, data, len, TCP_WRITE_FLAG_COPY);
-                if (err != ERR_OK) return false;
-                tcp_output((struct tcp_pcb *)_pcb);
+                struct tcp_pcb *pcb = (struct tcp_pcb *)_pcb;
+                if (tcp_write(pcb, data, len, TCP_WRITE_FLAG_COPY) != ERR_OK) return false;
+                tcp_output(pcb);
                 return true;
             }
 
@@ -509,80 +549,35 @@ namespace OpenKNX
             err_t Client::lwipConnected(void *arg, struct tcp_pcb *, err_t err)
             {
                 Client *self = static_cast<Client *>(arg);
-                if (!self) return ERR_OK;
-                if (err != ERR_OK)
-                {
-                    self->reconnect();
-                    return ERR_OK;
-                }
-                self->_state = STATE_CONNECTED;
-                self->sendConnect();
-                self->_lastActivity = millis();
+                if (self && err == ERR_OK) self->_tcpUp = true;
                 return ERR_OK;
             }
 
-            err_t Client::lwipRecv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
+            err_t Client::lwipRecv(void *arg, struct tcp_pcb *, struct pbuf *p, err_t err)
             {
                 Client *self = static_cast<Client *>(arg);
-                if (!self || !p)
+                if (!p)
                 {
-                    if (self) self->reconnect();
+                    if (self) self->_rxClosed = true;
                     return ERR_OK;
                 }
-                // Copy pbuf chain into _rxBuf
-                struct pbuf *q = p;
-                while (q)
+                if (!self || err != ERR_OK)
                 {
-                    if (self->_rxLen + q->len <= RX_BUF_SIZE)
-                    {
-                        memcpy(self->_rxBuf + self->_rxLen, q->payload, q->len);
-                        self->_rxLen += q->len;
-                    }
-                    q = q->next;
+                    pbuf_free(p);
+                    return ERR_OK;
                 }
-                tcp_recved(pcb, p->tot_len);
-                pbuf_free(p);
-                self->_lastActivity = millis();
-
-                // Parse packets inline (we're already in loop context via lwIP sys_check_timeouts)
-                size_t offset = 0;
-                while (offset < self->_rxLen)
-                {
-                    Packet pkt;
-                    size_t consumed;
-                    if (!parsePacket(self->_rxBuf + offset, self->_rxLen - offset, pkt, consumed)) break;
-                    self->processPacket(pkt);
-                    if (self->_state == STATE_DISCONNECTED || self->_state == STATE_RECONNECTING) break;
-                    offset += consumed;
-                }
-                if (self->_rxLen >= offset)
-                {
-                    self->_rxLen -= offset;
-                    if (offset && self->_rxLen) memmove(self->_rxBuf, self->_rxBuf + offset, self->_rxLen);
-                }
+                if (self->_rxPbuf)
+                    pbuf_cat(self->_rxPbuf, p);
                 else
-                {
-                    self->_rxLen = 0;
-                }
-
+                    self->_rxPbuf = p;
                 return ERR_OK;
             }
 
             void Client::lwipErr(void *arg, err_t)
             {
+                // The pcb is already freed; loop() sees the missing pcb and reconnects.
                 Client *self = static_cast<Client *>(arg);
-                if (self)
-                {
-                    self->_pcb = nullptr;
-                    self->reconnect();
-                }
-            }
-
-            err_t Client::lwipPoll(void *arg, struct tcp_pcb *)
-            {
-                Client *self = static_cast<Client *>(arg);
-                if (self) self->loop();
-                return ERR_OK;
+                if (self) self->_pcb = nullptr;
             }
 
 #endif // platform
