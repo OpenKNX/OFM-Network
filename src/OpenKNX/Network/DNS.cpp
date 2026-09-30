@@ -4,14 +4,16 @@
 
 #include <lwip/dns.h>
 #include <lwip/ip_addr.h>
+#include <utility>
+#include <vector>
 
 #ifdef ARDUINO_ARCH_ESP32
-#include <vector>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <lwip/tcpip.h>
-#include <utility>
+#else
+#include <lwip_wrap.h> // LWIPMutex: makes the ethernet IRQ defer
 #endif
 
 namespace OpenKNX
@@ -22,35 +24,40 @@ namespace OpenKNX
         {
             using Callback = std::function<void(IPAddress)>;
 
-#ifdef ARDUINO_ARCH_ESP32
-            // Mutex statt Critical Section: push_back/std::function allokieren,
-            // und Heap-Zugriffe sind in einer Critical Section unzulässig.
-            static SemaphoreHandle_t s_lock = nullptr;
+            // Results are only ever delivered from loop(): the lwIP callback runs in the
+            // TCP/IP task (ESP32) or the ethernet IRQ (RP2040).
             static std::vector<std::pair<IPAddress, Callback>> s_pending;
+
+#ifdef ARDUINO_ARCH_ESP32
+            // A mutex, not a critical section: push_back and std::function allocate.
+            static SemaphoreHandle_t s_lock = nullptr;
 
             static void ensureLock()
             {
                 if (s_lock == nullptr) s_lock = xSemaphoreCreateMutex();
             }
 
-            static void lock()
+            struct PendingLock
             {
-                ensureLock();
-                if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY);
-            }
-
-            static void unlock()
-            {
-                if (s_lock) xSemaphoreGive(s_lock);
-            }
+                PendingLock()
+                {
+                    ensureLock();
+                    if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY);
+                }
+                ~PendingLock()
+                {
+                    if (s_lock) xSemaphoreGive(s_lock);
+                }
+            };
+#else
+            using PendingLock = LWIPMutex;
+#endif
 
             static void enqueue(IPAddress ip, Callback&& cb)
             {
-                lock();
+                PendingLock lock;
                 s_pending.push_back({ip, std::move(cb)});
-                unlock();
             }
-#endif
 
             static void dnsFoundCallback(const char*, const ip_addr_t* ipaddr, void* arg)
             {
@@ -61,11 +68,7 @@ namespace OpenKNX
                     const ip4_addr_t* ip4 = ip_2_ip4(ipaddr);
                     ip = IPAddress(ip4_addr1(ip4), ip4_addr2(ip4), ip4_addr3(ip4), ip4_addr4(ip4));
                 }
-#ifdef ARDUINO_ARCH_ESP32
                 enqueue(ip, std::move(*cb));
-#else
-                (*cb)(ip);
-#endif
                 delete cb;
             }
 
@@ -74,8 +77,8 @@ namespace OpenKNX
                 auto* cb = new Callback(std::move(callback));
                 ip_addr_t resolved;
 #ifdef ARDUINO_ARCH_ESP32
-                // hier anlegen, solange nur der Loop-Task läuft — dnsFoundCallback
-                // kommt später aus dem TCP/IP-Task
+                // Created here while only the loop task runs; dnsFoundCallback comes
+                // later from the TCP/IP task.
                 ensureLock();
                 LOCK_TCPIP_CORE();
 #endif
@@ -83,37 +86,31 @@ namespace OpenKNX
 #ifdef ARDUINO_ARCH_ESP32
                 UNLOCK_TCPIP_CORE();
 #endif
-                if (err != ERR_INPROGRESS)
+                if (err == ERR_INPROGRESS) return;
+
+                IPAddress ip;
+                if (err == ERR_OK)
                 {
-                    Callback owned = std::move(*cb);
-                    delete cb;
-                    if (err == ERR_OK)
-                    {
-                        const ip4_addr_t* ip4 = ip_2_ip4(&resolved);
-                        IPAddress ip(ip4_addr1(ip4), ip4_addr2(ip4), ip4_addr3(ip4), ip4_addr4(ip4));
-#ifdef ARDUINO_ARCH_ESP32
-                        enqueue(ip, std::move(owned));
-#else
-                        owned(ip);
-#endif
-                    }
-                    else
-                    {
-                        owned(IPAddress());
-                    }
+                    const ip4_addr_t* ip4 = ip_2_ip4(&resolved);
+                    ip = IPAddress(ip4_addr1(ip4), ip4_addr2(ip4), ip4_addr3(ip4), ip4_addr4(ip4));
                 }
+                enqueue(ip, std::move(*cb));
+                delete cb;
             }
 
             void loop()
             {
-#ifdef ARDUINO_ARCH_ESP32
-                lock();
-                auto pending = std::move(s_pending);
-                s_pending.clear();
-                unlock();
+                // Unlocked peek: a torn read only delays a result by one tick, while taking
+                // LWIPMutex every tick would keep rescheduling the ethernet poll on RP2040.
+                if (s_pending.empty()) return;
+                std::vector<std::pair<IPAddress, Callback>> pending;
+                {
+                    PendingLock lock;
+                    if (s_pending.empty()) return;
+                    pending.swap(s_pending);
+                }
                 for (auto& [ip, cb] : pending)
                     cb(ip);
-#endif
             }
 
         } // namespace DNS
