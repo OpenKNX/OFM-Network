@@ -63,9 +63,9 @@
     // es dort, deshalb hier ein sichtbarer Marker: eine Lücke im Log soll man
     // sehen, statt sie stillschweigend hinzunehmen.
     OpenKNX.on('log', function (line) { appendOut(line); });
-    OpenKNX.onState(function (state) {
+    OpenKNX.onState(function (state, reason) {
         if (state === 'open') appendStatus('[verbunden]', 'green');
-        else appendStatus('[Verbindung getrennt — Lücke im Log]', 'red');
+        else appendStatus('[Verbindung getrennt' + (reason ? ' ' + reason : '') + ' — Lücke im Log]', 'red');
     });
 
     function send() {

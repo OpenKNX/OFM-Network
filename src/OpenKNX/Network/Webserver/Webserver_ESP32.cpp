@@ -597,6 +597,18 @@ namespace OpenKNX
             return wsSendText(fd, data, len);
         }
 
+        // The socket does not expose the ACK state; TCP keepalive (~9 s) finds dead peers
+        // here anyway, so the stall detector keeps its old behaviour.
+        uint32_t Webserver::wsPeerIdleMs(int) const
+        {
+            return UINT32_MAX;
+        }
+
+        void Webserver::wsLinkInfo(int, char* buf, size_t len) const
+        {
+            if (len) buf[0] = 0;
+        }
+
         void Webserver::dropClient(const char* uri, int fd)
         {
             notifySocketConnect(uri, fd, false);

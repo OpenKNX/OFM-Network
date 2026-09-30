@@ -21,14 +21,11 @@ namespace OpenKNX
 
         bool FileManager::ensureFs()
         {
+            // Mounted -- and formatted if need be -- by OGM-Common's Hardware::initFilesystem();
+            // this only confirms it and never formats on its own.
             static bool mounted = false;
             if (mounted) return true;
-#ifdef ARDUINO_ARCH_ESP32
-            mounted = LittleFS.begin(false);
-            if (!mounted) mounted = LittleFS.begin(true);
-#else
             mounted = LittleFS.begin();
-#endif
             return mounted;
         }
 

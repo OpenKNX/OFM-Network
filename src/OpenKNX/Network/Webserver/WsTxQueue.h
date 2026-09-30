@@ -34,6 +34,9 @@ namespace OpenKNX
             uint32_t maxRecord() const { return _maxRecord; }
             uint32_t capacity() const { return _size; }
             uint32_t freeBytes() const { return _size ? _size - (_wr - _oldest) : 0; }
+            // What append() would take from freeBytes() for this payload -- header and a
+            // padding record at the ring end included, so "fits" can be exact.
+            uint32_t cost(uint32_t payload) const;
 
             // key optional: ist er gesetzt, entsteht "key:data" ohne Zwischenpuffer.
             bool append(int16_t fd, uint8_t route, const char* key, const char* data, uint32_t len);

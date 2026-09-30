@@ -462,6 +462,20 @@ namespace OpenKNX
             return _txQueue.freeBytes();
         }
 
+        size_t Webserver::txCost(const char* key, size_t len) const
+        {
+            const size_t keyLen = key ? strlen(key) + 1 : 0; // + ':'
+            return _txQueue.cost((uint32_t)(keyLen + len));
+        }
+
+        bool Webserver::txFits(const char* key, size_t len) const
+        {
+            // An eighth of the ring, at most 512 B: room for status, tp and pong.
+            const size_t cap = _txQueue.capacity();
+            const size_t reserve = (cap / 8 < 512) ? cap / 8 : 512;
+            return txCost(key, len) + reserve <= txFree();
+        }
+
         bool Webserver::handleRequest(WebRequest& req, WebResponse& res)
         {
             // Extract path without query string for routing
@@ -717,10 +731,20 @@ namespace OpenKNX
 
                         // After the loop, not before: peek() has taken the skipped foreign
                         // records along, so what is left is what this client refused.
+                        // Only a silent peer counts -- ERR_MEM also blocks clients that still ACK.
                         if (!drop && _txQueue.stalled(i, millis(), 10000))
                         {
-                            logWarning("Webserver", "WS client %d accepted nothing for 10 s, disconnected", fd);
-                            drop = true;
+                            const uint32_t idle = wsPeerIdleMs(fd);
+                            if (idle >= 10000)
+                            {
+                                char info[112];
+                                wsLinkInfo(fd, info, sizeof(info));
+                                if (idle == UINT32_MAX) // platform cannot tell (ESP32)
+                                    logWarning("Webserver", "WS client %d accepted nothing for 10 s, disconnected", fd);
+                                else
+                                    logWarning("Webserver", "WS client %d accepted nothing for 10 s (peer silent %u ms%s), disconnected", fd, (unsigned)idle, info);
+                                drop = true;
+                            }
                         }
                     }
 

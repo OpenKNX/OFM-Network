@@ -154,7 +154,10 @@ namespace OpenKNX
             _json.reset();
             OpenKNX::Network::buildTelegramJson(frame, _json);
 
-            openknxNetwork.webserver.ui.sendMessage("tp", _json.c_str());
+            // Exact check: a long telegram (~1.4 KB JSON) exceeds what the quarter guarantees.
+            const std::string& msg = _json.str();
+            if (!openknxNetwork.webserver.txFits("tp", msg.size())) return;
+            openknxNetwork.webserver.ui.sendMessage("tp", msg.data(), msg.size());
         }
 
     } // namespace Network

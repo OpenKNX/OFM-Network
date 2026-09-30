@@ -184,6 +184,11 @@ Only `onConnect(fd, true)` is delivered from `loop()` and may do as much as it l
 initial per-client state belongs. Its counterpart, the disconnect notification, deliberately stays
 immediate so a recycled slot cannot have the *new* client's state torn down by a late callback.
 
+**Route handlers** (`addRoute()`) run in the loop on both platforms — on RP2040 with the lwIP lock
+held, so the ethernet interrupt cannot free the connection while its response is being built. Do not
+wait for the network inside one (blocking DNS, a synchronous HTTP client): the reply cannot be
+processed before the handler returns.
+
 ### Navigation Menu
 
 ```cpp
@@ -286,7 +291,9 @@ size_t cap = openknxNetwork.webserver.ui.maxMessage();
 ```
 
 Everything specific to this socket lives on `ui`. The send queue underneath serves every
-`addSocket()` endpoint, so its `webserver.txCapacity()` / `webserver.txFree()` stay on the webserver.
+`addSocket()` endpoint, so its `webserver.txCapacity()` / `webserver.txFree()` /
+`webserver.txFits(key, len)` stay on the webserver. A producer that can send a lot checks
+`txFits()` before each message — see [Send Queue](#send-queue) below.
 
 - **A receive handler is a network callback — keep it short.** See *Callback context* above; it
   applies to `receiveMessage()` exactly as it does to `addSocket()`. The `prog` handler in
@@ -343,7 +350,7 @@ out raw; formatting is the browser's job.
 OpenKNX.on('log', line => { … });      // register for a key
 OpenKNX.off('log', fn);
 OpenKNX.send('cmd', 'help');           // sends "cmd:help"
-OpenKNX.onState(s => { … });           // 'open' | 'closed'
+OpenKNX.onState((s, reason) => { … }); // 'open' | 'closed'; reason only on 'closed'
 OpenKNX.connected                      // bool
 ```
 
@@ -388,17 +395,27 @@ so a module with its own `addSocket()` endpoint benefits without doing anything.
   by it. Skipping records addressed to someone else advances that client's cursor too, so a client
   on a quiet endpoint never falls behind because of foreign traffic.
 - **A client is disconnected only when it stops reading**, for one of two reasons: it was overtaken
-  in the ring, or it accepted nothing for 10 s while records were waiting for it. Being merely slower
-  than a producer that is writing a lot is *not* a reason — producers throttle on the queue's free
-  space instead of filling it. Both in-tree producers do: the console enqueues at most a quarter of
-  the ring per tick and never more than is currently free (its lines are held in the logger ring
-  anyway and can wait), and the group monitor drops a telegram outright once free space falls below
-  a quarter of the ring. Without that, a burst would fill the ring, overtake a briefly slow browser
-  and tear it down — a reconnect loop instead of a dropped frame.
+  in the ring, or it accepted nothing for 10 s while records were waiting for it *and* the peer
+  itself has been silent that long (RP2040: no ACK and no byte received; ESP32: always assumed
+  silent, TCP keepalive finds dead peers there within ~9 s). The second condition is what keeps a
+  healthy browser connected when the blockage is local — with lwIP's 16 KB heap shared by MQTT, OTA
+  and downloads, `tcp_write()` can return `ERR_MEM` for seconds while the client is still
+  acknowledging everything. Such a client keeps its place on the device; only if it really falls
+  behind does the ring overrun catch it. On the UI socket the browser still gives up after ~3 s
+  without a `pong` (see *Liveness*) and reconnects — the device side merely no longer adds a second,
+  wrong verdict. Being merely slower
+  than a producer that is writing a lot is *not* a reason — producers throttle instead of filling
+  the ring, with `webserver.txFits(key, len)`: true when the message goes in without evicting and
+  still leaves a reserve for `status`/`tp`/`pong` (`webserver.txCost(key, len)` gives the exact
+  bytes, padding at the ring end included). Both in-tree producers do: the console checks every
+  line and waits otherwise (its lines are held in the logger ring anyway), and the group monitor
+  drops a telegram that does not fit. Without that, a burst would fill the ring, overtake a briefly
+  slow browser and tear it down — a reconnect loop instead of a dropped frame.
 
-  The console budget is a *per-tick* allowance, not a per-message limit: the first line of a tick
-  always goes out, however large. Otherwise a single line whose UTF-8 form exceeds the allowance
-  could never be sent and the read position would stand still for the rest of the boot.
+  The console additionally enqueues at most a quarter of the ring per tick. That is a *per-tick*
+  allowance, not a per-message limit: the first line of a tick may exceed it (never the free space).
+  Otherwise a single line whose UTF-8 form exceeds the allowance could never be sent and the read
+  position would stand still for the rest of the boot.
 - **A record is capped at `min(ring/2 - 5, maxWebsocketPayload(), 65535)`** — query it via
   `webserver.ui.maxMessage()`. With the default 4 KB ring that is 1496 B on RP2040 (the fixed WS
   frame buffer) and 2043 B on ESP32 (half the ring, since its frame size is unbounded). All three
@@ -487,10 +504,9 @@ class WebResponse {
 
 **Note:** `sendStatic()` must only be called with pointers to static data that remain valid for the entire
 application lifetime. Ideal for embedded assets (CSS, SVG, HTML templates) declared as `static const char[]`.
-The data is not copied into RAM, saving memory — especially on RP2040 with limited RAM. On RP2040 the static
-body is handed to lwIP **zero-copy** (`tcp_write` without `TCP_WRITE_FLAG_COPY`): lwIP keeps a `PBUF_REF` to the
-flash data until ACK instead of copying it into the pbuf pool — which is why the pointer must stay valid for the
-whole application lifetime.
+The data is not copied into RAM, saving memory — especially on RP2040 with limited RAM. lwIP itself still
+copies what it sends into its own buffers (`TCP_WRITE_FLAG_COPY`), on RP2040 piecewise with at most 2 × MSS in
+flight per connection, so a large page never occupies the whole lwIP heap at once.
 
 **Note on `setLayout(true)`:** header, body and footer are **not** concatenated into one buffer. `Webserver::handleRequest()`
 builds a segment list (`ResponseSegment[]`, max 3: header/body/footer) on the `WebResponse`; the platform sends each
@@ -539,7 +555,7 @@ regardless of whether layout is active.
   the send queue overtakes it, ends in a disconnect and is marked by `console.js` as a gap
 - New clients receive log lines from the moment of connection onward (no backlog). There is one read
   position for all clients now — a log line is relevant to every one of them, and the send queue holds
-  it. Per tick the console enqueues at most half the queue, so a burst like `showInformations` cannot
+  it. Per tick the console enqueues at most a quarter of the queue, so a burst like `showInformations` cannot
   flood it; the rest follows next tick out of the logger ring
 - Commands arrive as `cmd:<text>`; only printable ASCII (`0x20–0x7E`, `\r\n\t`) is accepted
 

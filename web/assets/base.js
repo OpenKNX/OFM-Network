@@ -7,6 +7,8 @@
     const stateCbs = [];
     let ws = null;
     let state = null; // last state reported to the registrants, null = nothing yet
+    let why = '';     // why the last 'closed' happened -- tells browser verdict from device close
+    let openedAt = 0;
     let delay = 1000;
     let lastRx = 0;
     let pingAt = 0;   // wann zuletzt gefragt wurde, 0 = keine Frage offen
@@ -21,10 +23,11 @@
 
     // Edge-triggered: with the network down every reconnect attempt fails again, and
     // reporting that as a fresh event filled the console with one gap marker per try.
-    function fire(next) {
+    function fire(next, reason) {
         if (next === state) return;
         state = next;
-        stateCbs.forEach(function (cb) { try { cb(next); } catch (e) {} });
+        why = reason || '';
+        stateCbs.forEach(function (cb) { try { cb(next, why); } catch (e) {} });
     }
 
     function reconnect() {
@@ -37,14 +40,16 @@
     // onclose waits for a handshake that never comes -- up to the TCP timeout. Reporting
     // and reconnecting must not wait for that, or the page shows "connected" for another
     // 20 seconds after the device is gone.
-    function fail() {
+    function fail(reason) {
         if (!ws) return;
         const dead = ws;
         ws = null; // beat() and send() must see "no socket" from here on
         dead.onopen = dead.onmessage = dead.onclose = null; // no late callbacks
         try { dead.close(); } catch (e) {}
         pingAt = 0;
-        fire('closed');
+        if (openedAt) reason = 'nach ' + ((nowMs() - openedAt) / 1000).toFixed(1) + ' s: ' + reason;
+        openedAt = 0;
+        fire('closed', reason);
         reconnect();
     }
 
@@ -56,13 +61,13 @@
             ws = new WebSocket(scheme + location.host + '/openknx/ws');
         } catch (e) {
             ws = null;
-            fire('closed');
+            fire('closed', 'Socket nicht erzeugbar');
             reconnect();
             return;
         }
         ws.onopen = function () {
             delay = 1000;
-            lastRx = lastTick = nowMs();
+            lastRx = lastTick = openedAt = nowMs();
             pingAt = 0;
             fire('open');
         };
@@ -76,7 +81,10 @@
             // Ein kaputter Handler darf den Socket nicht mitreissen.
             (handlers[key] || []).forEach(function (cb) { try { cb(data); } catch (err) {} });
         };
-        ws.onclose = fail;
+        // 1006 without a close frame is the device (or the network) dropping the TCP link.
+        ws.onclose = function (e) {
+            fail((openedAt ? 'vom Gerät geschlossen (' : 'Verbindungsaufbau fehlgeschlagen (') + e.code + ')');
+        };
     }
 
     window.OpenKNX = {
@@ -92,10 +100,11 @@
             ws.send(key + ':' + (data === undefined ? '' : data));
             return true;
         },
+        // cb(state, reason): reason is set for 'closed' only.
         onState: function (cb) {
             stateCbs.push(cb);
             // A late registrant gets the current state, not the next change.
-            if (state) try { cb(state); } catch (e) {}
+            if (state) try { cb(state, why); } catch (e) {}
         },
         get connected() { return !!ws && ws.readyState === 1; }
     };
@@ -124,7 +133,7 @@
         }
 
         if (pingAt) {
-            if (now - pingAt > PONG_WAIT) fail();
+            if (now - pingAt > PONG_WAIT) fail('kein Pong innerhalb ' + PONG_WAIT / 1000 + ' s');
             return;
         }
         if (now - lastRx > IDLE_PING) {
@@ -167,11 +176,13 @@
     }
 
     // Connection indicator in the navigation -- present on every page.
-    OpenKNX.onState(function (state) {
+    OpenKNX.onState(function (state, reason) {
         const dot = $('ws-dot');
         const open = state === 'open';
         if (dot) dot.className = 'prog-dot ' + (open ? 'dot-green' : 'dot-red');
         text('ws-text', open ? 'Verbunden' : 'Getrennt');
+        const t = $('ws-text');
+        if (t) t.title = open ? '' : reason;
     });
 
     OpenKNX.on('status', function (d) {

@@ -161,6 +161,9 @@ namespace OpenKNX
             // and not on ui. Producers throttle on it.
             size_t txCapacity() const;
             size_t txFree() const;
+            // Exact cost of "key:data" incl. padding; txFits(): no eviction, reserve left.
+            size_t txCost(const char* key, size_t len) const;
+            bool txFits(const char* key, size_t len) const;
 
             std::string buildHeader(const std::string& activeUri = "");
             std::string buildFooter();
@@ -196,6 +199,11 @@ namespace OpenKNX
             // Sendet sofort, an der Queue vorbei. Nur für den Drain -- ginge er über
             // sendToClient(), reihte er endlos wieder ein statt zu senden.
             WsSendResult wsSendNow(const char* uri, int fd, const char* data, size_t len);
+            // Time since the peer's last sign of life (ACK or received data). Tells "client
+            // stopped reading" apart from "we cannot send right now".
+            uint32_t wsPeerIdleMs(int fd) const;
+            // TCP state for the drop warning ("; wnd …"), empty where the stack hides it.
+            void wsLinkInfo(int fd, char* buf, size_t len) const;
             void dropClient(const char* uri, int fd);
 
           protected:

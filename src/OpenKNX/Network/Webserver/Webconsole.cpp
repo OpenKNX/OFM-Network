@@ -112,8 +112,10 @@ namespace OpenKNX
                 _readPos = writePos - Log::Logger::RING_SIZE;
             }
 
-            // Report it instead of skipping silently. Bypasses the budget on purpose;
-            // the ANSI escape colours it yellow in the browser.
+            Webserver& ws = openknxNetwork.webserver;
+
+            // Report it instead of skipping silently. Outside the per-tick share, but like
+            // every line only if it fits; the ANSI escape colours it yellow in the browser.
             if (_lostBytes && (millis() - _lostReported) >= 1000)
             {
                 _lostReported = millis();
@@ -121,26 +123,17 @@ namespace OpenKNX
                 int n = snprintf(note, sizeof(note),
                                  "\x1B[33m[... %u Bytes Log verworfen, Puffer zu klein ...]\x1B[0m\n",
                                  (unsigned)_lostBytes);
-                if (n > 0)
+                if (n > 0 && ws.txFits("log", (size_t)n))
                 {
-                    openknxNetwork.webserver.ui.sendMessage("log", note, (size_t)n);
+                    ws.ui.sendMessage("log", note, (size_t)n);
                     _lostBytes = 0; // only after enqueueing, or the report itself is a
                                     // silent loss path
                 }
             }
 
-            // Two bounds: a quarter of the ring per tick, and never more than is free.
-            // Without the second, a log burst would fill the ring and overtake a briefly
-            // slow client. The lines wait in the logger ring anyway.
-            const uint32_t reserve = 512; // headroom for status, tp and pong
-            const uint32_t freeNow = openknxNetwork.webserver.txFree();
-            uint32_t budget = openknxNetwork.webserver.txCapacity() / 4;
-            const uint32_t usable = (freeNow > reserve) ? freeNow - reserve : 0;
-            if (budget > usable) budget = usable;
-
-            // The budget bounds the amount per tick, not one line: a line tripling in
-            // size as UTF-8 could exceed it forever and stall _readPos. So the first line
-            // of a tick always goes out -- maxLine keeps it within ui.maxMessage().
+            // Each line must fit without evicting; only the first may exceed the per-tick quarter.
+            if (!ws.txFits("log", 0)) return; // full: don't build lines just to discard them
+            uint32_t budget = (uint32_t)ws.txCapacity() / 4;
             bool firstLine = true;
 
             while (_readPos != writePos)
@@ -172,13 +165,15 @@ namespace OpenKNX
                 line.reserve(raw.size());
                 OpenKNX::Charset::encodeUtf8(line, raw.data(), raw.size());
 
-                if (line.size() > budget && !firstLine) break;
-                budget = (budget > line.size()) ? budget - line.size() : 0;
+                if (!ws.txFits("log", line.size())) break;
+                const uint32_t cost = (uint32_t)ws.txCost("log", line.size());
+                if (cost > budget && !firstLine) break;
+                budget = (budget > cost) ? budget - cost : 0;
                 firstLine = false;
 
-                // Die Sendequeue hält die Zeile jetzt vor, _readPos rückt also
-                // unbedingt vor -- kein Retry, keine Per-Client-Buchführung.
-                openknxNetwork.webserver.ui.sendMessage("log", line.data(), line.size());
+                // The send queue holds the line now, so _readPos advances
+                // unconditionally -- no retry, no per-client bookkeeping.
+                ws.ui.sendMessage("log", line.data(), line.size());
                 _readPos = pos;
             }
         }

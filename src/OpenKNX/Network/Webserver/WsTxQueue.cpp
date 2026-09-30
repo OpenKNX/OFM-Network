@@ -82,6 +82,14 @@ namespace OpenKNX
                 _oldest += HDR_SIZE + readLen(_oldest);
         }
 
+        uint32_t WsTxQueue::cost(uint32_t payload) const
+        {
+            uint32_t c = HDR_SIZE + payload;
+            uint32_t payloadStart = idx(_wr + HDR_SIZE);
+            if (payloadStart + payload > _size) c += HDR_SIZE + (_size - payloadStart); // see append()
+            return c;
+        }
+
         bool WsTxQueue::append(int16_t fd, uint8_t route, const char* key, const char* data, uint32_t len)
         {
             if (!_ring) return false;
