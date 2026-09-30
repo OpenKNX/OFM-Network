@@ -2,6 +2,11 @@
 
 Built-in HTTP/WebSocket server for OpenKNX devices.
 
+Interna und Begründungen: [`docs/agents/Webserver.md`](docs/agents/Webserver.md),
+[`UiSocket.md`](docs/agents/UiSocket.md), [`WsTxQueue.md`](docs/agents/WsTxQueue.md),
+[`WebserverPlatform.md`](docs/agents/WebserverPlatform.md), [`Webconsole.md`](docs/agents/Webconsole.md),
+[`GroupMonitor.md`](docs/agents/GroupMonitor.md), [`FileManager.md`](docs/agents/FileManager.md).
+
 ---
 
 ## Compile Flags

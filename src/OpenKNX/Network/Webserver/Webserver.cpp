@@ -24,7 +24,7 @@ namespace OpenKNX
         // Guards ring pointers, cursor table and WebSocketRoute::clients together.
         // RP2040 is not plain single-thread: with PIN_ETH_INT the lwIP callbacks run in
         // the W5500 interrupt and preempt loop(); LWIPMutex makes the IRQ defer instead.
-        // Rationale in AGENTS.md, section "WS Send Queue".
+        // Rationale in docs/agents/WsTxQueue.md.
         namespace
         {
             struct WsQueueGuard
@@ -656,7 +656,7 @@ namespace OpenKNX
         // Client, mit fd zur Hand und ohne Kontextregel.
         //
         // Known gap: on RP2040 the IRQ can report the disconnect nested inside
-        // onConnect(true), so out of order -- still exactly once. See AGENTS.md.
+        // onConnect(true), so out of order -- still exactly once. See docs/agents/WsTxQueue.md.
         void Webserver::deliverPendingConnects()
         {
             int fds[WS_MAX_CLIENTS];

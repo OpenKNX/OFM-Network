@@ -2,6 +2,9 @@
 
 Built-in MQTT 3.1.1 implementation with no external dependencies. Supports two modes: **Client** (connects to an external broker) and **Broker** (acts as a minimal embedded broker). Both modes are available on ESP32 and RP2040.
 
+Interna und Begründungen: [`docs/agents/MQTT.md`](docs/agents/MQTT.md),
+[`TelegramJson.md`](docs/agents/TelegramJson.md).
+
 ---
 
 ## Enabling MQTT
@@ -80,7 +83,7 @@ The prefix is determined as follows (in order):
 
 ### `knx/tp/telegramm` Payload
 
-One JSON object per received TP telegram, built by the same decoder as `/groupmonitor` (`OpenKNX::Network::buildTelegramJson()`, see [`AGENTS.md`](AGENTS.md)):
+One JSON object per received TP telegram, built by the same decoder as `/groupmonitor` (`OpenKNX::Network::buildTelegramJson()`, see [`docs/agents/TelegramJson.md`](docs/agents/TelegramJson.md)):
 
 ```json
 {"src":{"addr":4353,"text":"1.1.1"},"dst":{"addr":2307,"text":"1/1/3"},"ga":true,
