@@ -238,7 +238,7 @@ namespace OpenKNX
                 bool net = openknxNetwork.established();
 
                 page += "<h2>Netzwerk</h2><table class='attribute-table'><tbody>";
-                row("Hostname", openknxNetwork.hostName());
+                row("Hostname", htmlEscape(openknxNetwork.hostName())); // same ETS text as the title above
                 row("MAC", macStr);
                 row("IP-Adresse", net ? openknxNetwork.localIP().toString().c_str()
                                               : "<span class='gray'>–</span>");
