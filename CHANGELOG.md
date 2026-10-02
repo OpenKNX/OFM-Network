@@ -38,6 +38,11 @@ Everything below is on `ec/v1dev-ec` and has not been released upstream yet.
 * fix: the SPI clock has one source. The health probe re-clocked the bus and the Wiznet driver never sets a clock of its own, so the configured 28 MHz was not in effect after the first probe; probes now use the driver clock and only a deliberate diagnostic rate is restored. The default is the 8 MHz the bus has actually been running at -- raising it is a separate change that needs its own soak test
 * fix: the post-mortem line logs a link duration that still exists at that moment and a rollover-safe uptime
 
+**Web UI**
+* feature: the browser tab shows the hostname instead of "OpenKNX", so several devices can be told apart in tabs, bookmarks and history -- the name mDNS and DHCP already use, changeable in ETS
+* fix: the hostname is HTML-escaped in the title and in the overview row -- it is the one value on those pages that comes from an ETS parameter
+* change: the HTML escaper is one inline function in `Webserver.h` instead of a copy per page
+
 **Post-merge audit**
 * fix: OTA gate, establish debounce, KNX-IP LED and OTA RX contention — four defects found by re-tracing the paths after the upstream merge
 * fix: `propertyValueRead` freed the buffer it allocated
