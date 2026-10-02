@@ -36,6 +36,16 @@ namespace OpenKNX
             }
             nav += "</div>";
 
+            // The tab title names the DEVICE, not the product: an installer has several OpenKNX pages open
+            // and "OpenKNX" on every tab tells them apart from nothing. The hostname is the identity mDNS,
+            // DHCP and the overview row already use, and ETS can change it (NET_HostName). Its default is
+            // OpenKNX- plus the 8 hex digits the serial row shows after "00FA:", set in init() long before a
+            // page can be served -- the empty fallback is belt and braces. Escaped because it is the one
+            // value on these pages that an installer types; the ETS parameter's pattern allows only
+            // [A-Za-z0-9-], so this guards a hand-edited knxprod, not a live hole.
+            const char *host = openknxNetwork.hostName();
+            const std::string title = htmlEscape(host[0] != '\0' ? host : "OpenKNX");
+
             std::string html =
                 "<!DOCTYPE html><html><head>"
                 "<meta charset='utf-8'>"
@@ -43,7 +53,7 @@ namespace OpenKNX
                 // the result down, so no max-width media query ever matches and every responsive rule is
                 // dead on exactly the devices it was written for.
                 "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-                "<title>OpenKNX</title>";
+                "<title>" + title + "</title>";
 
             std::string buster = "?v=" + std::to_string(BUILD_TIMESTAMP);
             html += "<link rel='icon' type='image/svg+xml' href='/assets/favicon.svg" + buster + "'>";
