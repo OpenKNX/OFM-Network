@@ -98,29 +98,6 @@ namespace OpenKNX
             return out;
         }
 
-        // Escaped für HTML-Textinhalt/Attribute. dir/displayName kommen aus dem
-        // Query-String bzw. aus Dateinamen, die der Upload-Handler ungeprüft annimmt —
-        // ohne dies bricht z.B. ein Verzeichnis- oder Dateiname mit '<' aus dem
-        // umgebenden Markup bzw. aus dem <script>-Block in buildOverviewPage aus.
-        static std::string htmlEscape(const std::string& s)
-        {
-            std::string r;
-            r.reserve(s.size());
-            for (char c : s)
-            {
-                switch (c)
-                {
-                    case '<': r += "&lt;"; break;
-                    case '>': r += "&gt;"; break;
-                    case '&': r += "&amp;"; break;
-                    case '"': r += "&quot;"; break;
-                    case '\'': r += "&#39;"; break;
-                    default: r += c; break;
-                }
-            }
-            return r;
-        }
-
         static std::string absPath(const std::string& dir, const std::string& entryName)
         {
             if (!entryName.empty() && entryName[0] == '/') return entryName;

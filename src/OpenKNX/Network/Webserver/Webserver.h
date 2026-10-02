@@ -23,6 +23,32 @@ namespace OpenKNX
     namespace Network
     {
 
+        // Escaped for HTML text content and attributes. Everything the pages put THERE that did not come
+        // from the firmware goes through this: file and directory names (the upload handler takes them
+        // unchecked) and the hostname (ETS parameter NET_HostName). NOT for a <script> block: a browser
+        // does not decode entities in script raw text, so a value inside one needs jsStrScriptBody()
+        // (FileManager.cpp) instead -- routing that through here would re-open the </script> break-out.
+        // One definition for both pages: OPENKNX_WEBFS implies OPENKNX_WEBSERVER, because
+        // FileManager::setup() registers itself on openknxNetwork.webserver.
+        inline std::string htmlEscape(const std::string& s)
+        {
+            std::string r;
+            r.reserve(s.size());
+            for (char c : s)
+            {
+                switch (c)
+                {
+                    case '<': r += "&lt;"; break;
+                    case '>': r += "&gt;"; break;
+                    case '&': r += "&amp;"; break;
+                    case '"': r += "&quot;"; break;
+                    case '\'': r += "&#39;"; break;
+                    default: r += c; break;
+                }
+            }
+            return r;
+        }
+
         // Ergebnis eines WS-Sendeversuchs. WouldBlock = Sendepuffer voll (langsamer
         // Client), das Frame ist unversehrt nicht rausgegangen und kann wiederholt
         // werden. Failed = Stream kaputt oder Verbindung weg → Client abräumen.
