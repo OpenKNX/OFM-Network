@@ -25,7 +25,7 @@ OPENKNX_WEBCLIENT_SLOTS            – parallel request slots (RP2040) / queue d
 OPENKNX_WEBCLIENT_TIMEOUT          – total request timeout in ms — default: 10000
 OPENKNX_WEBCLIENT_TASK_STACK       – ESP32 FreeRTOS worker task stack size in bytes — default: 6144
 OPENKNX_WEBCLIENT_MAX_BODY         – default max response body size buffered into Response.body() — default: 4096
-OPENKNX_WEBCLIENT_BUF_SIZE         – RP2040 per-slot TX/RX buffer size in bytes — default: 512
+OPENKNX_WEBCLIENT_BUF_SIZE         – RP2040 per-slot RX buffer size in bytes — default: 512
 ```
 
 ---
@@ -223,12 +223,13 @@ Plain HTTP is fully non-blocking. DNS resolution uses `OpenKNX::Network::DNS::qu
 
 Up to `OPENKNX_WEBCLIENT_SLOTS` requests can be active simultaneously. Additional requests are queued in an unbounded pending deque and started as slots become free.
 
-Each slot's TX/RX buffers (`OPENKNX_WEBCLIENT_BUF_SIZE` bytes each) are allocated in `startSlot()` and freed in `finishSlot()` — PSRAM if available (`PSRAM_CALLOC`, see [Helper.h](../OGM-Common/src/OpenKNX/Helper.h)), plain heap otherwise. They are not resident while a slot is idle. Allocation runs from `Handler::loop()`, before the connection is opened — never from an lwIP callback — so an allocation failure is caught synchronously and just fails the request (`onDone` with an empty `Response`).
+Each slot's RX buffer (`OPENKNX_WEBCLIENT_BUF_SIZE` bytes) is allocated in `startSlot()` and freed in `finishSlot()` — PSRAM if available (`PSRAM_CALLOC`, see [Helper.h](../OGM-Common/src/OpenKNX/Helper.h)), plain heap otherwise. It is not resident while a slot is idle. The request line and headers are a `std::string` sized to the request, built once the connection is up and released after sending. Allocation runs from `Handler::loop()`, before the connection is opened — never from an lwIP callback — so an allocation failure is caught synchronously and just fails the request (`onDone` with an empty `Response`).
 
 ---
 
 ## Limitations
 
+- URL: `http://` or `https://` only; host name up to 63 characters, no limit on path and query length. Request line and headers are built on the heap to their actual size
 - HTTP/1.1 with `Connection: close` — no keep-alive, one response per connection
 - Both plain and chunked `Transfer-Encoding` responses are decoded transparently
 - `HEAD`, `204 No Content`, and `304 Not Modified` responses never invoke `DataCallback`

@@ -128,7 +128,7 @@ namespace OpenKNX
 
             // ─── URL parser ────────────────────────────────────────────────────────────
 
-            bool Handler::parseUrl(const std::string &url, char *host, uint16_t &port, char *path, bool &ssl)
+            bool Handler::parseUrl(const std::string &url, char *host, uint16_t &port, std::string &path, bool &ssl)
             {
                 const char *p = url.c_str();
 
@@ -152,23 +152,25 @@ namespace OpenKNX
                 const char *hostStart = p;
                 const char *colon = nullptr;
 
-                while (*p && *p != '/' && *p != ':') p++;
-                if (*p == ':') { colon = p; while (*p && *p != '/') p++; }
-                const char *slash = (*p == '/') ? p : nullptr;
+                while (*p && *p != '/' && *p != ':' && *p != '?') p++;
+                const char *hostEnd = p;
+                if (*p == ':') { colon = p; while (*p && *p != '/' && *p != '?') p++; }
 
-                size_t hostLen = (colon ? colon : (slash ? slash : p)) - hostStart;
+                size_t hostLen = hostEnd - hostStart;
                 if (hostLen == 0 || hostLen >= 64) return false;
                 memcpy(host, hostStart, hostLen);
                 host[hostLen] = '\0';
 
                 if (colon)
                 {
-                    port = (uint16_t)atoi(colon + 1);
-                    if (port == 0) return false;
+                    long v = atol(colon + 1);
+                    if (v <= 0 || v > 65535) return false;
+                    port = (uint16_t)v;
                 }
 
-                strncpy(path, slash ? slash : "/", 255);
-                path[255] = '\0';
+                // No length limit; "http://host?x=1" becomes "/?x=1"
+                path = (*p == '?') ? "/" : "";
+                path += *p ? p : "/";
 
                 return true;
             }
@@ -251,15 +253,10 @@ namespace OpenKNX
                 Slot &s = _slots[idx];
                 s = Slot{};
 
-                s.txBuf = (uint8_t*)PSRAM_CALLOC(1, OPENKNX_WEBCLIENT_BUF_SIZE);
                 s.rxBuf = (uint8_t*)PSRAM_CALLOC(1, OPENKNX_WEBCLIENT_BUF_SIZE);
-                if (!s.txBuf || !s.rxBuf)
+                if (!s.rxBuf)
                 {
                     logError("Webclient", "Out of memory for request buffers");
-                    free(s.txBuf);
-                    free(s.rxBuf);
-                    s.txBuf = nullptr;
-                    s.rxBuf = nullptr;
                     if (req.onDone)
                     {
                         Response res;
@@ -272,9 +269,7 @@ namespace OpenKNX
                 if (!parseUrl(req.url, s.host, s.port, s.path, s.ssl))
                 {
                     logError("Webclient", "Invalid URL: %s", req.url.c_str());
-                    free(s.txBuf);
                     free(s.rxBuf);
-                    s.txBuf = nullptr;
                     s.rxBuf = nullptr;
                     if (req.onDone)
                     {
@@ -388,13 +383,14 @@ namespace OpenKNX
 
                     case Slot::State::SENDING_HDR:
                     {
-                        while (s.txSent < s.txLen)
+                        while (s.txSent < s.txHdr.size())
                         {
-                            int sent = platformSend(s, s.txBuf + s.txSent, s.txLen - s.txSent);
+                            int sent = platformSend(s, (const uint8_t *)s.txHdr.data() + s.txSent, s.txHdr.size() - s.txSent);
                             if (sent < 0) { finishSlot(idx, false); return; }
                             if (sent == 0) return;
-                            s.txSent += (uint16_t)sent;
+                            s.txSent += (size_t)sent;
                         }
+                        s.txHdr = std::string();
                         s.state = s.requestBody.empty() ? Slot::State::HEADERS : Slot::State::SENDING_BODY;
                         s.bodySent = 0;
                         break;
@@ -491,9 +487,7 @@ namespace OpenKNX
                 Slot &s = _slots[idx];
                 platformClose(s);
 
-                free(s.txBuf);
                 free(s.rxBuf);
-                s.txBuf = nullptr;
                 s.rxBuf = nullptr;
 
                 DoneCallback doneCb = std::move(s.onDone);
@@ -511,6 +505,8 @@ namespace OpenKNX
                 s.state = Slot::State::IDLE;
                 s.bodyIncomplete = false;
                 s.requestBody.clear();
+                s.txHdr = std::string();
+                s.path = std::string();
                 s.extraHeaders.clear();
                 s.responseHeaders.clear();
                 s.responseBody.clear();
@@ -536,37 +532,36 @@ namespace OpenKNX
 
             void Handler::formatRequestHeaders(Slot &s)
             {
-                char buf[512];
-                int len = snprintf(buf, sizeof(buf),
-                    "%s %s HTTP/1.1\r\n"
-                    "Host: %s\r\n"
-                    "Connection: close\r\n",
-                    s.method, s.path, s.host);
-
-                for (auto &hdr : s.extraHeaders)
-                {
-                    int n = snprintf(buf + len, sizeof(buf) - len, "%s: %s\r\n",
-                        hdr.first.c_str(), hdr.second.c_str());
-                    if (n > 0 && len + n < (int)sizeof(buf)) len += n;
-                }
-
-                if (!s.requestBody.empty())
-                {
-                    int n = snprintf(buf + len, sizeof(buf) - len, "Content-Length: %zu\r\n",
-                        s.requestBody.size());
-                    if (n > 0 && len + n < (int)sizeof(buf)) len += n;
-                }
-
-                if (len + 2 < (int)sizeof(buf))
-                {
-                    buf[len++] = '\r';
-                    buf[len++] = '\n';
-                }
-
-                if (len > OPENKNX_WEBCLIENT_BUF_SIZE) len = OPENKNX_WEBCLIENT_BUF_SIZE;
-                memcpy(s.txBuf, buf, len);
-                s.txLen = (uint16_t)len;
+                s.txHdr = buildRequestHead(s.method, s.path, s.host, s.extraHeaders, s.requestBody.size());
                 s.txSent = 0;
+            }
+
+            std::string Handler::buildRequestHead(const char *method, const std::string &path, const char *host,
+                                                  const std::vector<std::pair<std::string, std::string>> &headers, size_t bodySize)
+            {
+                std::string out;
+                out.reserve(path.size() + 96);
+                out += method;
+                out += ' ';
+                out += path;
+                out += " HTTP/1.1\r\nHost: ";
+                out += host;
+                out += "\r\nConnection: close\r\n";
+                for (auto &h : headers)
+                {
+                    out += h.first;
+                    out += ": ";
+                    out += h.second;
+                    out += "\r\n";
+                }
+                if (bodySize > 0)
+                {
+                    out += "Content-Length: ";
+                    out += std::to_string(bodySize);
+                    out += "\r\n";
+                }
+                out += "\r\n";
+                return out;
             }
 
             bool Handler::processHeaderByte(Slot &s, uint8_t b)

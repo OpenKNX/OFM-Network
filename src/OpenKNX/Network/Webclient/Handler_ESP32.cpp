@@ -101,34 +101,8 @@ namespace OpenKNX
 
                     // ── Send request headers ──────────────────────────────────────────
                     {
-                        char hdrBuf[768];
-                        int hdrLen = snprintf(hdrBuf, sizeof(hdrBuf),
-                            "%s %s HTTP/1.1\r\n"
-                            "Host: %s\r\n"
-                            "Connection: close\r\n",
-                            req->method, req->path, req->host);
-
-                        for (auto &h : req->headers)
-                        {
-                            int n = snprintf(hdrBuf + hdrLen, sizeof(hdrBuf) - hdrLen,
-                                "%s: %s\r\n", h.first.c_str(), h.second.c_str());
-                            if (n > 0 && hdrLen + n < (int)sizeof(hdrBuf)) hdrLen += n;
-                        }
-
-                        if (!req->body.empty())
-                        {
-                            int n = snprintf(hdrBuf + hdrLen, sizeof(hdrBuf) - hdrLen,
-                                "Content-Length: %zu\r\n", req->body.size());
-                            if (n > 0 && hdrLen + n < (int)sizeof(hdrBuf)) hdrLen += n;
-                        }
-
-                        if (hdrLen + 2 < (int)sizeof(hdrBuf))
-                        {
-                            hdrBuf[hdrLen++] = '\r';
-                            hdrBuf[hdrLen++] = '\n';
-                        }
-
-                        client->write((const uint8_t *)hdrBuf, hdrLen);
+                        std::string head = buildRequestHead(req->method, req->path, req->host, req->headers, req->body.size());
+                        client->write((const uint8_t *)head.data(), head.size());
                     }
 
                     // ── Send body ─────────────────────────────────────────────────────

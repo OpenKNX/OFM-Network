@@ -2,6 +2,8 @@
 
 ## upcoming releases
 
+* feature: the HTTP client no longer limits the URL path — a path (with query) over 255 characters used to be cut off silently, and the request head was capped at 512 (RP2040) / 768 (ESP32) bytes. Request line and headers are now built to their actual size. `http://host?x=1` is parsed as `/?x=1` instead of taking the query for part of the host name, and a port above 65535 is rejected instead of wrapping around. The host name stays limited to 63 characters
+
 * feature: The web interface now keeps **one WebSocket open on every page** (`/openknx/ws`) instead of one per feature. Values that change on the device — programming mode, KNX address, network data, free memory — update live, without reloading. The programming-mode button in the navigation switches over the socket; without JavaScript the previous form post still works
 * change: `OPENKNX_WEBSERVER_MAX_CONN` is one flag for both platforms now (ESP32 7, RP2040 6) and limits the sum of HTTP and WebSocket connections; the mix is free, so a slot goes to whoever asks first. The separate WebSocket cap on ESP32 is gone — it reduced the number of possible visitors to guard a state that resolves itself on the next page reload
 * fix: the group monitor no longer depends on the file manager for group-address names. It serves `/openknx_ga.tsv` from its own route, so the Name column also works on devices built without `OPENKNX_WEBFS` — previously the page requested `/filemanager/download` and got a 404. A device without a group-address table answers with an empty table rather than an error, so opening the page no longer writes a warning to the log

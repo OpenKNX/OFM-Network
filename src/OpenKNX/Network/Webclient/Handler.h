@@ -121,7 +121,7 @@ namespace OpenKNX
 
                 char host[64] = {};
                 uint16_t port = 80;
-                char path[256] = {};
+                std::string path;
                 bool ssl = false;
                 VerifyMode verifyMode = VerifyMode::NONE;
                 const char *verify = nullptr;
@@ -134,15 +134,14 @@ namespace OpenKNX
                 uint32_t bodyMaxSize = 0;
                 std::vector<std::pair<std::string, std::string>> responseHeaders;
 
-                // Allocated in startSlot()/freed in finishSlot() — PSRAM if available, only
-                // resident while a request is in flight.
-                uint8_t* txBuf = nullptr;
-                uint16_t txLen = 0;
-                uint16_t txSent = 0;
+                std::string txHdr; // request line + headers, built when the connection is up
+                size_t txSent = 0;
                 std::string requestBody;
                 uint32_t bodySent = 0;
                 std::vector<std::pair<std::string, std::string>> extraHeaders;
 
+                // Allocated in startSlot()/freed in finishSlot() — PSRAM if available, only
+                // resident while a request is in flight.
                 uint8_t* rxBuf = nullptr;
 
                 bool headersComplete = false;
@@ -219,7 +218,9 @@ namespace OpenKNX
                 std::deque<PendingRequest> _pending;
                 uint32_t _nextRequestId = 1;
 
-                bool parseUrl(const std::string &url, char *host, uint16_t &port, char *path, bool &ssl);
+                bool parseUrl(const std::string &url, char *host, uint16_t &port, std::string &path, bool &ssl);
+                static std::string buildRequestHead(const char *method, const std::string &path, const char *host,
+                                                    const std::vector<std::pair<std::string, std::string>> &headers, size_t bodySize);
                 void startSlot(int idx, PendingRequest &&req);
                 void processSlot(int idx);
                 void finishSlot(int idx, bool success);
@@ -253,7 +254,7 @@ namespace OpenKNX
                     uint32_t timeoutMs;
                     char host[64];
                     uint16_t port;
-                    char path[256];
+                    std::string path;
                     bool ssl;
                     VerifyMode verifyMode;
                     const char *verify;
