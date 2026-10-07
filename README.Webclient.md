@@ -209,7 +209,7 @@ Without a verify call, TLS connections skip certificate verification (insecure m
 
 ### ESP32
 
-Requests are processed in a dedicated FreeRTOS worker task (Core 0, `OPENKNX_WEBCLIENT_TASK_STACK` bytes). The task handles DNS resolution, TCP/SSL connect, header and body streaming. All `DataCallback` and `DoneCallback` calls are dispatched back to the main thread via an internal result queue drained in `loop()` — **user callbacks never need to be thread-safe**.
+Requests are processed in a dedicated FreeRTOS worker task (Core 0, `OPENKNX_WEBCLIENT_TASK_STACK` bytes). The task handles DNS resolution, TCP/SSL connect, header and body streaming. All `DataCallback` and `DoneCallback` calls are dispatched back to the main thread via an internal result queue drained in `loop()` — **user callbacks never need to be thread-safe**. A callback may start the next request itself (e.g. a follow-up call from `onDone`).
 
 The task always reads the response body to completion before signalling done. `DataCallback` entries are only queued when an `onData` callback is registered, avoiding unnecessary queue pressure for fire-and-forget requests. Body buffering (`.maxBodySize()`) is accumulated in the task and moved into the `Response` object before dispatch.
 
@@ -217,7 +217,7 @@ Up to `OPENKNX_WEBCLIENT_SLOTS` requests can be queued. Additional requests beyo
 
 ### RP2040 (WiFi + W5500)
 
-Plain HTTP is fully non-blocking. DNS resolution uses `OpenKNX::Network::DNS::query()`. TCP connections use the lwIP raw `tcp_` API (`tcp_connect`, `tcp_write`, `tcp_output`, `tcp_recv` callback) — the same pattern as the MQTT client and RP2040 webserver. Data arrives via `lwipRecv` callback and is stored as a zero-copy pbuf chain directly in the slot. The chain is drained in `loop()` via `platformRead`, which advances the TCP receive window (`tcp_recved`) incrementally as bytes are consumed — this provides natural flow control without any intermediate buffer or data loss. The slot state machine advances (`RESOLVING → CONNECTING → SSL_HANDSHAKE → SENDING_HDR → SENDING_BODY → HEADERS → BODY`) entirely without blocking.
+Plain HTTP is fully non-blocking. DNS resolution uses `OpenKNX::Network::DNS::query()`. TCP connections use the lwIP raw `tcp_` API (`tcp_connect`, `tcp_write`, `tcp_output`, `tcp_recv` callback) — the same pattern as the MQTT client and RP2040 webserver. Data arrives via `lwipRecv` callback and is stored as a zero-copy pbuf chain directly in the slot. The chain is drained in `loop()` via `platformRead`, which advances the TCP receive window (`tcp_recved`) incrementally as bytes are consumed — this provides natural flow control without any intermediate buffer or data loss. The lwIP callbacks run in the ethernet interrupt and only hand over pbufs and connection state (established, FIN, error); every access to the pcb and the pbuf chain from `loop()` sits under `LWIPMutex`, while BearSSL's record processing runs outside it. The slot state machine advances (`RESOLVING → CONNECTING → SSL_HANDSHAKE → SENDING_HDR → SENDING_BODY → HEADERS → BODY`) entirely without blocking.
 
 **HTTPS is fully non-blocking**: The BearSSL state machine is driven one step per `loop()` call in the `SSL_HANDSHAKE` state. Each iteration checks the engine state (`BR_SSL_SENDREC`/`BR_SSL_RECVREC`/`BR_SSL_SENDAPP`), sends or receives one batch of TLS records, and returns immediately. The W5500 background context delivers incoming TLS records via the `lwipRecv` pbuf chain between `loop()` calls. Handshake typically completes in 20–100 loop iterations.
 

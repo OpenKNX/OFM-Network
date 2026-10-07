@@ -21,14 +21,11 @@ namespace OpenKNX
 
         bool FileManager::ensureFs()
         {
+            // Mounted -- and formatted if need be -- by OGM-Common's Hardware::initFilesystem();
+            // this only confirms it and never formats on its own.
             static bool mounted = false;
             if (mounted) return true;
-#ifdef ARDUINO_ARCH_ESP32
-            mounted = LittleFS.begin(false);
-            if (!mounted) mounted = LittleFS.begin(true);
-#else
             mounted = LittleFS.begin();
-#endif
             return mounted;
         }
 
@@ -456,6 +453,11 @@ namespace OpenKNX
 
         void FileManager::setup()
         {
+            // Like Webconsole and GroupMonitor: setup() runs again when the server start
+            // fails and Module::loop() retries it, stacking menu, routes and assets.
+            if (_initialized) return;
+            _initialized = true;
+
             ensureFs();
 
             openknxNetwork.webserver.addMenuItem("Dateimanager", "/filemanager", 50);

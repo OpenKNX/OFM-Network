@@ -105,13 +105,17 @@ namespace OpenKNX
                 openknx.common.skipLooptimeWarning();
                 openknx.loop();
                 NTP.begin((const char*)ParamNET_NTPServer, (const char*)ParamNET_NTPServer); // not working on setup()
-                NTP.waitSet(
+                const bool synced = NTP.waitSet(
                     []() {
                         openknx.common.skipLooptimeWarning();
                         openknx.loop();
                     });
                 openknx.common.skipLooptimeWarning();
-                timeSet();
+                // Without an answer the clock is still unset (1970) -- don't report it.
+                if (synced)
+                    timeSet();
+                else
+                    logErrorP("No answer from %s", (const char*)ParamNET_NTPServer);
                 _lastSync = millis();
                 _syncInProgress = false;
             }

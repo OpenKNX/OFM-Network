@@ -12,10 +12,11 @@ namespace OpenKNX
     {
         namespace DNS
         {
-            // Resolves a hostname asynchronously. Callback receives 0.0.0.0 on failure.
+            // Resolves a hostname asynchronously. Callback receives 0.0.0.0 on failure and
+            // always runs from loop(), never inline and never in a network callback.
             void query(const std::string& name, std::function<void(IPAddress)> callback);
 
-            // Called from Network::Module::loop() — processes queued results on ESP32.
+            // Called from Network::Module::loop() — delivers queued results.
             void loop();
         } // namespace DNS
     } // namespace Network

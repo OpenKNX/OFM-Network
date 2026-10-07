@@ -15,6 +15,7 @@
 #endif
 #elif defined(ARDUINO_ARCH_RP2040)
 #include <lwip/tcp.h>
+#include <lwip_wrap.h> // LWIPMutex: makes the ethernet IRQ defer
 #endif
 
 namespace OpenKNX
@@ -50,7 +51,6 @@ namespace OpenKNX
                 srv->begin();
                 _server = srv;
 #elif defined(ARDUINO_ARCH_RP2040)
-                _instance = this;
                 struct tcp_pcb *pcb = tcp_new();
                 if (!pcb)
                 {
@@ -108,11 +108,17 @@ namespace OpenKNX
                 acceptNew();
                 for (auto &c : _conns)
                 {
-                    if (!c.active) continue;
 #if defined(ARDUINO_ARCH_ESP32)
+                    if (!c.active) continue;
                     readConn(c);
+                    if (c.active) serviceConn(c);
+#elif defined(ARDUINO_ARCH_RP2040)
+                    if (!c.active && c.pcb) openConn(c);
+                    if (!c.active) continue;
+                    const bool gone = readConn(c);
+                    serviceConn(c); // data received before FIN still counts
+                    if (gone && c.active) closeConn(c);
 #endif
-                    serviceConn(c);
                 }
             }
 
@@ -214,18 +220,30 @@ namespace OpenKNX
                     c.wifiClient = nullptr;
                 }
 #elif defined(ARDUINO_ARCH_RP2040)
-                if (c.pcb)
+                LWIPMutex lock;
+                if (c.rxPbuf)
                 {
-                    tcp_arg((struct tcp_pcb *)c.pcb, nullptr);
-                    tcp_recv((struct tcp_pcb *)c.pcb, nullptr);
-                    tcp_close((struct tcp_pcb *)c.pcb);
-                    c.pcb = nullptr;
+                    // Unread data left in the window makes tcp_close() send RST and drop
+                    // what we still had queued (e.g. a refusing CONNACK).
+                    if (c.pcb) tcp_recved(c.pcb, c.rxPbuf->tot_len);
+                    pbuf_free(c.rxPbuf);
+                    c.rxPbuf = nullptr;
+                }
+                c.rxClosed = false;
+                struct tcp_pcb *pcb = c.pcb;
+                c.pcb = nullptr;
+                if (pcb)
+                {
+                    tcp_arg(pcb, nullptr);
+                    tcp_recv(pcb, nullptr);
+                    tcp_err(pcb, nullptr);
+                    if (tcp_close(pcb) != ERR_OK) tcp_abort(pcb);
                 }
 #endif
-                c.active = false;
                 c.connected = false;
                 c.subscriptions.clear();
                 c.rxLen = 0;
+                c.active = false; // last: from here on the accept IRQ may reuse the slot
             }
 
             bool Broker::sendToConn(Conn &c, const uint8_t *data, size_t len)
@@ -234,10 +252,11 @@ namespace OpenKNX
                 if (!c.wifiClient) return false;
                 return static_cast<WiFiClient *>(c.wifiClient)->write(data, len) == len;
 #elif defined(ARDUINO_ARCH_RP2040)
-                if (!c.pcb) return false;
-                err_t err = tcp_write((struct tcp_pcb *)c.pcb, data, len, TCP_WRITE_FLAG_COPY);
-                if (err != ERR_OK) return false;
-                tcp_output((struct tcp_pcb *)c.pcb);
+                LWIPMutex lock;
+                struct tcp_pcb *pcb = c.pcb;
+                if (!pcb) return false;
+                if (tcp_write(pcb, data, len, TCP_WRITE_FLAG_COPY) != ERR_OK) return false;
+                tcp_output(pcb);
                 return true;
 #else
                 return false;
@@ -591,83 +610,82 @@ namespace OpenKNX
             // ----------------------------------------------------------------
 #if defined(ARDUINO_ARCH_RP2040)
 
-            Broker *Broker::_instance = nullptr;
+            // The lwIP callbacks run in the ethernet IRQ and only hand over: a new pcb
+            // into a free slot, pbufs into rxPbuf, FIN/error as flags. Parsing, routing and
+            // slot bookkeeping run in loop(), every pcb access under LWIPMutex.
 
-            Broker::Conn *Broker::findConnByPcb(void *pcb)
+            void Broker::openConn(Conn &c)
             {
-                for (auto &c : _conns)
-                    if (c.active && c.pcb == pcb) return &c;
-                return nullptr;
+                c.connected = false;
+                c.clientId[0] = '\0';
+                c.keepAlive = 0;
+                c.rxLen = 0;
+                c.subscriptions.clear();
+                c.lastActivity = millis();
+                c.active = true;
+            }
+
+            bool Broker::readConn(Conn &c)
+            {
+                LWIPMutex lock;
+                if (c.rxPbuf && c.rxLen < sizeof(c.rxBuf))
+                {
+                    const u16_t n = pbuf_copy_partial(c.rxPbuf, c.rxBuf + c.rxLen, (u16_t)(sizeof(c.rxBuf) - c.rxLen), 0);
+                    c.rxPbuf = pbuf_free_header(c.rxPbuf, n);
+                    c.rxLen += n;
+                    // Acknowledged only once taken: a busy loop closes the window, nothing is lost.
+                    if (c.pcb) tcp_recved(c.pcb, n);
+                }
+                return !c.rxPbuf && (!c.pcb || c.rxClosed);
             }
 
             err_t Broker::lwipAccept(void *arg, struct tcp_pcb *newPcb, err_t err)
             {
                 Broker *self = static_cast<Broker *>(arg);
-                if (!self || err != ERR_OK) return ERR_VAL;
+                if (!self || err != ERR_OK || !newPcb) return ERR_VAL;
 
                 for (auto &c : self->_conns)
                 {
-                    if (!c.active)
-                    {
-                        c.active = true;
-                        c.connected = false;
-                        c.rxLen = 0;
-                        c.lastActivity = millis();
-                        c.subscriptions.clear();
-                        c.pcb = newPcb;
-                        tcp_arg(newPcb, &c);
-                        tcp_recv(newPcb, lwipRecv);
-                        tcp_err(newPcb, lwipErr);
-                        tcp_poll(newPcb, lwipPoll, 4);
-                        return ERR_OK;
-                    }
+                    if (c.active || c.pcb) continue;
+                    // Left over when the previous peer failed before loop() opened the slot
+                    if (c.rxPbuf) pbuf_free(c.rxPbuf);
+                    c.rxPbuf = nullptr;
+                    c.rxClosed = false;
+                    tcp_arg(newPcb, &c);
+                    tcp_recv(newPcb, lwipRecv);
+                    tcp_err(newPcb, lwipErr);
+                    c.pcb = newPcb; // loop() sees pcb without active and opens the slot
+                    return ERR_OK;
                 }
-                // No free slot
                 tcp_abort(newPcb);
                 return ERR_ABRT;
             }
 
-            err_t Broker::lwipRecv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t)
+            err_t Broker::lwipRecv(void *arg, struct tcp_pcb *, struct pbuf *p, err_t err)
             {
                 Conn *c = static_cast<Conn *>(arg);
-                if (!c || !_instance) return ERR_OK;
                 if (!p)
                 {
-                    _instance->closeConn(*c);
+                    if (c) c->rxClosed = true;
                     return ERR_OK;
                 }
-
-                struct pbuf *q = p;
-                while (q)
+                if (!c || err != ERR_OK)
                 {
-                    size_t space = sizeof(c->rxBuf) - c->rxLen;
-                    size_t copy = q->len < space ? q->len : space;
-                    memcpy(c->rxBuf + c->rxLen, q->payload, copy);
-                    c->rxLen += copy;
-                    q = q->next;
+                    pbuf_free(p);
+                    return ERR_OK;
                 }
-                tcp_recved(pcb, p->tot_len);
-                pbuf_free(p);
-                c->lastActivity = millis();
-                // Do NOT call serviceConn here — process in Broker::loop() instead.
+                if (c->rxPbuf)
+                    pbuf_cat(c->rxPbuf, p);
+                else
+                    c->rxPbuf = p;
                 return ERR_OK;
             }
 
             void Broker::lwipErr(void *arg, err_t)
             {
+                // The pcb is already freed; loop() closes the slot.
                 Conn *c = static_cast<Conn *>(arg);
-                if (c && _instance)
-                {
-                    c->pcb = nullptr;
-                    _instance->closeConn(*c);
-                }
-            }
-
-            err_t Broker::lwipPoll(void *arg, struct tcp_pcb *)
-            {
-                // Keepalive timeouts are handled in Broker::loop() → serviceConn().
-                (void)arg;
-                return ERR_OK;
+                if (c) c->pcb = nullptr;
             }
 #endif // RP2040
 

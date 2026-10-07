@@ -2,6 +2,7 @@
 #ifdef ARDUINO_ARCH_RP2040
 
 #include <lwip/tcp.h>
+#include <lwip_wrap.h> // LWIPMutex: makes the ethernet IRQ defer
 #include <bearssl/bearssl.h>
 #include "OpenKNX/Crypto/TrustAnchor.h"
 #include "OpenKNX/Network/Webclient/Handler.h"
@@ -127,47 +128,40 @@ namespace OpenKNX
         namespace Webclient
         {
             // ─── lwIP callbacks ───────────────────────────────────────────────────────
+            // They run in the ethernet IRQ and only hand over: pbufs into rxPbuf, the
+            // outcome into tcpConnEst/tcpError/rxClosed/tcpPcb. The loop touches pcb and
+            // pbuf chain only under LWIPMutex (rawPbufRead, rawTcpWrite, platformClose).
 
             err_t Handler::lwipConnected(void *arg, struct tcp_pcb * /*pcb*/, err_t err)
             {
                 Slot *s = static_cast<Slot *>(arg);
                 if (!s) return ERR_OK;
                 if (err != ERR_OK)
-                {
                     s->tcpError = true;
-                    return ERR_VAL;
-                }
-                s->tcpConnEst = true;
+                else
+                    s->tcpConnEst = true;
                 return ERR_OK;
             }
 
-            err_t Handler::lwipRecv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t /*err*/)
+            err_t Handler::lwipRecv(void *arg, struct tcp_pcb * /*pcb*/, struct pbuf *p, err_t err)
             {
                 Slot *s = static_cast<Slot *>(arg);
-                if (!s) return ERR_OK;
                 if (!p)
                 {
-                    // Server closed connection — complete the TCP teardown and forget the PCB
-                    tcp_arg(pcb, nullptr);
-                    tcp_recv(pcb, nullptr);
-                    tcp_err(pcb, nullptr);
-                    tcp_close(pcb);
-                    s->tcpPcb = nullptr;
+                    // FIN: the pcb stays ours until platformClose(); data before it is still read
+                    if (s) s->rxClosed = true;
                     return ERR_OK;
                 }
-                // Append pbuf to our receive chain without copying.
-                // tcp_recved is called from platformRead as bytes are actually consumed.
-                if (!s->rxHead)
+                if (!s || err != ERR_OK)
                 {
-                    s->rxHead = p;
-                    s->rxTail = p;
+                    pbuf_free(p);
+                    return ERR_OK;
                 }
+                // Zero-copy; tcp_recved follows in rawPbufRead as bytes are consumed.
+                if (s->rxPbuf)
+                    pbuf_cat(s->rxPbuf, p);
                 else
-                {
-                    s->rxTail->next = p;
-                }
-                while (s->rxTail->next)
-                    s->rxTail = s->rxTail->next;
+                    s->rxPbuf = p;
                 return ERR_OK;
             }
 
@@ -180,32 +174,52 @@ namespace OpenKNX
                 s->tcpError = true;
             }
 
-            // ─── Raw pbuf read (used by BearSSL handshake and read loop) ─────────────
+            // ─── Raw TCP access: the only places that touch pcb and pbuf chain ───────
 
             static int rawPbufRead(Slot &s, unsigned char *buf, size_t len)
             {
-                size_t n = 0;
-                while (n < len && s.rxHead)
-                {
-                    size_t avail = s.rxHead->len - s.rxOffset;
-                    size_t take  = (avail < len - n) ? avail : (len - n);
-                    memcpy(buf + n, (const uint8_t *)s.rxHead->payload + s.rxOffset, take);
-                    n          += take;
-                    s.rxOffset += (uint16_t)take;
-
-                    if (s.rxOffset >= s.rxHead->len)
-                    {
-                        struct pbuf *done = s.rxHead;
-                        s.rxHead = done->next;
-                        if (!s.rxHead) s.rxTail = nullptr;
-                        done->next = nullptr;
-                        pbuf_free(done);
-                        s.rxOffset = 0;
-                    }
-                }
-                if (n > 0 && s.tcpPcb)
-                    tcp_recved(s.tcpPcb, (u16_t)n);
+                LWIPMutex lock;
+                if (!s.rxPbuf || len == 0) return 0;
+                if (len > 0xFFFF) len = 0xFFFF;
+                const u16_t n = pbuf_copy_partial(s.rxPbuf, buf, (u16_t)len, 0);
+                s.rxPbuf = pbuf_free_header(s.rxPbuf, n);
+                if (s.tcpPcb) tcp_recved(s.tcpPcb, n);
                 return (int)n;
+            }
+
+            // Bytes queued; 0 while the send buffer is full, -1 without a connection.
+            static int rawTcpWrite(Slot &s, const void *data, size_t len)
+            {
+                LWIPMutex lock;
+                struct tcp_pcb *pcb = s.tcpPcb;
+                if (!pcb) return -1;
+                const size_t room = tcp_sndbuf(pcb);
+                const size_t n = (len < room) ? len : room;
+                if (n == 0) return 0;
+                const err_t err = tcp_write(pcb, data, (u16_t)n, TCP_WRITE_FLAG_COPY);
+                if (err == ERR_MEM) return 0;
+                if (err != ERR_OK) return -1;
+                tcp_output(pcb);
+                return (int)n;
+            }
+
+            // BearSSL itself runs outside the lock: record processing can take a while.
+            static void flushTlsRecords(Slot &s, br_ssl_engine_context &eng)
+            {
+                size_t len;
+                unsigned char *buf = br_ssl_engine_sendrec_buf(&eng, &len);
+                if (!buf || len == 0) return;
+                const int n = rawTcpWrite(s, buf, len);
+                if (n > 0) br_ssl_engine_sendrec_ack(&eng, (size_t)n);
+            }
+
+            static void feedTlsRecords(Slot &s, br_ssl_engine_context &eng)
+            {
+                size_t len;
+                unsigned char *buf = br_ssl_engine_recvrec_buf(&eng, &len);
+                if (!buf || len == 0) return;
+                const int n = rawPbufRead(s, buf, len);
+                if (n > 0) br_ssl_engine_recvrec_ack(&eng, (size_t)n);
             }
 
             // ─── Platform methods ─────────────────────────────────────────────────────
@@ -216,28 +230,30 @@ namespace OpenKNX
                 // WiFiClientSecure is NOT used: its ClientContext::connect() spin loop
                 // blocks for 5 s on W5500 because its default TCP connect timeout is 5000 ms
                 // and the TCP SYN-ACK is not delivered during the spin loop on W5500.
+                ip_addr_t addr;
+                IP_ADDR4(&addr, ip[0], ip[1], ip[2], ip[3]);
+
+                LWIPMutex lock;
                 struct tcp_pcb *pcb = tcp_new();
                 if (!pcb) return false;
 
+                if (s.rxPbuf) pbuf_free(s.rxPbuf);
+                s.rxPbuf     = nullptr;
+                s.rxClosed   = false;
                 s.tcpConnEst = false;
                 s.tcpError   = false;
-                s.rxHead     = nullptr;
-                s.rxTail     = nullptr;
-                s.rxOffset   = 0;
                 s.tcpPcb     = pcb;
 
                 tcp_arg(pcb, &s);
                 tcp_recv(pcb, lwipRecv);
                 tcp_err(pcb, lwipErr);
 
-                ip_addr_t addr;
-                IP_ADDR4(&addr, ip[0], ip[1], ip[2], ip[3]);
-
-                err_t err = tcp_connect(pcb, &addr, port, lwipConnected);
-                if (err != ERR_OK)
+                if (tcp_connect(pcb, &addr, port, lwipConnected) != ERR_OK)
                 {
-                    tcp_abort(pcb);
                     s.tcpPcb = nullptr;
+                    tcp_arg(pcb, nullptr);
+                    tcp_err(pcb, nullptr);
+                    tcp_abort(pcb);
                     return false;
                 }
                 return true;
@@ -255,9 +271,10 @@ namespace OpenKNX
                 {
                     unsigned st = br_ssl_engine_current_state(&s.brState->client.eng);
                     if (st == BR_SSL_CLOSED) return false;
+                    if (st & BR_SSL_RECVAPP) return true; // decrypted data still to read after FIN
                 }
-                if (s.tcpPcb != nullptr) return true;
-                return s.rxHead != nullptr;
+                if (s.tcpPcb && !s.rxClosed) return true;
+                return s.rxPbuf != nullptr;
             }
 
             // ─── BearSSL handshake over lwIP (incremental, non-blocking) ─────────────
@@ -381,31 +398,10 @@ namespace OpenKNX
                     return 1; // Handshake complete
                 }
 
-                if ((st & BR_SSL_SENDREC) && s.tcpPcb)
-                {
-                    size_t len;
-                    unsigned char *buf = br_ssl_engine_sendrec_buf(&eng, &len);
-                    uint16_t sndbuf = tcp_sndbuf(s.tcpPcb);
-                    if (sndbuf > 0 && len > 0)
-                    {
-                        size_t toSend = (len < (size_t)sndbuf) ? len : (size_t)sndbuf;
-                        if (tcp_write(s.tcpPcb, buf, (u16_t)toSend, TCP_WRITE_FLAG_COPY) == ERR_OK)
-                        {
-                            tcp_output(s.tcpPcb);
-                            br_ssl_engine_sendrec_ack(&eng, toSend);
-                        }
-                    }
-                }
+                if (st & BR_SSL_SENDREC) flushTlsRecords(s, eng);
 
                 st = br_ssl_engine_current_state(&eng);
-                if (st & BR_SSL_RECVREC)
-                {
-                    size_t len;
-                    unsigned char *buf = br_ssl_engine_recvrec_buf(&eng, &len);
-                    int n = rawPbufRead(s, buf, len);
-                    if (n > 0)
-                        br_ssl_engine_recvrec_ack(&eng, (size_t)n);
-                }
+                if (st & BR_SSL_RECVREC) feedTlsRecords(s, eng);
 
                 return 0; // In progress — call again next loop()
             }
@@ -424,18 +420,7 @@ namespace OpenKNX
                     // Flush pending outgoing TLS record before accepting new app data
                     if (st & BR_SSL_SENDREC)
                     {
-                        size_t rlen;
-                        unsigned char *rbuf = br_ssl_engine_sendrec_buf(&eng, &rlen);
-                        uint16_t sndbuf = tcp_sndbuf(s.tcpPcb);
-                        if (sndbuf > 0 && rlen > 0)
-                        {
-                            size_t toSend = (rlen < (size_t)sndbuf) ? rlen : (size_t)sndbuf;
-                            if (tcp_write(s.tcpPcb, rbuf, (u16_t)toSend, TCP_WRITE_FLAG_COPY) == ERR_OK)
-                            {
-                                tcp_output(s.tcpPcb);
-                                br_ssl_engine_sendrec_ack(&eng, toSend);
-                            }
-                        }
+                        flushTlsRecords(s, eng);
                         return 0; // yield — come back next loop iteration
                     }
 
@@ -452,14 +437,7 @@ namespace OpenKNX
                     return (int)toWrite;
                 }
 
-                if (!s.tcpPcb) return -1;
-                uint16_t sndbuf = tcp_sndbuf(s.tcpPcb);
-                if (sndbuf == 0) return 0;
-                size_t toSend = (len < (size_t)sndbuf) ? len : (size_t)sndbuf;
-                err_t err = tcp_write(s.tcpPcb, data, (u16_t)toSend, TCP_WRITE_FLAG_COPY);
-                if (err != ERR_OK) return -1;
-                tcp_output(s.tcpPcb);
-                return (int)toSend;
+                return rawTcpWrite(s, data, len);
             }
 
             int Handler::platformRead(Slot &s, uint8_t *buf, size_t len)
@@ -471,32 +449,11 @@ namespace OpenKNX
                     unsigned st = br_ssl_engine_current_state(&eng);
 
                     // Forward any pending outgoing TLS records (e.g. TLS alerts, ACKs)
-                    if ((st & BR_SSL_SENDREC) && s.tcpPcb)
-                    {
-                        size_t rlen;
-                        unsigned char *rbuf = br_ssl_engine_sendrec_buf(&eng, &rlen);
-                        uint16_t sndbuf = tcp_sndbuf(s.tcpPcb);
-                        if (sndbuf > 0 && rlen > 0)
-                        {
-                            size_t toSend = (rlen < (size_t)sndbuf) ? rlen : (size_t)sndbuf;
-                            if (tcp_write(s.tcpPcb, rbuf, (u16_t)toSend, TCP_WRITE_FLAG_COPY) == ERR_OK)
-                            {
-                                tcp_output(s.tcpPcb);
-                                br_ssl_engine_sendrec_ack(&eng, toSend);
-                            }
-                        }
-                    }
+                    if (st & BR_SSL_SENDREC) flushTlsRecords(s, eng);
 
                     // Feed incoming raw TLS record data from pbuf chain into BearSSL
                     st = br_ssl_engine_current_state(&eng);
-                    if (st & BR_SSL_RECVREC)
-                    {
-                        size_t rlen;
-                        unsigned char *rbuf = br_ssl_engine_recvrec_buf(&eng, &rlen);
-                        int n = rawPbufRead(s, rbuf, rlen);
-                        if (n > 0)
-                            br_ssl_engine_recvrec_ack(&eng, (size_t)n);
-                    }
+                    if (st & BR_SSL_RECVREC) feedTlsRecords(s, eng);
 
                     // Return decrypted application data if available
                     st = br_ssl_engine_current_state(&eng);
@@ -515,28 +472,7 @@ namespace OpenKNX
                 }
 
                 // Plain HTTP: consume from pbuf chain
-                size_t n = 0;
-                while (n < len && s.rxHead)
-                {
-                    size_t avail = s.rxHead->len - s.rxOffset;
-                    size_t take  = (avail < len - n) ? avail : (len - n);
-                    memcpy(buf + n, (const uint8_t *)s.rxHead->payload + s.rxOffset, take);
-                    n          += take;
-                    s.rxOffset += (uint16_t)take;
-
-                    if (s.rxOffset >= s.rxHead->len)
-                    {
-                        struct pbuf *done = s.rxHead;
-                        s.rxHead = done->next;
-                        if (!s.rxHead) s.rxTail = nullptr;
-                        done->next = nullptr;
-                        pbuf_free(done);
-                        s.rxOffset = 0;
-                    }
-                }
-                if (n > 0 && s.tcpPcb)
-                    tcp_recved(s.tcpPcb, (u16_t)n);
-                return (int)n;
+                return rawPbufRead(s, buf, len);
             }
 
             void Handler::platformClose(Slot &s)
@@ -548,19 +484,23 @@ namespace OpenKNX
                     s.brState = nullptr;
                 }
 
-                if (s.tcpPcb)
+                LWIPMutex lock;
+                if (s.rxPbuf)
                 {
-                    tcp_arg(s.tcpPcb, nullptr);
-                    tcp_recv(s.tcpPcb, nullptr);
-                    tcp_err(s.tcpPcb, nullptr);
-                    tcp_close(s.tcpPcb);
-                    s.tcpPcb = nullptr;
+                    // Otherwise tcp_close() answers with RST instead of FIN
+                    if (s.tcpPcb) tcp_recved(s.tcpPcb, s.rxPbuf->tot_len);
+                    pbuf_free(s.rxPbuf); // frees the entire remaining chain
+                    s.rxPbuf = nullptr;
                 }
-                if (s.rxHead)
+                s.rxClosed = false;
+                struct tcp_pcb *pcb = s.tcpPcb;
+                s.tcpPcb = nullptr;
+                if (pcb)
                 {
-                    pbuf_free(s.rxHead); // frees the entire remaining chain
-                    s.rxHead = nullptr;
-                    s.rxTail = nullptr;
+                    tcp_arg(pcb, nullptr);
+                    tcp_recv(pcb, nullptr);
+                    tcp_err(pcb, nullptr);
+                    if (tcp_close(pcb) != ERR_OK) tcp_abort(pcb);
                 }
             }
 

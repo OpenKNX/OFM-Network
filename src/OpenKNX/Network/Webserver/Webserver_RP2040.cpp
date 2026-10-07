@@ -8,16 +8,23 @@
 #include "OpenKNX/Network/Webserver/Webserver.h"
 #include <algorithm>
 #include <lwip/tcp.h>
+#include <lwip_wrap.h> // LWIPMutex: makes the ethernet IRQ defer
 #include <string>
 #include <vector>
 
-// lwIP-TCP-PCB-Slots, HTTP und WS teilen sich den Pool. Erhöhen braucht auch mehr
-// MEMP_NUM_TCP_PCB im Elternprojekt.
-#ifndef OPENKNX_WEBSERVER_MAX_CONN
-#define OPENKNX_WEBSERVER_MAX_CONN 3
+// Der Slot-Default steht in Webserver.h, weil die Sendequeue ihre Cursortabelle
+// danach dimensioniert. HTTP und WS teilen sich den Pool.
+//
+// MEMP_NUM_TCP_PCB ist die Zahl gleichzeitig aktiver TCP-PCBs im *ganzen* Gerät --
+// inklusive MQTT, Webclient, OTA und den TIME_WAIT-Zuständen frisch geschlossener
+// Verbindungen. arduino-pico setzt sie auf __LWIP_MEMMULT * 5, der Default ist also
+// 5. Reicht sie nicht, scheitert der letzte Accept still in lwIP.
+#if OPENKNX_WEBSERVER_MAX_CONN >= MEMP_NUM_TCP_PCB
+#warning "OPENKNX_WEBSERVER_MAX_CONN >= MEMP_NUM_TCP_PCB: set -D__LWIP_MEMMULT=2 in the parent project, otherwise the extra connection slots have no effect"
 #endif
 // One RX buffer per slot, for HTTP headers and WS payloads alike. Oversized headers
-// get a 431, oversized WS payloads are truncated. Max 65535 (rxLen is uint16_t).
+// get a 431, an oversized WS payload drops the connection -- same as ESP32, and the
+// client reconnects. Max 65535 (rxLen is uint16_t).
 #ifndef OPENKNX_WEBSERVER_RX_CAP
 #define OPENKNX_WEBSERVER_RX_CAP 1024
 #endif
@@ -66,6 +73,8 @@ namespace OpenKNX
             int idx;
             ConnState state;
             uint8_t pollCount;
+            uint32_t lastPeerMs; // last ACK or received byte
+            uint16_t pendOff;    // bytes of g_pending[idx] already written
 
             char rxBuf[OPENKNX_WEBSERVER_RX_CAP];
             uint16_t rxLen;
@@ -77,9 +86,8 @@ namespace OpenKNX
             bool uriTooLong;   // uri[] didn't fit the actual request line — reject with 414
             uint16_t wsKeyOff; // Sec-WebSocket-Key offset into rxBuf, 0 = absent
 
-            // HTTP TX — nur die Position; die zu sendenden Blöcke liegen in
-            // g_response[idx].segments(), gehören also der WebResponse.
-            uint8_t txSegIdx; // aktuell sendendes Segment
+            // HTTP TX position only; the blocks belong to g_response[idx]
+            uint8_t txSegIdx; // segment being sent
             int txSent;       // bereits gesendete Bytes innerhalb dieses Segments
 
             // WS RX state machine
@@ -97,7 +105,7 @@ namespace OpenKNX
             // POST body buffering
             uint32_t contentLength = 0; // aus Content-Length Header
             uint16_t headerEnd = 0;     // Offset nach \r\n\r\n in rxBuf
-            uint8_t* bodyBuf = nullptr; // heap-alloc für Overflow
+            uint8_t* bodyBuf = nullptr; // heap, for bodies beyond rxBuf
             uint32_t bodyReceived = 0;
             bool waitingForBody = false;
 
@@ -113,26 +121,34 @@ namespace OpenKNX
         static constexpr int MAX_CONN = OPENKNX_WEBSERVER_MAX_CONN; // shared HTTP + WS slot pool
         static ConnSlot g_slots[MAX_CONN];
 
-        // Muss den asynchronen Versand über mehrere onSent()-Ticks überleben. Nicht in
-        // ConnSlot: onAccept nullt den per memset und zerstörte so die std::string-Member.
+        // Must outlive the asynchronous send. Not in ConnSlot: onAccept() clears that with
+        // memset, which would wreck the std::string members.
         static WebResponse g_response[MAX_CONN];
+
+        // Sent before anything else: the HTTP header, or a stream chunk tcp_write() refused.
+        static std::string g_pending[MAX_CONN];
+
+        // Stream cleanups close files, so they run in loopPlatform() -- never in a
+        // callback, which is the ethernet IRQ. A slot with one pending stays unused.
+        struct StreamGc
+        {
+            WebStreamCleanupFn fn;
+            void* ctx;
+        };
+        static StreamGc g_streamGc[MAX_CONN];
+
+        // Per HTTP connection; uncapped, one page takes most of the 16 KB lwIP heap.
+        static constexpr int HTTP_INFLIGHT = 2 * TCP_MSS;
 
         static constexpr size_t WS_FRAME_BUF = 1500;
         static constexpr size_t WS_MAX_PAYLOAD = WS_FRAME_BUF - 4; // 4 B header, 126..65535 form
 
         // ── Slot management ───────────────────────────────────────────────────
 
-        static ConnSlot* findSlot(tcp_pcb* pcb)
-        {
-            for (auto& s : g_slots)
-                if (s.pcb == pcb) return &s;
-            return nullptr;
-        }
-
         static ConnSlot* freeSlot()
         {
-            for (auto& s : g_slots)
-                if (s.pcb == nullptr) return &s;
+            for (int i = 0; i < MAX_CONN; i++)
+                if (g_slots[i].pcb == nullptr && !g_streamGc[i].fn) return &g_slots[i];
             return nullptr;
         }
 
@@ -141,96 +157,164 @@ namespace OpenKNX
             if (!s) return;
             s->txSegIdx = 0;
             s->txSent = 0;
-            // Gibt Body und Layout-Hüllen der Antwort frei
-            if (s->idx >= 0 && s->idx < MAX_CONN) g_response[s->idx].reset();
+            s->pendOff = 0;
+            if (s->idx >= 0 && s->idx < MAX_CONN)
+            {
+                g_response[s->idx].reset(); // body and layout shells
+                g_pending[s->idx] = std::string();
+                if (s->streaming && s->streamCleanup) g_streamGc[s->idx] = {s->streamCleanup, s->streamCtx};
+            }
             if (s->bodyBuf)
             {
                 free(s->bodyBuf); // PSRAM_MALLOC in onRecv
                 s->bodyBuf = nullptr;
             }
-            if (s->streaming && s->streamCleanup)
-            {
-                s->streamCleanup(s->streamCtx);
-                s->streaming = false;
-            }
+            s->streaming = false;
             s->streamReader = nullptr;
             s->streamCleanup = nullptr;
             s->streamCtx = nullptr;
             s->pcb = nullptr;
         }
 
+        // Before every close, tcp_err included: a lingering pcb must not reach the slot's next user.
+        static void detach(tcp_pcb* pcb)
+        {
+            tcp_arg(pcb, nullptr);
+            tcp_recv(pcb, nullptr);
+            tcp_sent(pcb, nullptr);
+            tcp_poll(pcb, nullptr, 0);
+            tcp_err(pcb, nullptr);
+        }
+
+        // Frees the slot, telling the WS layer first. Leaves the pcb alone.
+        static void endSlot(ConnSlot* s)
+        {
+            if (s->state == CS_WS) s->ws->notifySocketConnect(s->uri, s->idx, false);
+            releaseSlot(s);
+        }
+
+        // ERR_ABRT = the pcb had to be aborted; a callback must return exactly that.
+        static err_t closeSlot(ConnSlot* s, bool notify = true)
+        {
+            tcp_pcb* pcb = s->pcb;
+            if (notify)
+                endSlot(s);
+            else
+                releaseSlot(s);
+            if (!pcb) return ERR_OK;
+            detach(pcb);
+            if (tcp_close(pcb) == ERR_OK) return ERR_OK;
+            tcp_abort(pcb);
+            return ERR_ABRT;
+        }
+
         // ── TCP send helpers ──────────────────────────────────────────────────
 
         static bool txDone(const ConnSlot* s)
         {
-            return s->txSegIdx >= g_response[s->idx].segmentCount();
+            return s->pendOff >= g_pending[s->idx].size() &&
+                   s->txSegIdx >= g_response[s->idx].segmentCount();
+        }
+
+        static int txRoom(tcp_pcb* pcb)
+        {
+            return HTTP_INFLIGHT - (int)(TCP_SND_BUF - tcp_sndbuf(pcb));
+        }
+
+        // false = bytes still waiting (window full or ERR_MEM), retried later.
+        static bool flushPending(ConnSlot* s)
+        {
+            const std::string& p = g_pending[s->idx];
+            while (s->pendOff < p.size())
+            {
+                int n = (int)(p.size() - s->pendOff);
+                int room = txRoom(s->pcb);
+                if (room <= 0) return false;
+                if (n > room) n = room;
+                if (tcp_write(s->pcb, p.data() + s->pendOff, (u16_t)n, TCP_WRITE_FLAG_COPY) != ERR_OK) return false;
+                s->pendOff += (uint16_t)n;
+            }
+            return true;
         }
 
         static void tcpSendChunk(ConnSlot* s)
         {
-            const WebResponse& res = g_response[s->idx];
-            while (s->txSegIdx < res.segmentCount())
+            if (flushPending(s))
             {
-                const ResponseSegment& seg = res.segments()[s->txSegIdx];
-                if (s->txSent >= seg.len)
+                const WebResponse& res = g_response[s->idx];
+                while (s->txSegIdx < res.segmentCount())
                 {
-                    // Segment fertig → nahtlos am nächsten weiter, solange Platz ist
-                    s->txSegIdx++;
-                    s->txSent = 0;
-                    continue;
+                    const ResponseSegment& seg = res.segments()[s->txSegIdx];
+                    if (s->txSent >= seg.len)
+                    {
+                        s->txSegIdx++;
+                        s->txSent = 0;
+                        continue;
+                    }
+
+                    int toWrite = seg.len - s->txSent;
+                    int room = txRoom(s->pcb);
+                    if (room <= 0) break;
+                    if (toWrite > room) toWrite = room;
+
+                    // ERR_MEM: nothing counted, loopPlatform() retries -- after an ERR_MEM
+                    // with nothing in flight, no ACK would ever call onSent().
+                    if (tcp_write(s->pcb, seg.data + s->txSent, (u16_t)toWrite, TCP_WRITE_FLAG_COPY) != ERR_OK)
+                        break;
+                    s->txSent += toWrite;
                 }
-
-                int canWrite = (int)tcp_sndbuf(s->pcb);
-                if (canWrite <= 0) break;
-                int remaining = seg.len - s->txSent;
-                int toWrite = remaining < canWrite ? remaining : canWrite;
-
-                if (tcp_write(s->pcb, seg.data + s->txSent, (u16_t)toWrite, TCP_WRITE_FLAG_COPY) != ERR_OK)
-                    break; // ERR_MEM — nicht weiterzählen, Retry kommt aus onSent
-                s->txSent += toWrite;
             }
-            // Immer flushen: auch eine Antwort ganz ohne Segmente (z.B. 303-Redirect) muss
-            // ihren bereits geschriebenen HTTP-Header sofort loswerden.
+            // Always flush: a response without segments (a 303) still has its header queued.
             tcp_output(s->pcb);
         }
 
-        // Streaming-Download: liest einen Chunk aus LittleFS und schreibt ihn via TCP.
-        // 512-Byte Stack-Buffer — kein Heap, kein Fragmentierungsrisiko.
-        //
-        // Nur EIN Chunk pro Aufruf: der ganze tcp_sndbuf() (bis zu TCP_SND_BUF, hier
-        // 8*TCP_MSS ~ 11.6 KB) leerzulesen hätte diesen einen loop()-Tick um die Zeit
-        // für bis zu ~23 Flash-/SPI-Reads verlängert -- sichtbar als "loop took longer
-        // than usual", proportional zur Dateigröße. onSent() ruft für den Rest erneut
-        // auf, sobald der Client die nächste Portion bestätigt (mehrfach pro Sekunde,
-        // nicht am ~2 s Poll-Timer hängend), Durchsatz bleibt dadurch unverändert.
-        static void tcpSendStreamChunk(ConnSlot* s)
+        // Loop context only: the reader touches the filesystem. A few chunks per tick,
+        // so a large download does not stretch the loop.
+        static void tcpSendStream(ConnSlot* s)
         {
-            if (s->streamSent >= s->streamTotal) return;
-
-            int avail = (int)tcp_sndbuf(s->pcb);
-            if (avail <= 0) return; // onSent feuert wenn Platz frei
-
             uint8_t buf[512];
-            size_t toRead = sizeof(buf);
-            if (toRead > (size_t)avail) toRead = (size_t)avail;
-            size_t rem = s->streamTotal - s->streamSent;
-            if (toRead > rem) toRead = rem;
-
-            size_t got = s->streamReader(s->streamCtx, buf, toRead);
-            if (got == 0)
+            for (int i = 0; i < 4 && flushPending(s) && s->streamSent < s->streamTotal; i++)
             {
-                s->streamSent = s->streamTotal; // EOF
-                return;
+                int room = txRoom(s->pcb);
+                if (room <= 0) break;
+                size_t toRead = sizeof(buf);
+                if (toRead > (size_t)room) toRead = (size_t)room;
+                size_t rem = s->streamTotal - s->streamSent;
+                if (toRead > rem) toRead = rem;
+
+                size_t got = s->streamReader(s->streamCtx, buf, toRead);
+                if (got == 0)
+                {
+                    s->streamSent = s->streamTotal; // early EOF, the close ends it
+                    break;
+                }
+                s->streamSent += got;
+                if (tcp_write(s->pcb, buf, (u16_t)got, TCP_WRITE_FLAG_COPY) != ERR_OK)
+                {
+                    // Already consumed from the file -- dropping it would corrupt the download.
+                    g_pending[s->idx].assign((const char*)buf, got);
+                    s->pendOff = 0;
+                    break;
+                }
             }
-            if (tcp_write(s->pcb, buf, (u16_t)got, TCP_WRITE_FLAG_COPY) != ERR_OK) return;
-            s->streamSent += got;
             tcp_output(s->pcb);
         }
 
-        // Sendet ein WS-Textframe über lwIP. Header + Payload gehen in einem einzigen
-        // tcp_write raus: zwei getrennte Writes riskieren, dass der zweite mit ERR_MEM
-        // scheitert während der Header schon in der Queue liegt — das zerlegt den Stream.
-        // Zu grosse Payloads sind Failed (nie sendbar), voller Sendepuffer WouldBlock.
+        // Refill and finish from the loop: streams only get refilled here, and a plain
+        // response needs it after an ERR_MEM that left nothing in flight.
+        static void pumpHttp(ConnSlot* s)
+        {
+            if (s->streaming)
+                tcpSendStream(s);
+            else
+                tcpSendChunk(s);
+            // tcp_close() keeps queued data and sends the FIN after it.
+            if (txDone(s) && (!s->streaming || s->streamSent >= s->streamTotal))
+                closeSlot(s);
+        }
+
+        // Header and payload in one tcp_write: with two, an ERR_MEM on the second would
+        // leave a header without payload in the stream. Too large = Failed, full = WouldBlock.
         static WsSendResult wsTcpSend(tcp_pcb* pcb, const char* data, size_t len)
         {
             // Stack buffer avoids heap fragmentation
@@ -397,8 +481,7 @@ namespace OpenKNX
                 }
                 s->ws->logWebsocket(wsReq, 404);
 
-                tcp_close(s->pcb);
-                releaseSlot(s);
+                closeSlot(s);
                 return;
             }
 
@@ -408,8 +491,7 @@ namespace OpenKNX
                 char accept[64] = {};
                 if (!wsComputeAccept(s->rxBuf + s->wsKeyOff, accept, sizeof(accept)))
                 {
-                    tcp_close(s->pcb);
-                    releaseSlot(s);
+                    closeSlot(s);
                     return;
                 }
 
@@ -421,7 +503,12 @@ namespace OpenKNX
                                     "Sec-WebSocket-Accept: %s\r\n\r\n",
                                     accept);
 
-                tcp_write(s->pcb, resp, (u16_t)rLen, TCP_WRITE_FLAG_COPY);
+                // Without the 101 the browser would wait for its timeout; closing lets it retry now.
+                if (tcp_write(s->pcb, resp, (u16_t)rLen, TCP_WRITE_FLAG_COPY) != ERR_OK)
+                {
+                    closeSlot(s);
+                    return;
+                }
                 tcp_output(s->pcb);
 
                 s->state = CS_WS;
@@ -470,7 +557,7 @@ namespace OpenKNX
                 request.setRemotePort(remotePort);
             }
 
-            // POST-Body übergeben (aus rxBuf oder heap-alloc bodyBuf)
+            // POST body, from rxBuf or the heap bodyBuf
             if (s->contentLength > 0)
             {
                 if (s->bodyBuf)
@@ -479,8 +566,8 @@ namespace OpenKNX
                     request.setBody((const uint8_t*)s->rxBuf + s->headerEnd, s->contentLength);
             }
 
-            // Antwort im Slot-Speicher aufbauen: der Versand läuft asynchron über
-            // onSent() weiter, eine lokale Instanz wäre dann längst zerstört.
+            // Built in the slot's storage: sending continues asynchronously, a local
+            // instance would be long gone by then.
             WebResponse& response = g_response[s->idx];
             response.reset();
             s->ws->handleRequest(request, response);
@@ -511,7 +598,7 @@ namespace OpenKNX
 
             if (response.isStreaming())
             {
-                // Streaming-Download: HTTP-Header mit Content-Length senden, dann chunks via onSent
+                // Header with Content-Length first, then the chunks from loopPlatform()
                 char hdr[512];
                 char statusStr[32];
                 snprintf(statusStr, sizeof(statusStr), "%d %s", statusCode, statusText);
@@ -525,8 +612,8 @@ namespace OpenKNX
                                     response.streamTotal());
                 appendResponseHeaders(hdr, sizeof(hdr), hLen, response);
 
-                tcp_write(s->pcb, hdr, (u16_t)hLen, TCP_WRITE_FLAG_COPY);
-
+                g_pending[s->idx].assign(hdr, (size_t)hLen);
+                s->pendOff = 0;
                 s->streamReader = response.streamReadFn();
                 s->streamCleanup = response.streamCleanupFn();
                 s->streamCtx = response.streamCtx();
@@ -537,12 +624,11 @@ namespace OpenKNX
                 s->txSent = 0;
                 s->state = CS_HTTP_SEND;
 
-                tcpSendStreamChunk(s);
+                tcpSendStream(s);
                 return;
             }
 
-            // Die Segmente stehen bereits in der Response (handleRequest hat sie gebaut) —
-            // hier wird nur noch die Sendeposition zurückgesetzt und rausgeschrieben.
+            // handleRequest() has built the segments already; only the send position is reset here.
             s->state = CS_HTTP_SEND;
             s->txSegIdx = 0;
             s->txSent = 0;
@@ -563,15 +649,28 @@ namespace OpenKNX
 
             appendResponseHeaders(hdr, sizeof(hdr), hLen, response);
 
-            tcp_write(s->pcb, hdr, (u16_t)hLen, TCP_WRITE_FLAG_COPY);
+            // Through g_pending like the body: an ERR_MEM here used to lose the header
+            // and send the body bare.
+            g_pending[s->idx].assign(hdr, (size_t)hLen);
+            s->pendOff = 0;
 
-            // Send as much body as fits now; remainder via sent_cb
+            // As much as fits now, the rest from onSent() and loopPlatform()
             tcpSendChunk(s);
         }
 
         // ── WebSocket frame processing ────────────────────────────────────────
 
-        static void wsProcessData(ConnSlot* s, const uint8_t* data, u16_t len)
+        // Close frame from the browser: answer it, then end the connection.
+        static err_t wsClose(ConnSlot* s)
+        {
+            uint8_t closeReply[2] = {0x88, 0x00};
+            tcp_write(s->pcb, closeReply, 2, TCP_WRITE_FLAG_COPY);
+            tcp_output(s->pcb);
+            return closeSlot(s);
+        }
+
+        // Returns what the recv callback has to return; the slot is gone once s->pcb is null.
+        static err_t wsProcessData(ConnSlot* s, const uint8_t* data, u16_t len)
         {
             u16_t pos = 0;
 
@@ -629,25 +728,11 @@ namespace OpenKNX
                         if (s->wsHdrRcvd < 4) break;
                         s->wsHdrRcvd = 0;
                         s->wsPayRcvd = 0;
-                        // Leere Frames hier abschliessen: WR_PAYLOAD liest ein Byte pro
-                        // Durchlauf und liefe bei wsPayLen==0 in den nächsten Frame.
+                        // Empty frames end here: WR_PAYLOAD consumes a byte and would run into the next frame.
                         if (s->wsPayLen == 0)
                         {
                             if (s->wsOpcode == 0x08) // Close (no payload)
-                            {
-                                uint8_t closeReply[2] = {0x88, 0x00};
-                                tcp_write(s->pcb, closeReply, 2, TCP_WRITE_FLAG_COPY);
-                                tcp_output(s->pcb);
-                                tcp_pcb* pcb = s->pcb;
-                                s->ws->notifySocketConnect(s->uri, s->idx, false);
-                                tcp_arg(pcb, nullptr);
-                                tcp_recv(pcb, nullptr);
-                                tcp_sent(pcb, nullptr);
-                                tcp_poll(pcb, nullptr, 0);
-                                releaseSlot(s);
-                                tcp_close(pcb);
-                                return;
-                            }
+                                return wsClose(s);
                             if (s->wsOpcode == 0x09) // Ping (no payload) → send empty pong
                             {
                                 uint8_t pong[2] = {0x8A, 0x00};
@@ -656,8 +741,7 @@ namespace OpenKNX
                             }
                             else if (s->wsOpcode == 0x01 || s->wsOpcode == 0x02) // empty text/binary
                             {
-                                // Leeres Frame zustellen (z.B. blankes Enter in der Webconsole),
-                                // damit der Empfänger eine Leerzeile verarbeiten kann.
+                                // Delivered anyway: a bare Enter in the console is an empty line.
                                 bool isBinary = (s->wsOpcode == 0x02);
                                 s->ws->notifySocketMessage(s->uri, s->idx, (uint8_t*)s->rxBuf, 0, isBinary);
                             }
@@ -671,6 +755,19 @@ namespace OpenKNX
 
                     case WR_PAYLOAD:
                     {
+                        // Oversized frame: drop the connection like ESP32 does, never
+                        // truncate. A truncated frame used to be delivered, turning a long
+                        // "cmd:" into half a console command that then ran. wsPayLen is
+                        // 64-bit (RFC 6455's 127 form) so this comparison sees the real
+                        // wire value; a narrower field would let 0x1_0000_0200 pass as 512
+                        // and desynchronise the parser.
+                        if (s->wsPayRcvd == 0 && s->wsPayLen > sizeof(s->rxBuf))
+                        {
+                            logWarning("Webserver", "WS frame %u B > %u B buffer, disconnected",
+                                       (unsigned)s->wsPayLen, (unsigned)sizeof(s->rxBuf));
+                            return closeSlot(s); // slot is released, do not touch s again
+                        }
+
                         if (s->wsPayRcvd < sizeof(s->rxBuf))
                             s->rxBuf[s->wsPayRcvd] = s->wsMasked
                                                           ? (b ^ s->wsMask[s->wsPayRcvd % 4])
@@ -681,22 +778,7 @@ namespace OpenKNX
 
                         // Frame complete
                         if (s->wsOpcode == 0x08) // Close
-                        {
-                            uint8_t closeReply[2] = {0x88, 0x00};
-                            tcp_write(s->pcb, closeReply, 2, TCP_WRITE_FLAG_COPY);
-                            tcp_output(s->pcb);
-                            tcp_pcb* pcb = s->pcb;
-                            s->ws->notifySocketConnect(s->uri, s->idx, false);
-                            // tcp_arg vor releaseSlot löschen, sonst findet lwIPs FIN-ACK
-                            // einen bereits wiederverwendeten Slot.
-                            tcp_arg(pcb, nullptr);
-                            tcp_recv(pcb, nullptr);
-                            tcp_sent(pcb, nullptr);
-                            tcp_poll(pcb, nullptr, 0);
-                            releaseSlot(s);
-                            tcp_close(pcb);
-                            return;
-                        }
+                            return wsClose(s);
                         else if (s->wsOpcode == 0x09) // Ping → Pong
                         {
                             uint8_t pong[2] = {0x8A, 0x00};
@@ -719,113 +801,85 @@ namespace OpenKNX
                     }
                 }
             }
+            return ERR_OK;
         }
 
         // ── lwIP callbacks ────────────────────────────────────────────────────
+        // With PIN_ETH_INT they run in the W5500 interrupt. They keep to bookkeeping,
+        // parsing and RAM-only sending; anything touching files runs in loopPlatform().
 
-        static void onClose(ConnSlot* s)
+        // A pcb whose slot has moved on. Normally unreachable -- every close detaches --
+        // but should one arrive, cut it loose instead of acting on someone else's slot.
+        static void dropStale(tcp_pcb* tpcb)
         {
-            if (!s) return;
-            if (s->pcb)
-            {
-                // Callbacks abmelden, sonst greifen spätere lwIP-Events auf einen
-                // wiederverwendeten Slot zu.
-                tcp_arg(s->pcb, nullptr);
-                tcp_recv(s->pcb, nullptr);
-                tcp_sent(s->pcb, nullptr);
-                tcp_poll(s->pcb, nullptr, 0);
-                // tcp_err is left — lwIP fires it without a pcb pointer so it can't be cleared here.
-            }
-            if (s->state == CS_WS)
-            {
-                s->ws->notifySocketConnect(s->uri, s->idx, false);
-            }
-            releaseSlot(s);
+            if (tpcb) detach(tpcb);
         }
 
         static void onErr(void* arg, err_t /*err*/)
         {
             ConnSlot* s = (ConnSlot*)arg;
             if (!s) return;
-            // pcb is already freed by lwIP on error — don't touch it
-            s->pcb = nullptr; // mark as gone before onClose
-            onClose(s);
+            s->pcb = nullptr; // already freed by lwIP -- must not be touched
+            endSlot(s);
         }
 
         static err_t onSent(void* arg, tcp_pcb* tpcb, u16_t /*len*/)
         {
             ConnSlot* s = (ConnSlot*)arg;
-            if (!s || s->pcb != tpcb) return ERR_OK; // stale callback from a reused slot
-
-            // Sendefortschritt = Lebenszeichen, sonst killt der Stall-Detector in
-            // onPoll() jeden Transfer über ~22 s (grosse Downloads).
-            s->pollCount = 0;
-
-            if (s->state == CS_HTTP_SEND)
+            if (!s || s->pcb != tpcb)
             {
-                if (s->streaming)
-                {
-                    if (s->streamSent < s->streamTotal)
-                    {
-                        tcpSendStreamChunk(s);
-                    }
-                    else
-                    {
-                        // Streaming fertig — Cleanup und Verbindung schließen
-                        if (s->streamCleanup) s->streamCleanup(s->streamCtx);
-                        s->streaming = false;
-                        s->streamReader = nullptr;
-                        s->streamCleanup = nullptr;
-                        s->streamCtx = nullptr;
-                        tcp_pcb* pcb = s->pcb;
-                        tcp_arg(pcb, nullptr);
-                        tcp_recv(pcb, nullptr);
-                        tcp_sent(pcb, nullptr);
-                        tcp_poll(pcb, nullptr, 0);
-                        releaseSlot(s);
-                        tcp_close(pcb);
-                    }
-                }
-                else if (!txDone(s))
-                {
-                    tcpSendChunk(s);
-                }
-                else
-                {
-                    // Callbacks vor releaseSlot löschen: nach tcp_close feuert lwIP im
-                    // TIME_WAIT weiter onSent/onPoll für den alten pcb.
-                    tcp_pcb* pcb = s->pcb;
-                    tcp_arg(pcb, nullptr);
-                    tcp_recv(pcb, nullptr);
-                    tcp_sent(pcb, nullptr);
-                    tcp_poll(pcb, nullptr, 0);
-                    releaseSlot(s);
-                    tcp_close(pcb);
-                }
+                dropStale(tpcb);
+                return ERR_OK;
             }
-            return ERR_OK;
+
+            // Progress is a sign of life, or onPoll() would kill any transfer over ~22 s.
+            s->pollCount = 0;
+            s->lastPeerMs = millis();
+
+            // Streams are refilled from loopPlatform() only: their reader touches files.
+            if (s->state != CS_HTTP_SEND || s->streaming) return ERR_OK;
+
+            tcpSendChunk(s);
+            return txDone(s) ? closeSlot(s) : ERR_OK;
+        }
+
+        // Error responses for requests that never reach the router.
+        static err_t rejectRequest(ConnSlot* s, const char* resp, size_t len)
+        {
+            tcp_write(s->pcb, resp, (u16_t)len, TCP_WRITE_FLAG_COPY);
+            tcp_output(s->pcb);
+            return closeSlot(s);
         }
 
         static err_t onRecv(void* arg, tcp_pcb* tpcb, pbuf* p, err_t err)
         {
             ConnSlot* s = (ConnSlot*)arg;
-            if (!s || s->pcb != tpcb) return ERR_OK; // stale callback from a reused slot
+            if (!s || s->pcb != tpcb)
+            {
+                // Returning ERR_OK means the pbuf is ours -- free it, or it leaks.
+                dropStale(tpcb);
+                if (p) pbuf_free(p);
+                return ERR_OK;
+            }
 
             if (err != ERR_OK || p == nullptr)
             {
-                onClose(s);
-                tcp_close(tpcb);
-                return ERR_OK;
+                if (p) pbuf_free(p);
+                return closeSlot(s);
             }
 
             tcp_recved(tpcb, p->tot_len);
             s->pollCount = 0;
+            s->lastPeerMs = millis();
 
-            if (s->state == CS_HTTP_RECV)
+            err_t ret = ERR_OK;
+            // One request per connection (Connection: close). Anything after it is
+            // ignored -- parsing it again would allocate a second bodyBuf over the first.
+            if (s->state == CS_HTTP_RECV && !s->hasPendingRequest)
             {
                 if (s->waitingForBody)
                 {
-                    // Header bereits geparst – restliche Body-Bytes sammeln
+                    // Header already parsed -- collect the remaining body bytes
                     for (pbuf* q = p; q != nullptr; q = q->next)
                     {
                         uint32_t space = s->contentLength - s->bodyReceived;
@@ -841,7 +895,7 @@ namespace OpenKNX
                 }
                 else
                 {
-                    // Bytes in rxBuf akkumulieren (Header noch nicht komplett)
+                    // Accumulate into rxBuf until the header is complete
                     for (pbuf* q = p; q != nullptr; q = q->next)
                     {
                         size_t space = sizeof(s->rxBuf) - s->rxLen - 1;
@@ -855,20 +909,13 @@ namespace OpenKNX
                     {
                         if (s->uriTooLong)
                         {
-                            // sonst würde die abgeschnittene URI lautlos geroutet
-                            const char resp414[] =
+                            // Otherwise the truncated URI would be routed silently. Body kept so a
+                            // human sees the reason; 20 ASCII bytes, keep it in step with Content-Length.
+                            static const char resp414[] =
                                 "HTTP/1.1 414 URI Too Long\r\nContent-Type: text/plain\r\n"
                                 "Content-Length: 20\r\nConnection: close\r\n\r\n"
-                                "Anfragezeile zu lang"; // 20 ASCII bytes -- keep both in step
-                            tcp_pcb* pcb = s->pcb;
-                            tcp_write(pcb, resp414, sizeof(resp414) - 1, TCP_WRITE_FLAG_COPY);
-                            tcp_output(pcb);
-                            tcp_arg(pcb, nullptr);
-                            tcp_recv(pcb, nullptr);
-                            tcp_sent(pcb, nullptr);
-                            tcp_poll(pcb, nullptr, 0);
-                            releaseSlot(s);
-                            tcp_close(pcb);
+                                "Anfragezeile zu lang";
+                            ret = rejectRequest(s, resp414, sizeof(resp414) - 1);
                         }
                         else if (s->contentLength == 0)
                         {
@@ -879,38 +926,21 @@ namespace OpenKNX
                             uint32_t bodyInBuf = (uint32_t)(s->rxLen - s->headerEnd);
                             if (bodyInBuf >= s->contentLength)
                             {
-                                // Body vollständig im rxBuf
-                                s->hasPendingRequest = true;
+                                s->hasPendingRequest = true; // body complete in rxBuf
                             }
                             else if (s->contentLength > OPENKNX_WEBSERVER_MAX_BODY)
                             {
-                                // Zu groß – 413 senden und Verbindung schließen
-                                const char resp413[] =
+                                static const char resp413[] =
                                     "HTTP/1.1 413 Content Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-                                tcp_pcb* pcb = s->pcb;
-                                tcp_write(pcb, resp413, sizeof(resp413) - 1, TCP_WRITE_FLAG_COPY);
-                                tcp_output(pcb);
-                                tcp_arg(pcb, nullptr);
-                                tcp_recv(pcb, nullptr);
-                                tcp_sent(pcb, nullptr);
-                                tcp_poll(pcb, nullptr, 0);
-                                releaseSlot(s);
-                                tcp_close(pcb);
+                                ret = rejectRequest(s, resp413, sizeof(resp413) - 1);
                             }
                             else
                             {
-                                // Body-Buffer allozieren und bereits empfangene Bytes kopieren
+                                // Body buffer, seeded with what already arrived
                                 s->bodyBuf = (uint8_t*)PSRAM_MALLOC(s->contentLength);
                                 if (s->bodyBuf == nullptr)
                                 {
-                                    // Allocation fehlgeschlagen – Verbindung schließen
-                                    tcp_pcb* pcb = s->pcb;
-                                    tcp_arg(pcb, nullptr);
-                                    tcp_recv(pcb, nullptr);
-                                    tcp_sent(pcb, nullptr);
-                                    tcp_poll(pcb, nullptr, 0);
-                                    releaseSlot(s);
-                                    tcp_close(pcb);
+                                    ret = closeSlot(s);
                                 }
                                 else
                                 {
@@ -923,45 +953,38 @@ namespace OpenKNX
                     }
                     else if (s->rxLen >= sizeof(s->rxBuf) - 1)
                     {
-                        // rxBuf voll ohne komplette Header → wird nie vollständig
-                        const char resp431[] =
+                        // rxBuf full without a complete header -- it never will be
+                        static const char resp431[] =
                             "HTTP/1.1 431 Request Header Fields Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-                        tcp_pcb* pcb = s->pcb;
-                        tcp_write(pcb, resp431, sizeof(resp431) - 1, TCP_WRITE_FLAG_COPY);
-                        tcp_output(pcb);
-                        tcp_arg(pcb, nullptr);
-                        tcp_recv(pcb, nullptr);
-                        tcp_sent(pcb, nullptr);
-                        tcp_poll(pcb, nullptr, 0);
-                        releaseSlot(s);
-                        tcp_close(pcb);
+                        ret = rejectRequest(s, resp431, sizeof(resp431) - 1);
                     }
                 }
             }
             else if (s->state == CS_WS)
             {
-                for (pbuf* q = p; q != nullptr; q = q->next)
-                {
-                    if (!s->pcb) break; // slot released inside wsProcessData (close frame)
-                    wsProcessData(s, (const uint8_t*)q->payload, q->len);
-                }
+                for (pbuf* q = p; q != nullptr && s->pcb; q = q->next)
+                    ret = wsProcessData(s, (const uint8_t*)q->payload, q->len);
             }
 
             pbuf_free(p);
-            return ERR_OK;
+            return ret;
         }
 
         static err_t onPoll(void* arg, tcp_pcb* tpcb)
         {
             ConnSlot* s = (ConnSlot*)arg;
-            if (!s || s->pcb != tpcb) return ERR_OK; // stale callback from a reused slot
+            if (!s || s->pcb != tpcb)
+            {
+                dropStale(tpcb);
+                return ERR_OK;
+            }
 
             s->pollCount++;
 
             if (s->state == CS_WS)
             {
-                // WS-Ping alle ~60 s; bleibt der Pong aus, räumt lwIPs Retransmit-Timeout
-                // die Verbindung über onErr ab.
+                // WS ping every ~60 s; without an answer lwIP's retransmit timeout ends
+                // the connection through onErr.
                 if (s->pollCount >= 30)
                 {
                     s->pollCount = 0;
@@ -972,10 +995,11 @@ namespace OpenKNX
                 return ERR_OK;
             }
 
-            // Abort stalled HTTP connections that never deliver a complete request.
-            if (s->pollCount > 10) // ~20 s (poll interval = 4 × 500ms)
+            // Abort HTTP connections without progress (no request, no ACK).
+            if (s->pollCount > 10) // ~20 s (poll interval = 4 × 500 ms)
             {
-                onClose(s);
+                endSlot(s);
+                detach(tpcb);
                 tcp_abort(tpcb);
                 return ERR_ABRT;
             }
@@ -1000,6 +1024,7 @@ namespace OpenKNX
             s->ws = (Webserver*)arg;
             s->state = CS_HTTP_RECV;
             s->pollCount = 0;
+            s->lastPeerMs = millis();
 
             tcp_arg(newpcb, s);
             tcp_recv(newpcb, onRecv);
@@ -1021,11 +1046,19 @@ namespace OpenKNX
                 return;
             }
 
-            tcp_bind(pcb, IP_ADDR_ANY, 80);
-            _listenPcb = tcp_listen(pcb);
+            // start() retries every few seconds -- a pcb left behind per attempt would
+            // drain the pool of 5 that MQTT, OTA and the webclient share.
+            if (tcp_bind(pcb, IP_ADDR_ANY, 80) != ERR_OK)
+            {
+                logError("Webserver", "port 80 already in use");
+                tcp_close(pcb);
+                return;
+            }
+            _listenPcb = tcp_listen(pcb); // frees pcb on success only
             if (!_listenPcb)
             {
                 logError("Webserver", "tcp_listen failed");
+                tcp_close(pcb);
                 return;
             }
 
@@ -1041,16 +1074,33 @@ namespace OpenKNX
             logInfoP("Started on port 80");
         }
 
-        void Webserver::loop()
+        void Webserver::loopPlatform()
         {
-            // Ausserhalb des lwIP-Callback-Stacks: doHttpDispatch() baut die komplette
-            // Antwort und ist für onRecv() zu schwer.
             for (int ci = 0; ci < MAX_CONN; ci++)
             {
-                ConnSlot& s = g_slots[ci];
-                if (!s.pcb || !s.hasPendingRequest) continue;
-                s.hasPendingRequest = false;
-                doHttpDispatch(&s);
+                // Unlocked peek: every lock release runs the async context's workers.
+                const ConnSlot& peek = g_slots[ci];
+                if (!g_streamGc[ci].fn && !(peek.pcb && (peek.hasPendingRequest || peek.state == CS_HTTP_SEND)))
+                    continue;
+
+                StreamGc gc = {};
+                {
+                    // Keeps the IRQ from releasing the slot mid-dispatch; see WebserverPlatform.md.
+                    LWIPMutex lock;
+                    ConnSlot& s = g_slots[ci];
+                    if (s.pcb && s.hasPendingRequest)
+                    {
+                        s.hasPendingRequest = false;
+                        doHttpDispatch(&s);
+                    }
+                    else if (s.pcb && s.state == CS_HTTP_SEND)
+                    {
+                        pumpHttp(&s);
+                    }
+                    gc = g_streamGc[ci];
+                    g_streamGc[ci] = {};
+                }
+                if (gc.fn) gc.fn(gc.ctx); // closes files -- no need for the lwIP lock
             }
         }
 
@@ -1064,64 +1114,49 @@ namespace OpenKNX
             return WS_MAX_PAYLOAD;
         }
 
-        bool Webserver::sendToClient(const std::string&, int fd, const char* data, size_t len)
+        // Bypasses the queue -- only the drain calls this, and it handles Failed.
+        WsSendResult Webserver::wsSendNow(const char*, int fd, const char* data, size_t len)
         {
-            if (!_listenPcb) return false;
+            if (!_listenPcb) return WsSendResult::Failed;
             if (fd < 0 || fd >= MAX_CONN || !g_slots[fd].pcb || g_slots[fd].state != CS_WS)
-                return false;
-            // Failed braucht hier keine Sonderbehandlung: tote Verbindungen räumt
-            // lwIP über onErr/onPoll ab.
-            return wsTcpSend(g_slots[fd].pcb, data, len) == WsSendResult::Ok;
+                return WsSendResult::Failed;
+            return wsTcpSend(g_slots[fd].pcb, data, len);
         }
 
-        void Webserver::sendWebsocketMessage(const std::string& uri, const char* message, int fd)
+        uint32_t Webserver::wsPeerIdleMs(int fd) const
         {
-            if (!_listenPcb) return;
-
-            if (fd >= 0)
-            {
-                if (fd < MAX_CONN && g_slots[fd].pcb && g_slots[fd].state == CS_WS)
-                    wsTcpSend(g_slots[fd].pcb, message, strlen(message));
-                return;
-            }
-
-            const WebSocketRoute* r = findSocketRoute(uri.c_str());
-            if (!r || r->clients.empty()) return;
-
-            size_t len = strlen(message);
-            std::vector<int> clients = r->clients; // snapshot: onSent/onErr must not see us iterate it
-            for (int idx : clients)
-            {
-                if (idx < 0 || idx >= MAX_CONN) continue;
-                ConnSlot& s = g_slots[idx];
-                if (s.pcb && s.state == CS_WS)
-                    wsTcpSend(s.pcb, message, len);
-            }
+            if (fd < 0 || fd >= MAX_CONN || !g_slots[fd].pcb) return UINT32_MAX;
+            return millis() - g_slots[fd].lastPeerMs;
         }
 
-        void Webserver::notifySocketConnect(const char* uri, int fd, bool connected)
+        // wnd 0 / persist > 0: the browser closed its window, i.e. stopped reading.
+        // nrtx > 0 with unacked data: we retransmit and nothing comes back.
+        void Webserver::wsLinkInfo(int fd, char* buf, size_t len) const
         {
-            WebSocketRoute* r = findSocketRoute(uri);
-            if (r)
-            {
-                if (connected)
-                    r->clients.push_back(fd);
-                else
-                    r->clients.erase(std::remove(r->clients.begin(), r->clients.end(), fd), r->clients.end());
-            }
-
-            if (r && r->onConnect) r->onConnect(fd, connected);
+            buf[0] = 0;
+            if (fd < 0 || fd >= MAX_CONN || !g_slots[fd].pcb) return;
+            const tcp_pcb* p = g_slots[fd].pcb;
+            snprintf(buf, len, "; wnd %u, sndbuf %u, qlen %u, unacked %d, unsent %d, nrtx %u, persist %u",
+                     (unsigned)p->snd_wnd, (unsigned)p->snd_buf, (unsigned)p->snd_queuelen,
+                     p->unacked != nullptr, p->unsent != nullptr, (unsigned)p->nrtx, (unsigned)p->persist_backoff);
         }
 
-        void Webserver::notifySocketMessage(const char* uri, int fd,
-                                            uint8_t* data, int length, bool isBinary)
+        void Webserver::dropClient(const char* uri, int fd)
         {
-            WebSocketRoute* r = findSocketRoute(uri);
-            if (r && r->onMessage)
-            {
-                WebSocketFrame frame{data, length, isBinary};
-                r->onMessage(fd, &frame);
-            }
+            if (fd < 0 || fd >= MAX_CONN) return;
+            ConnSlot* s = &g_slots[fd];
+
+            // Deregister first and outside the lock, even for an already free slot: the
+            // module's onConnect(false) must not run with the ethernet IRQ deferred, and a
+            // cursor left in the queue would warn on every tick.
+            notifySocketConnect(uri, fd, false);
+
+            // The teardown must run as a whole: each tcp_* wrapper releases the deferred
+            // IRQ on the way out, which could free the pcb the next line works on.
+            LWIPMutex lock;
+
+            // Only if the slot still holds a WS connection -- onAccept may have reused it.
+            if (s->pcb && s->state == CS_WS) closeSlot(s, false);
         }
 
     } // namespace Network

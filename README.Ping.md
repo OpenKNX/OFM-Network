@@ -134,7 +134,7 @@ ping 192.168.1.254
 - **RetryContext** (shared_ptr): Manages the state of a retry-ping series
 - **weak_ptr**: Prevents circular references and memory leaks
 - **Queue**: Additional pings are automatically queued when capacity is full
-- **DNS-Enqueue** (ESP32): Prevents deadlocks by enqueueing DNS results
+- **DNS-Enqueue**: DNS results are queued and delivered from `loop()` — on ESP32 they come from the TCP/IP task, on RP2040 from the network interrupt
 
 ### Thread Safety
 

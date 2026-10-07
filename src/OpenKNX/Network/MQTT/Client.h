@@ -104,6 +104,7 @@ namespace OpenKNX
                 static const size_t RX_BUF_SIZE = 1024;
                 uint8_t _rxBuf[RX_BUF_SIZE];
                 size_t _rxLen = 0;
+                size_t _rxSkip = 0; // rest of a packet larger than _rxBuf, discarded
 
                 std::vector<Subscription> _subscriptions;
                 size_t _subscribedUpTo = 0; // index into _subscriptions for pending sends
@@ -112,15 +113,14 @@ namespace OpenKNX
                 // ESP32: Arduino WiFiClient
                 void *_wifiClient = nullptr; // WiFiClient* — void* to avoid including WiFi.h here
 #elif defined(ARDUINO_ARCH_RP2040)
-                // RP2040: lwIP tcp_pcb
-                void *_pcb = nullptr;
-                // Reassembly buffer managed via lwIP callbacks (static trampoline)
-                static Client *_instance; // single-instance for callback routing
+                // RP2040: lwIP tcp_pcb; the IRQ nulls it on error
+                void *volatile _pcb = nullptr;
+                struct pbuf *_rxPbuf = nullptr; // received, not yet read by loop()
+                volatile bool _tcpUp = false;
+                volatile bool _rxClosed = false;
                 static err_t lwipRecv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err);
                 static void lwipErr(void *arg, err_t err);
                 static err_t lwipConnected(void *arg, struct tcp_pcb *pcb, err_t err);
-                static err_t lwipPoll(void *arg, struct tcp_pcb *pcb);
-                bool _tcpConnectPending = false;
 
                 void onResolved(IPAddress ip);
                 uint16_t _resolveId = 0; // drops results of a superseded lookup

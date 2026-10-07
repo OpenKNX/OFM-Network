@@ -172,15 +172,15 @@ namespace OpenKNX
                 bool chunkDone = false;
 
 #ifdef ARDUINO_ARCH_RP2040
-                // lwIP raw API for non-blocking TCP (plain HTTP and SSL alike)
-                struct tcp_pcb *tcpPcb    = nullptr;
-                volatile bool   tcpConnEst = false;
-                volatile bool   tcpError   = false;
+                // lwIP raw API for non-blocking TCP (plain HTTP and SSL alike).
+                // The IRQ nulls tcpPcb on error and sets the flags.
+                struct tcp_pcb *volatile tcpPcb = nullptr;
+                volatile bool tcpConnEst = false;
+                volatile bool tcpError   = false;
+                volatile bool rxClosed   = false; // FIN received
 
                 // Zero-copy receive: pbuf chain from lwipRecv, consumed in platformRead
-                struct pbuf *rxHead   = nullptr; // first pbuf with unread data
-                struct pbuf *rxTail   = nullptr; // last pbuf for O(1) append
-                uint16_t     rxOffset = 0;       // byte offset into rxHead->payload
+                struct pbuf *rxPbuf = nullptr;
 
                 // BearSSL state — allocated on demand when ssl=true; defined in Handler_RP2040.cpp
                 struct BrState *brState = nullptr;

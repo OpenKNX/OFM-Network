@@ -12,7 +12,7 @@
 
     // GA-Namen client-seitig aus der TSV (Backend hält keine Namen vor)
     let gaNames = null;
-    fetch('/filemanager/download?path=%2Fopenknx_ga.tsv')
+    fetch('/groupmonitor/ga.tsv')
         .then(r => r.ok ? r.text() : Promise.reject())
         .then(t => {
             gaNames = new Map();
@@ -47,10 +47,10 @@
                     this.checked = false;
                     return;
                 }
-                if (ws && ws.readyState === 1) ws.send('busmonitor:on');
+                OpenKNX.send('busmon', '1');
                 statusRow('Busmonitor-Modus aktiviert &mdash; Telegramme werden nicht mehr verarbeitet', 'gm-sys-err');
             } else {
-                if (ws && ws.readyState === 1) ws.send('busmonitor:off');
+                OpenKNX.send('busmon', '0');
                 statusRow('Busmonitor-Modus deaktiviert (TP-Reset)', 'gm-sys-ok');
             }
         };
@@ -89,7 +89,6 @@
         if (cbScroll.checked) wrap.scrollTop = wrap.scrollHeight;
     }
 
-    let ws, reconnTimer;
     function statusRow(msg, cls) {
         const tr = document.createElement('tr');
         tr.className = 'gm-sysrow';
@@ -98,31 +97,32 @@
         if (cbScroll.checked) wrap.scrollTop = wrap.scrollHeight;
     }
 
-    function connect() {
-        ws = new WebSocket('ws://' + location.host + '/groupmonitor');
-        ws.onopen = function () {
+    // Socket und Reconnect kommen aus base.js. Den Busmonitor-Zustand liefert das
+    // status-Event mit -- beim Verbinden und bei jeder Änderung, ein eigener Abruf
+    // ist deshalb nicht mehr nötig.
+    OpenKNX.on('tp', function (d) {
+        try { addRow(JSON.parse(d)); } catch (err) {}
+    });
+
+    OpenKNX.on('status', function (d) {
+        if (!cbBusmon) return;
+        let s;
+        try { s = JSON.parse(d); } catch (err) { return; }
+        if (s.busmon === undefined) return;
+        const was = cbBusmon.checked;
+        cbBusmon.checked = !!s.busmon;
+        if (s.busmon && !was) statusRow('Busmonitor-Modus ist aktiv &mdash; Telegramme werden nicht verarbeitet', 'gm-sys-err');
+    });
+
+    OpenKNX.onState(function (state) {
+        if (state === 'open') {
             st.textContent = 'Verbunden';
             st.className = 'gm-status ok';
-            reconnDelay = 2000;
             statusRow('Verbunden', 'gm-sys-ok');
-            // Query busmonitor state after connect (cbBusmon absent on a router build)
-            if (cbBusmon) {
-                fetch('/groupmonitor/state').then(r => r.json()).then(s => {
-                    cbBusmon.checked = !!s.monitoring;
-                    if (s.monitoring) statusRow('Busmonitor-Modus ist aktiv &mdash; Telegramme werden nicht verarbeitet', 'gm-sys-err');
-                }).catch(() => {});
-            }
-        };
-        ws.onmessage = e => { try { addRow(JSON.parse(e.data)); } catch (err) {} };
-        ws.onclose = () => {
+        } else {
             st.textContent = 'Getrennt — verbinde neu…';
             st.className = 'gm-status err';
             statusRow('Verbindung getrennt — verbinde neu…', 'gm-sys-err');
-            clearTimeout(reconnTimer);
-            reconnTimer = setTimeout(connect, reconnDelay);
-            reconnDelay = Math.min(reconnDelay * 2, 30000);
-        };
-    }
-    let reconnDelay = 2000;
-    connect();
+        }
+    });
 })();

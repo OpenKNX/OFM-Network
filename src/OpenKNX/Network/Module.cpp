@@ -371,7 +371,6 @@ namespace OpenKNX
                     // do nothing
                     break;
                 case ARDUINO_EVENT_ETH_START:
-                case ARDUINO_EVENT_WIFI_AP_START:
                     logDebugP("Event: Start");
                     // The hostname must be set after the interface is started, but needs
                     // to be set before DHCP, so set it from the event handler thread.
@@ -427,7 +426,7 @@ namespace OpenKNX
 #ifdef ARDUINO_ARCH_ESP32
 #ifdef KNX_IP_WIFI
             KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP);
-            KNX_NETIF.mode(WIFI_AP_STA);
+            KNX_NETIF.mode(WIFI_STA);
             KNX_NETIF.setAutoReconnect(true);
             if (strlen(_wifiSSID) > 0)
                 KNX_NETIF.begin(_wifiSSID, _wifiPassphrase);
@@ -1154,16 +1153,26 @@ namespace OpenKNX
 #if defined(OPENKNX_TELEGRAMJSON) && defined(OPENKNX_WEBMONITOR)
                     groupmonitor.setup();
 #endif
+                    // Last, not in setup(): only now are all routes, menus and assets
+                    // registered. On ESP32 httpd serves from its own task, so a request
+                    // landing earlier could iterate a vector while it reallocates.
+                    webserver.start();
                 }
                 if (webserver.isRunning())
                 {
-                    webserver.loop();
+                    // Producer vor Transport: webserver.loop() entleert am Ende die
+                    // Sendequeue, was diese Module vorher gefüllt haben sollen. In
+                    // umgekehrter Reihenfolge ginge alles einen Tick später raus.
 #ifdef OPENKNX_WEBCONSOLE
                     webconsole.loop();
 #endif
 #ifdef OPENKNX_WEBFS
                     filemanager.loop();
 #endif
+#if defined(OPENKNX_TELEGRAMJSON) && defined(OPENKNX_WEBMONITOR)
+                    groupmonitor.loop();
+#endif
+                    webserver.loop();
                 }
             }
 #endif

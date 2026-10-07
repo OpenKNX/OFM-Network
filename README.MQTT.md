@@ -2,6 +2,9 @@
 
 Built-in MQTT 3.1.1 implementation with no external dependencies. Supports two modes: **Client** (connects to an external broker) and **Broker** (acts as a minimal embedded broker). Both modes are available on ESP32 and RP2040.
 
+Interna und Begründungen: [`docs/agents/MQTT.md`](docs/agents/MQTT.md),
+[`TelegramJson.md`](docs/agents/TelegramJson.md).
+
 ---
 
 ## Enabling MQTT
@@ -80,7 +83,7 @@ The prefix is determined as follows (in order):
 
 ### `knx/tp/telegramm` Payload
 
-One JSON object per received TP telegram, built by the same decoder as `/groupmonitor` (`OpenKNX::Network::buildTelegramJson()`, see [`AGENTS.md`](AGENTS.md)):
+One JSON object per received TP telegram, built by the same decoder as `/groupmonitor` (`OpenKNX::Network::buildTelegramJson()`, see [`docs/agents/TelegramJson.md`](docs/agents/TelegramJson.md)):
 
 ```json
 {"src":{"addr":4353,"text":"1.1.1"},"dst":{"addr":2307,"text":"1/1/3"},"ga":true,
@@ -167,7 +170,11 @@ The broker/client loop runs in a dedicated **FreeRTOS task** (Core 0, `OPENKNX_M
 
 ### RP2040
 
-The broker/client loop runs in the main Arduino **`loop()`** (single-threaded, `NO_SYS=1`). The broker uses lwIP callbacks (`tcp_accept`, `tcp_recv`, `tcp_err`, `tcp_poll`) only for buffering incoming data — all MQTT protocol processing happens in `loop()`, never inside a callback.
+The broker/client loop runs in the main Arduino **`loop()`** (single-threaded, `NO_SYS=1`). The lwIP callbacks (`tcp_accept`, `tcp_recv`, `tcp_err`, `tcp_connect`) run in the ethernet interrupt and only hand over: a new connection, received pbufs, connection established or lost. Connection bookkeeping, packet parsing, routing and subscription callbacks run in `loop()`, never inside a callback.
+
+Received data stays in lwIP's pbuf chain and is acknowledged only as `loop()` reads it into the connection's buffer, so a slow loop closes the TCP window instead of losing data. A broker client whose single packet exceeds the 512 B per-connection buffer is disconnected with an error.
+
+An incoming packet larger than the client's 1 KB receive buffer is skipped with a warning (both platforms) — a reconnect would just receive the same retained message again.
 
 ### Send Queue
 
@@ -218,7 +225,7 @@ QoS 2 inbound is accepted (PUBREC/PUBREL/PUBCOMP are exchanged) but the message 
 
 `Client::begin()` reports success as soon as the client is **set up** — a failed initial TCP connect is runtime state, not a setup error, and is retried from `Client::loop()` every 5 seconds. Reporting it as failure used to break the retry entirely: `Module::setup()` keeps `_initialized` false, `Module::loop()` returns before `Client::loop()`, and the reconnect timer armed in `begin()` never fires. What actually retried was `setup()` itself, at tick rate, printing its whole log block each time. For the same reason `_initialized` is now set even when `Broker::begin()` fails — an inactive broker is a no-op in `loop()`, whereas repeating setup() is not.
 
-The server may be a hostname or an IP address. On ESP32 `WiFiClient::connect()` resolves it; on RP2040 `tcpConnect()` goes through [`OpenKNX::Network::DNS::query()`](src/OpenKNX/Network/DNS.h) — the same asynchronous helper Ping and the Webclient use — and the client sits in `STATE_RESOLVING` until the callback arrives. Nothing blocks. Two details that state exists for: the 5 s retry in `loop()` must not fire a second lookup while one is in flight, and a result arriving from a superseded attempt is dropped via `_resolveId`. On a DNS cache hit the callback runs **inline**, still inside `tcpConnect()` — so the caller must not touch `_state` or `_reconnectTimer` after that call.
+The server may be a hostname or an IP address. On ESP32 `WiFiClient::connect()` resolves it; on RP2040 `tcpConnect()` goes through [`OpenKNX::Network::DNS::query()`](src/OpenKNX/Network/DNS.h) — the same asynchronous helper Ping and the Webclient use — and the client sits in `STATE_RESOLVING` until the callback arrives. Nothing blocks. Two details that state exists for: the 5 s retry in `loop()` must not fire a second lookup while one is in flight, and a result arriving from a superseded attempt is dropped via `_resolveId`. The callback always arrives from `DNS::loop()` on a later tick, even on a cache hit — never inline and never from the network interrupt.
 
 ---
 

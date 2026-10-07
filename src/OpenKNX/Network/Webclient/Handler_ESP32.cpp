@@ -79,10 +79,12 @@ namespace OpenKNX
 
                     client->setTimeout(req->timeoutMs / 1000);
 
-                    auto sendDone = [&](Response res) {
+                    // By value: every path deletes req before calling sendDone.
+                    const uint32_t reqId = req->requestId;
+                    auto sendDone = [self, reqId](Response res) {
                         auto *entry = wcNew<ResultEntry>();
                         entry->type = ResultEntry::Type::DONE;
-                        entry->requestId = req->requestId;
+                        entry->requestId = reqId;
                         entry->dataLen = 0;
                         entry->response = std::move(res);
                         xQueueSend(self->_resultQueue, &entry, portMAX_DELAY);
@@ -393,20 +395,31 @@ namespace OpenKNX
                 {
                     if (!entry) continue;
 
+                    // Callbacks may start a request, whose push_back reallocates the vector:
+                    // take the function out before calling it, never touch `it` afterwards.
                     for (auto it = _activeCallbacks.begin(); it != _activeCallbacks.end(); ++it)
                     {
                         if (it->first != entry->requestId) continue;
 
                         if (entry->type == ResultEntry::Type::DATA)
                         {
-                            if (it->second.onData)
-                                it->second.onData(entry->data, entry->dataLen);
+                            DataCallback cb = std::move(it->second.onData);
+                            if (cb)
+                            {
+                                cb(entry->data, entry->dataLen);
+                                for (auto &ac : _activeCallbacks)
+                                    if (ac.first == entry->requestId)
+                                    {
+                                        ac.second.onData = std::move(cb);
+                                        break;
+                                    }
+                            }
                         }
                         else
                         {
-                            if (it->second.onDone)
-                                it->second.onDone(entry->response);
+                            DoneCallback cb = std::move(it->second.onDone);
                             _activeCallbacks.erase(it);
+                            if (cb) cb(entry->response);
                         }
                         break;
                     }

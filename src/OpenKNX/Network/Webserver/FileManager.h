@@ -37,6 +37,8 @@ namespace OpenKNX
             void handleFetchStatus(WebRequest& req, WebResponse& res);  // poll it
 #endif
 
+            bool _initialized = false;
+
             bool ensureFs();
             static std::string sanitizePath(const std::string& raw);
             static std::string urlEncode(const std::string& s);

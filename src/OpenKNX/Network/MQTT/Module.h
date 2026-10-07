@@ -78,7 +78,7 @@ namespace OpenKNX
                 bool _initialized = false;
 
                 // Mirror, refreshed once per MQTT round -- reading broker/client directly
-                // would mean taking _mutex from the KNX loop. See AGENTS.md.
+                // would mean taking _mutex from the KNX loop. See docs/agents/MQTT.md.
                 volatile bool _connected = false;
                 void refreshConnected();
 
@@ -86,7 +86,7 @@ namespace OpenKNX
                 Broker _broker;
 
                 // Send queue: publishing inline would block (ESP32) or drop under load
-                // (RP2040) -- see AGENTS.md. One block per entry, header + topic + payload.
+                // (RP2040) -- see README.MQTT.md. One block per entry, header + topic + payload.
                 struct QueueEntry
                 {
                     QueueEntry *next;
