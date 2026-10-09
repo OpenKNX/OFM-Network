@@ -53,6 +53,7 @@
 #if defined(ARDUINO_ARCH_ESP32)
 #include <ESPmDNS.h>
 #include <Preferences.h>
+#include <atomic>
 #include <vector>
 #if defined(KNX_IP_LAN)
 #include <ETH.h>
@@ -313,6 +314,13 @@ namespace OpenKNX
 
 #ifdef ARDUINO_ARCH_ESP32
             bool espConnected = false;
+
+            // KNX-IP requests from the network event task, applied by loop(): IpDataLinkLayer is not thread-safe.
+            static constexpr uint32_t KNXIP_REQ_DOWN = 0x01;   // disable (ETH START, LOST_IP, DISCONNECTED, STOP)
+            static constexpr uint32_t KNXIP_REQ_REBIND = 0x02; // GOT_IP: re-bind on an address change or a closed endpoint
+            std::atomic<uint32_t> _knxIpRequest{0};
+            void requestKnxIp(bool rebind);
+            void applyKnxIpRequest();
 #endif
 
             char _hostName[25] = {};

@@ -176,7 +176,7 @@ namespace OpenKNX
             delay(500);
             initPhy();
             initIp();
-            controlKnxIp(true);
+            controlKnxIp(true); // ESP32: the pending STOP/START down request closes it again; GOT_IP or the link check re-opens it
 
             logInfoP("Complete");
             logIndentDown();
@@ -362,6 +362,9 @@ namespace OpenKNX
         }
 
 #ifdef ARDUINO_ARCH_ESP32
+        /**
+         * @brief Runs on the "arduino_events" task; KNX-IP changes are only recorded here, loop() applies them.
+         */
         void Module::esp32NetworkEvent(CALLBACK_EVENT event)
         {
             switch (event)
@@ -375,7 +378,7 @@ namespace OpenKNX
                     // The hostname must be set after the interface is started, but needs
                     // to be set before DHCP, so set it from the event handler thread.
                     KNX_NETIF.setHostname(_hostName);
-                    controlKnxIp(false);
+                    requestKnxIp(false);
 
                     break;
                 case ARDUINO_EVENT_ETH_CONNECTED:
@@ -385,38 +388,61 @@ namespace OpenKNX
                     break;
                 case ARDUINO_EVENT_ETH_GOT_IP:
                 case ARDUINO_EVENT_WIFI_STA_GOT_IP:
-                {
                     logDebugP("Event: Got IP");
-                    // Rebind kostet Telegramme, daher nur bei echtem IP-Wechsel.
-                    IPAddress ip = localIP();
-                    if (ip != _boundIp)
-                    {
-                        controlKnxIp(false);
-                        controlKnxIp(true);
-                        _boundIp = ip;
-                    }
+                    requestKnxIp(true);
                     break;
-                }
                 case ARDUINO_EVENT_ETH_LOST_IP:
                 case ARDUINO_EVENT_WIFI_STA_LOST_IP:
                     logDebugP("Event: Lost IP");
-                    controlKnxIp(false);
+                    requestKnxIp(false);
                     break;
                 case ARDUINO_EVENT_ETH_DISCONNECTED:
                 case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
                     logDebugP("Event: Disconnected");
-                    controlKnxIp(false);
+                    requestKnxIp(false);
                     espConnected = false;
                     break;
                 case ARDUINO_EVENT_ETH_STOP:
                 case ARDUINO_EVENT_WIFI_STA_STOP:
                     logDebugP("Event: Stop");
-                    controlKnxIp(false);
+                    requestKnxIp(false);
                     espConnected = false;
                     break;
                 default:
                     logDebugP("Event: Ignored %i", event);
                     break;
+            }
+        }
+
+        /**
+         * @brief Event task: a down event replaces any pending request with DOWN; GOT_IP adds REBIND to it.
+         * The last event wins. Router: after a DOWN, the REBIND or the link check in checkLinkStatus() re-joins.
+         */
+        void Module::requestKnxIp(bool rebind)
+        {
+            if (rebind)
+                _knxIpRequest.fetch_or(KNXIP_REQ_REBIND, std::memory_order_release);
+            else
+                _knxIpRequest.exchange(KNXIP_REQ_DOWN, std::memory_order_release); // RMW like the consumer's
+        }
+
+        /**
+         * @brief loop() context: applies the recorded request, DOWN before REBIND (the order they occurred in).
+         * A re-bind costs telegrams, so only on an address change or when the endpoint is not up.
+         */
+        void Module::applyKnxIpRequest()
+        {
+            const uint32_t req = _knxIpRequest.exchange(0, std::memory_order_acquire);
+            if (req & KNXIP_REQ_DOWN) controlKnxIp(false);
+            if (!(req & KNXIP_REQ_REBIND)) return;
+
+            const IPAddress ip = localIP();
+            if (ip == IPAddress()) return; // address gone again; the next GOT_IP requests the bind
+            if (ip != _boundIp || !knxIpEnabled())
+            {
+                controlKnxIp(false);
+                controlKnxIp(true);
+                if (knxIpEnabled()) _boundIp = ip;
             }
         }
 #endif
@@ -1086,6 +1112,10 @@ namespace OpenKNX
                 if (!openknxDisplayModule.tryAddWidget(netInfo))
                     logDebugP("WidgetNetInfo not registered (no display/manager)");
             }
+#endif
+#ifdef ARDUINO_ARCH_ESP32
+            // Ahead of the _powerSave/_otaActive returns, so KNX-IP follows the network in every state.
+            if (_knxIpRequest.load(std::memory_order_relaxed)) applyKnxIpRequest();
 #endif
             if (_restartTimer > 0 && delayCheck(_restartTimer, 2000))
             {
