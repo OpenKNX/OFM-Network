@@ -109,7 +109,7 @@ WiFiUDP Udp;
 
 // Total LAN packet counters. Consumers: the DeviceDisplay net-speed widget (declares it `extern`) and the
 // `net` console output. Bytes aren't available (lwIP MIB2 is off in the prebuilt core), so packets are the
-// honest whole-interface figure. RP2040 + wired LAN only -- the ESP32 ETH class exposes no such counters.
+// whole-interface figure. RP2040 + wired LAN only -- the ESP32 ETH class exposes no such counters.
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
 void openknxLanTraffic(uint32_t &rxPackets, uint32_t &txPackets)
 {
@@ -954,7 +954,7 @@ namespace OpenKNX
         {
             if (!delayCheckMillis(_lastLinkCheck, 500)) return;
 
-            // Honest KNX-IP-Status LED (func 11): reflects the KNXnet/IP datalink, separate from the physical-link LED below.
+            // KNX-IP-Status LED (func 11): reflects the KNXnet/IP datalink, separate from the physical-link LED below.
             checkKnxIpStatus();
 
             // One carrier read per tick, debounced where it can glitch; everything below derives from it
@@ -2077,8 +2077,8 @@ namespace OpenKNX
             if (!enable) _boundIp = IPAddress(); // no address recorded
         }
 
-        // True while the KNXnet/IP datalink layer is enabled (the honest "KNX-IP is running" signal,
-        // distinct from the physical Ethernet/IP link). Counterpart to controlKnxIp().
+        // True while the KNXnet/IP datalink layer is enabled ("KNX-IP is running", distinct from the
+        // physical Ethernet/IP link). Counterpart to controlKnxIp().
         bool Module::knxIpEnabled()
         {
 #if MASK_VERSION == 0x091A || MASK_VERSION == 0x07B0 // primary datalink = KNXnet/IP (091A router, 07B0 interface Bau07B0IP)
@@ -2104,7 +2104,7 @@ namespace OpenKNX
             else if (established())
                 newState = 2; // link/IP up, but KNX-IP not running (router; on 0x07B0 knxIpEnabled is always true -> never here)
             else
-                newState = 3; // no link / no IP (on 0x07B0: the honest "network down" state, was unreachable before)
+                newState = 3; // no link / no IP (on 0x07B0 this is the "network down" state)
 
             if (_knxIpLedState == newState) return;
             _knxIpLedState = newState;
