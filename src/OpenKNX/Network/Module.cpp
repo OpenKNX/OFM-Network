@@ -341,14 +341,6 @@ namespace OpenKNX
 #else
             KNX_NETIF.hostname(_hostName);
 #endif
-
-#ifdef ARDUINO_ARCH_ESP32
-#if defined(ESP_IDF_VERSION) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
-            ::Network.onEvent([](arduino_event_id_t event) -> void { openknxNetwork.esp32NetworkEvent(event); });
-#else
-            WiFi.onEvent([](WiFiEvent_t event) -> void { openknxNetwork.esp32NetworkEvent(event); });
-#endif
-#endif
         }
 
         void Module::init()
@@ -357,6 +349,14 @@ namespace OpenKNX
             logIndentUp();
             initPhy();
             loadSettings();
+#ifdef ARDUINO_ARCH_ESP32
+            // Once only: applyLocalNetworkConfig() re-runs loadSettings(), and a second callback would be appended.
+#if defined(ESP_IDF_VERSION) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+            ::Network.onEvent([](arduino_event_id_t event) -> void { openknxNetwork.esp32NetworkEvent(event); });
+#else
+            WiFi.onEvent([](WiFiEvent_t event) -> void { openknxNetwork.esp32NetworkEvent(event); });
+#endif
+#endif
             initIp();
             logIndentDown();
         }
