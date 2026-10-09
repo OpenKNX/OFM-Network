@@ -1083,7 +1083,7 @@ namespace OpenKNX
             if (_currentLinkState) checkIpStatus();
 
 #ifdef OPENKNX_NETWORK_AUTOIP
-            // every tick, not just the edge: AutoIP takes over ~1 min into the discover phase.
+            // every tick, not just the edge: AutoIP takes over after the DHCP tries, with the link up all along.
             if (_currentLinkState) checkIpAssignmentMethod();
 #endif
 
