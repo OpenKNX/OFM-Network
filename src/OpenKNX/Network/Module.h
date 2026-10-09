@@ -310,7 +310,7 @@ namespace OpenKNX
             IPAddress _staticSubnetMask;
             IPAddress _staticGatewayIP;
             IPAddress _staticNameServerIP;
-            IPAddress _boundIp; // IP, auf die der KNX-Multicast-Socket gebunden ist; leer = nicht gebunden
+            IPAddress _boundIp; // ESP32: address of the last join by REBIND or the link check; a GOT_IP for it skips the rebind while the endpoint is up
 
 #ifdef ARDUINO_ARCH_ESP32
             bool espConnected = false;

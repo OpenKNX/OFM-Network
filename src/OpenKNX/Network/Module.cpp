@@ -969,10 +969,13 @@ namespace OpenKNX
             refreshMulticastMembership(establishedState); // reuses this tick's debounced state
 
 #ifdef ARDUINO_ARCH_ESP32
-            // Fängt einen Link-Flap auf, nach dem GOT_IP ausbleibt. Nur ESP32: RP2040 hat
-            // keine Events und damit keine Lücke. Flankengesteuert: level-triggered würde bei einem
-            // scheiternden Join zweimal pro Sekunde den kompletten Socket-Aufbau wiederholen.
-            controlKnxIp(establishedState);
+            // Level-triggered: follows the link state every tick, so a failing join is retried every 500 ms.
+            if (establishedState != knxIpEnabled())
+            {
+                const IPAddress ip = localIP();
+                controlKnxIp(establishedState);
+                if (establishedState && knxIpEnabled()) _boundIp = ip; // a GOT_IP for this address skips the rebind while up
+            }
 #endif
 
             const bool newLinkState = establishedState || carrier;
@@ -2071,7 +2074,7 @@ namespace OpenKNX
 #elif MASK_VERSION == 0x57B0
             knx.bau().getDataLinkLayer()->enabled(enable);
 #endif
-            if (!enable) _boundIp = IPAddress(); // Socket zu, Bindung ungültig
+            if (!enable) _boundIp = IPAddress(); // no address recorded
         }
 
         // True while the KNXnet/IP datalink layer is enabled (the honest "KNX-IP is running" signal,
