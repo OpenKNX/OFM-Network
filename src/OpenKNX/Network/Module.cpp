@@ -349,6 +349,9 @@ namespace OpenKNX
             logIndentUp();
             initPhy();
             loadSettings();
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+            RP2040ArduinoPlatform::setNetif(KNX_NETIF.getNetIf());
+#endif
 #ifdef ARDUINO_ARCH_ESP32
             // Once only: applyLocalNetworkConfig() re-runs loadSettings(), and a second callback would be appended.
 #if defined(ESP_IDF_VERSION) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
