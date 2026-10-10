@@ -1,5 +1,5 @@
 #pragma once
-// Minimal, self-contained W5500 access layer via raw SPI - for things the Wiznet5500lwIP driver keeps
+// Minimal, self-contained W5500 access layer via raw SPI - for things the W5500Drv driver keeps
 // private (PHY link mode/status, chip version, and any other register a future feature might need).
 //
 // Why: the driver's register helpers (wizchip_read/write, get/setPHYCFGR, wizphy_*) are PRIVATE, so we

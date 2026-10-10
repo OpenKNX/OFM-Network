@@ -1,7 +1,7 @@
 #include "W5500Phy.h"
 #if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
 
-// The Wiznet5500lwIP driver serialises its SPI access with these (weak) core hooks. We take the same
+// The W5500Drv driver serialises its SPI access with these (weak) core hooks. We take the same
 // lock so our raw register access never interleaves with an in-flight driver transaction.
 extern void ethernet_arch_lwip_begin() __attribute__((weak));
 extern void ethernet_arch_lwip_end() __attribute__((weak));

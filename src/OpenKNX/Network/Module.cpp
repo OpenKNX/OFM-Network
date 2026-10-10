@@ -2084,9 +2084,8 @@ namespace OpenKNX
             // reality never heals, while this retries exactly when the datalink is not where it should be.
             if (enable == knxIpEnabled()) return;
 #endif
-            // NOTE: deliberately NOT extended to 0x07B0. On the interface controlKnxIp has always been a no-op
-            // (Bau07B0IP owns it); the endpoint is rebuilt by networkChanged() on the link edge instead.
-            // tear down a live tunnel on a link flap. Router masks only.
+            // Not on 0x07B0: Bau07B0IP owns the endpoint and networkChanged() rebuilds it on the link edge; toggling
+            // it here could drop live tunnels. Router masks only.
 #if MASK_VERSION == 0x091A
             knx.bau().getPrimaryDataLinkLayer()->enabled(enable);
 #elif MASK_VERSION == 0x57B0
@@ -2423,7 +2422,7 @@ namespace OpenKNX
             if (!delayCheckMillis(_lastEthHealth, ETH_HEALTH_INTERVAL_MS)) return;
             _lastEthHealth = millis();
 
-            // Serialize the raw VERSIONR read against the Wiznet5500lwIP async SPI pump (the driver wraps its
+            // Serialize the raw VERSIONR read against the W5500Drv async SPI pump (the driver wraps its
             // own transactions in this same lock). Without it the reads interleave on the shared bus, VERSIONR
             // comes back garbage, and a healthy chip is mis-classified "dead" -> KNX-IP teardown.
             ethernet_arch_lwip_begin();
