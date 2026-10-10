@@ -134,6 +134,10 @@ namespace OpenKNX
             const std::string name() override;
             const std::string version() override;
             void init() override;
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+            /** @brief Drains the W5500 for the KNX stack before it sends (knx pollReceive); skipped in power save and OTA. */
+            void pollEthernetRx();
+#endif
             void loop(bool configured) override;
             void setup(bool configured) override;
             void resetNetwork();

@@ -352,6 +352,9 @@ namespace OpenKNX
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
             RP2040ArduinoPlatform::setNetif(KNX_NETIF.getNetIf());
 #endif
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+            RP2040ArduinoPlatform::setReceivePoll([]() { openknxNetwork.pollEthernetRx(); });
+#endif
 #ifdef ARDUINO_ARCH_ESP32
             // Once only: applyLocalNetworkConfig() re-runs loadSettings(), and a second callback would be appended.
 #if defined(ESP_IDF_VERSION) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
@@ -2753,6 +2756,12 @@ namespace OpenKNX
                 sys_check_timeouts();
             }
             ethernet_arch_lwip_end();
+        }
+
+        // knx pollReceive() hook: gated like the pump in loop(); savePower() holds the chip in reset, OTA owns RX.
+        void Module::pollEthernetRx()
+        {
+            if (!_powerSave && !_otaActive) pumpEthernet();
         }
 
         // OTA RX handover. The framework OTA read (_runUpdate) is fully blocking and never returns to loop()
