@@ -70,10 +70,17 @@
 // OPENKNX_ETH_W5500_MAINLOOP_RX: build the driver WITHOUT the INT pin so RX is NOT IRQ-driven; we pump the chip
 // from the main loop (pumpEthernet) instead. Fixes two W5500+lwIP bugs with one root -- RX/timers running in a
 // preemptive IRQ under a non-fair lock: the tunnel-flood watchdog reboot and the 30 s mDNS loop stall.
-#if defined(PIN_ETH_INT) && !defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
-Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE, PIN_ETH_INT);
+// OPENKNX_ETH_W5500: own copy of the W5500 driver, driver/W5500Drv (see driver/W5500Drv.md).
+#if defined(OPENKNX_ETH_W5500)
+#include "driver/W5500Drv.h"
+using KnxNetif = LwipIntfDev<W5500Drv>;
 #else
-Wiznet5500lwIP KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE);
+using KnxNetif = Wiznet5500lwIP;
+#endif
+#if defined(PIN_ETH_INT) && !defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
+KnxNetif KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE, PIN_ETH_INT);
+#else
+KnxNetif KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE);
 #endif
 
 // Board identity for the mDNS TXT record, same fallback order the console uses for "Device / Name".
@@ -1705,6 +1712,11 @@ namespace OpenKNX
                     openknxLanTraffic(rxPackets, txPackets);
                     logInfoP("Packets RX/TX: %s / %s", humanCount(rxPackets).c_str(),
                              humanCount(txPackets).c_str());
+#if defined(OPENKNX_ETH_W5500)
+                    logInfoP("W5500 socket reopens / close timeouts / command timeouts: %u / %u / %u",
+                             (unsigned)KNX_NETIF.sendReopens(), (unsigned)KNX_NETIF.closeTimeouts(),
+                             (unsigned)KNX_NETIF.cmdTimeouts()); // driver wait bounds that expired
+#endif
                 }
 #endif
                 // logInfoP("Mode: %s", phyMode().c_str()); currently not supported
@@ -2298,7 +2310,7 @@ namespace OpenKNX
         // The bring-up without the RSTn pulse, so the stepped self-heal can own the pulse timing itself.
         bool Module::beginEthAfterReset()
         {
-            // Wiznet5500::begin() -> setSn_CR() spins unbounded on a silent chip; probe before entering.
+            // begin() on a chip that never clears Sn_CR runs its setSn_CR() into the bound; probe before entering.
             const uint8_t probe = _ethLink.chipVersion();
             if (probe != 0x04)
             {
@@ -2446,17 +2458,17 @@ namespace OpenKNX
             recoverEth();
         }
 
-        // Brick-free runtime recovery (no reboot): detach KNX-IP, HW-reset FIRST so the driver's end() busy-wait
-        // returns immediately (that unbounded wait is the old brick), end(), then hand to ethSelfHeal().
+        // Runtime recovery (no reboot): detach KNX-IP, HW-reset FIRST so the driver's end() wait returns at once,
+        // end(), then hand to ethSelfHeal().
         void Module::recoverEth()
         {
             // Reset the PHY FIRST: controlKnxIp(false) leaves the IGMP group on router masks, and that Leave
-            // is a real frame through sendFrame(), which busy-waits unbounded on a wedged chip. After the
+            // is a real frame through sendFrame(), which busy-waits up to its bound on a wedged chip. After the
             // reset Sn_SR reads SOCK_CLOSED and both that wait and end()'s return at once.
             openknx.common.skipLooptimeWarning(); // hwResetPhy() blocks 62ms; the ESP32 twin does the same
             hwResetPhy();
-            // Everything below can transmit or poll the chip unbounded: controlKnxIp(false) emits an IGMP
-            // Leave through sendFrame(), end() spins twice (setSn_CR, Sn_SR). Both only on a chip that
+            // Everything below can transmit or poll the chip: controlKnxIp(false) emits an IGMP Leave through
+            // sendFrame(), end() waits in setSn_CR and on Sn_SR (both bounded). Both only on a chip that
             // answers; a stale _started is cleared by beginEthAfterReset() once it is back.
             const bool chipAnswers = (_ethLink.chipVersion() == 0x04);
             if (chipAnswers) controlKnxIp(false);
