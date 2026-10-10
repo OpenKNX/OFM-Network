@@ -779,6 +779,10 @@ private:
 
     netif *_netif;
 
+    /** @brief True when a KNXnet/IP ROUTING_BUSY is among the frames waiting in the receive buffer (headers only). */
+    bool routingBusyInRx();
+    /** @brief The outgoing frame is a KNXnet/IP ROUTING_INDICATION. */
+    static bool isRoutingIndication(const struct pbuf* p);
     /** @brief Waits for the SENDOK of the frame sent last, reopening the socket after the bound; false when not MACRAW. */
     bool waitSendDone();
     /** @brief Clears SENDOK and TIMEOUT; true when either was set. */

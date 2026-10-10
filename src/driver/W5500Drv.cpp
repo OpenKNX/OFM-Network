@@ -341,6 +341,12 @@ uint16_t W5500Drv::sendFrame(struct pbuf *p) {
 
     const uint16_t txWr = getSn_TX_WR();
     wizchip_write_buf(BlockSelectTxBuf, txWr, (const uint8_t*)p->payload, p->len);
+    // Checked with the frame already in the chip, the last step before SEND: a ROUTING_BUSY that arrived meanwhile
+    // stops this ROUTING_INDICATION. TX_WR stays where it was, so the chip discards the frame; the caller keeps it queued.
+    if (isRoutingIndication(p) && routingBusyInRx()) {
+        ethernet_arch_lwip_gpio_unmask();
+        return 0;
+    }
     setSn_TX_WR(txWr + p->len);
     if (!setSn_CR(Sn_CR_SEND)) {
         ethernet_arch_lwip_gpio_unmask();
@@ -386,6 +392,40 @@ void W5500Drv::reopenSocket() {
     end();
     setSn_MR(Sn_MR_MACRAW);
     setSn_CR(Sn_CR_OPEN);
+}
+
+// KNXnet/IP over IPv4/UDP port 3671 with the given service type; frame = Ethernet II from the destination MAC.
+static bool isKnxIpService(const uint8_t* f, uint16_t len, uint8_t serviceLow) {
+    if (len < 14 + 20 + 8 + 4 || f[12] != 0x08 || f[13] != 0x00 || f[23] != 17)
+        return false;
+    const uint16_t udp = 14 + (uint16_t)(f[14] & 0x0F) * 4;
+    return len >= udp + 8 + 4 && f[udp + 2] == 0x0E && f[udp + 3] == 0x57 && f[udp + 8 + 2] == 0x05
+        && f[udp + 8 + 3] == serviceLow;
+}
+
+bool W5500Drv::isRoutingIndication(const struct pbuf* p) {
+    return isKnxIpService((const uint8_t*)p->payload, p->len, 0x30);
+}
+
+// MACRAW receive buffer: each frame is a 2-octet length (itself included) and the Ethernet frame. Only the headers up
+// to the KNXnet/IP service type are read; at most 16 frames, the rest is left to the next check.
+bool W5500Drv::routingBusyInRx() {
+    uint16_t pending = getSn_RX_RSR();
+    uint16_t ptr = getSn_RX_RD();
+    for (uint8_t n = 0; n < 16 && pending >= 2; n++) {
+        uint8_t h[2 + 64];
+        wizchip_read_buf(BlockSelectRxBuf, ptr, h, 2);
+        const uint16_t size = ((uint16_t)h[0] << 8) | h[1];
+        if (size < 2 || size > pending)
+            return false;
+        const uint16_t peek = (size - 2) < 64 ? (size - 2) : 64;
+        wizchip_read_buf(BlockSelectRxBuf, ptr + 2, h + 2, peek);
+        if (isKnxIpService(h + 2, peek, 0x32))
+            return true;
+        ptr += size;
+        pending -= size;
+    }
+    return false;
 }
 
 #endif
