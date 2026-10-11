@@ -1,6 +1,6 @@
 # Changes
 
-## upcoming releases
+## ec/v0.9.0-beta.1: 2026-10-11
 
 ### From upstream v1dev (merged)
 
@@ -43,11 +43,15 @@ Everything below is on `ec/v1dev-ec` and has not been released upstream yet.
 * fix: the KNX multicast socket is rebound on an IP change and the link state reconciled, restored after the namespace refactor dropped it
 * fix: the RP2040 W5500 robustness layer was lost in the refactor and is restored
 * feature: AutoIP fallback, lwIP link state on the W5500, and connection-age plus reconnect statistics
+* fix (ESP32): KNX-IP is switched only from the main loop. The network event handler runs on its own task and opened or closed the KNXnet/IP endpoint while the loop was using it; it now records the request and the loop applies it. The handler is registered once, so a network setting applied from the display no longer makes every later event run it twice
+* fix (ESP32): after a link flap that the link check recovers, the GOT_IP that follows for the same address no longer closes and reopens the endpoint
+* feature (RP2040, W5500): the KNX stack drains the W5500 before it sends a routing frame, so a ROUTING_BUSY waiting in the chip is seen first; a ROUTING_INDICATION is not sent while a ROUTING_BUSY waits in the chip's receive buffer, the router keeps it queued instead. On an interface (mask 07B0) the refused frame is not queued: it is confirmed negatively and counted in PID 72
 
 **Display widgets**
 * Feature: `WidgetNetSpeed` ships with this module now, where the packet counters live, instead of being copied into every product
 * Feature: `WidgetNetInfo` shows host name, IP with its assignment method, link state and link age -- taken off the system-info widget of OGM-Common, which had to reach into this module for them
 * Change: both register from `loop()`, not `setup()`: this module is number 7 and DeviceDisplay is 10, so in `setup()` there is no widget manager yet
+* feature (ESP32, wired LAN): the LAN speed widget, the overview page (`Pakete RX/TX`) and `net` show the packet counters of the whole interface. The ESP32 ETH class exposes none, so the module counts at the lwIP netif, whose input and output functions it wraps in the tcpip task. Built only for a device with a display, or with `OPENKNX_NET_PACKET_COUNT`; before, the widget showed "n/a" on ESP32. Measured on an ESP32 interface: 20 echo requests raised the counters by 48 and 41
 
 **Network configuration and diagnostics**
 * feature: mDNS announces the product, the KNX order number and the board — a scanner can name a device instead of showing a bare serial, and a tool can tell before an upload whether the image belongs to it
@@ -70,6 +74,9 @@ Everything below is on `ec/v1dev-ec` and has not been released upstream yet.
 * fix: the KNXnet/IP datalink is re-enabled after a recovery, and `net reset` no longer disables it on a path that returns before the re-enable -- on a router that left the device without routing or discovery until a reboot
 * fix: the SPI clock has one source. The health probe re-clocked the bus and the Wiznet driver never sets a clock of its own, so the configured 28 MHz was not in effect after the first probe; probes now use the driver clock and only a deliberate diagnostic rate is restored. The default is the 8 MHz the bus has actually been running at -- raising it is a separate change that needs its own soak test
 * fix: the post-mortem line logs a link duration that still exists at that moment and a rollover-safe uptime
+* change (RP2040, W5500): the module runs its own copy of the arduino-pico W5500 driver (`src/driver/W5500Drv`, BSD-3, differences listed in `W5500Drv.md`). Register and frame data move in SPI blocks, a frame's SENDOK is awaited before the next send instead of after its own, and every wait on the chip has a bound, so a chip that stops answering no longer hangs the main loop in `sendFrame()`, `end()` or `setSn_CR()`; a corrupt received frame length is dropped instead of moving the receive pointer
+* feature: `net` shows the W5500 socket reopens, close timeouts and command timeouts since boot
+* change (RP2040): the module hands its lwIP interface to the knx platform (`setNetif()`); it needs the matching knx version
 
 **Web UI**
 * feature: the browser tab shows the hostname instead of "OpenKNX", so several devices can be told apart in tabs, bookmarks and history -- the name mDNS and DHCP already use, changeable in ETS
