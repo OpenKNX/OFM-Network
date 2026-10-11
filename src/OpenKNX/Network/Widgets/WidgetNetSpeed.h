@@ -6,11 +6,9 @@
 #include <string>
 
 /**
- * @brief LAN throughput widget (single page): live TX/RX rate + history sparklines.
+ * @brief LAN traffic widget (single page): live TX and RX rate in packets per second with a mirrored history.
  *
- * Total Ethernet traffic in bytes/s, from lwIP's netif byte counters (ifin/outoctets, needs
- * -D MIB2_STATS=1). "Big read-out": large TX (up) and RX (down) numbers, each with a sparkline.
- * Auto unit B/s -> KB/s -> MB/s. Read-only; the counters live in lwIP, this widget only samples them.
+ * Samples the whole-interface packet counters of openknxLanTraffic(); a build without them shows "n/a".
  */
 class WidgetNetSpeed : public Widget
 {
@@ -60,13 +58,13 @@ class WidgetNetSpeed : public Widget
     uint32_t _lastDraw = 0;
     bool _forceRedraw = true;
 
-    // rate sampling from the lwIP byte counters (uint32 deltas wrap safely)
+    // rate sampling from the packet counters (uint32 deltas wrap safely)
     uint32_t _lastSample = 0;
-    uint32_t _lastRxBytes = 0, _lastTxBytes = 0;
-    uint32_t _rxRate = 0, _txRate = 0; // bytes/s
+    uint32_t _lastRxPackets = 0, _lastTxPackets = 0;
+    uint32_t _rxRate = 0, _txRate = 0; // packets/s
     bool _haveBase = false;
 
-    // history ring (bytes/s), auto-scaled at draw time
+    // history ring (packets/s), auto-scaled at draw time
     uint16_t _rxHist[SPARK_LEN] = {0};
     uint16_t _txHist[SPARK_LEN] = {0};
     uint8_t _histHead = 0;

@@ -299,7 +299,7 @@ namespace OpenKNX
                                            : "–", "ov-mask");
                 row("Gateway", net ? openknxNetwork.gatewayIP().toString().c_str()
                                            : "–", "ov-gw");
-#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+#ifdef OPENKNX_NET_HAVE_LAN_TRAFFIC
                 {
                     uint32_t rxPackets = 0, txPackets = 0;
                     openknxLanTraffic(rxPackets, txPackets);

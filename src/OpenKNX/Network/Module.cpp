@@ -114,14 +114,77 @@ WiFiUDP Udp;
 #pragma warn "Unsupported platform"
 #endif
 
-// Total LAN packet counters. Consumers: the DeviceDisplay net-speed widget (declares it `extern`) and the
+// Total LAN packet counters. Consumers: the DeviceDisplay net-speed widget, the overview page and the
 // `net` console output. Bytes aren't available (lwIP MIB2 is off in the prebuilt core), so packets are the
-// whole-interface figure. RP2040 + wired LAN only -- the ESP32 ETH class exposes no such counters.
+// whole-interface figure.
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
 void openknxLanTraffic(uint32_t &rxPackets, uint32_t &txPackets)
 {
     rxPackets = KNX_NETIF.packetsReceived();
     txPackets = KNX_NETIF.packetsSent();
+}
+#elif defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_NET_HAVE_LAN_TRAFFIC)
+// ESP32: the netif's input and linkoutput are wrapped by two counting functions. Both run with the lwIP
+// core held, so the increments do not race; a reader takes a 32-bit snapshot.
+static volatile uint32_t lanRxPackets = 0;
+static volatile uint32_t lanTxPackets = 0;
+static netif_input_fn lanOrigInput = nullptr;
+static netif_linkoutput_fn lanOrigLinkOutput = nullptr;
+static netif *lanHooked = nullptr;
+
+static err_t lanCountInput(struct pbuf *p, struct netif *inp)
+{
+    lanRxPackets = lanRxPackets + 1;
+    return lanOrigInput(p, inp);
+}
+
+static err_t lanCountLinkOutput(struct netif *n, struct pbuf *p)
+{
+    lanTxPackets = lanTxPackets + 1;
+    return lanOrigLinkOutput(n, p);
+}
+
+/**
+ * @brief Wraps the netif with the given index; runs in the tcpip task, a no-op when it is wrapped already.
+ * A netif created anew gets wrapped again, and a wrapped one that is still listed is restored first.
+ */
+static void lanHookNetif(void *arg)
+{
+    netif *n = netif_get_by_index((u8_t)(uintptr_t)arg);
+    if (n == nullptr || n->input == nullptr || n->linkoutput == nullptr) return;
+    if (n == lanHooked && n->input == lanCountInput && n->linkoutput == lanCountLinkOutput) return;
+
+    netif *it;
+    NETIF_FOREACH(it)
+    {
+        if (it != lanHooked) continue;
+        if (it->input == lanCountInput) it->input = lanOrigInput;
+        if (it->linkoutput == lanCountLinkOutput) it->linkoutput = lanOrigLinkOutput;
+    }
+    lanOrigInput = n->input;
+    lanOrigLinkOutput = n->linkoutput;
+    n->input = lanCountInput;
+    n->linkoutput = lanCountLinkOutput;
+    lanHooked = n;
+}
+
+/** @brief Asks the tcpip task every 2 s to make sure the KNX netif is wrapped. */
+static void lanTrafficService()
+{
+    static uint32_t last = 0;
+    if (!delayCheckMillis(last, 2000)) return;
+    last = millis();
+    esp_netif_t *en = KNX_NETIF.netif();
+    if (en == nullptr) return;
+    const int idx = esp_netif_get_netif_impl_index(en);
+    if (idx <= 0) return;
+    tcpip_try_callback(lanHookNetif, (void *)(uintptr_t)idx);
+}
+
+void openknxLanTraffic(uint32_t &rxPackets, uint32_t &txPackets)
+{
+    rxPackets = lanRxPackets;
+    txPackets = lanTxPackets;
 }
 #endif
 
@@ -966,6 +1029,9 @@ namespace OpenKNX
         void Module::checkLinkStatus()
         {
             if (!delayCheckMillis(_lastLinkCheck, 500)) return;
+#if defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_NET_HAVE_LAN_TRAFFIC)
+            lanTrafficService();
+#endif
 
             // KNX-IP-Status LED (func 11): reflects the KNXnet/IP datalink, separate from the physical-link LED below.
             checkKnxIpStatus();
@@ -1704,7 +1770,7 @@ namespace OpenKNX
 #ifdef KNX_IP_LAN
                 _ethLink.logLinkInfo(); // "ETH link: X Mbit Y-duplex (fixed/auto)"
 #endif
-#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+#ifdef OPENKNX_NET_HAVE_LAN_TRAFFIC
                 {
                     // Whole-interface packet totals since boot. Compact units: the raw counters reach
                     // eight digits within days on a busy segment.
@@ -1712,12 +1778,12 @@ namespace OpenKNX
                     openknxLanTraffic(rxPackets, txPackets);
                     logInfoP("Packets RX/TX: %s / %s", humanCount(rxPackets).c_str(),
                              humanCount(txPackets).c_str());
-#if defined(OPENKNX_ETH_W5500)
-                    logInfoP("W5500 socket reopens / close timeouts / command timeouts: %u / %u / %u",
-                             (unsigned)KNX_NETIF.sendReopens(), (unsigned)KNX_NETIF.closeTimeouts(),
-                             (unsigned)KNX_NETIF.cmdTimeouts()); // driver wait bounds that expired
-#endif
                 }
+#endif
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500)
+                logInfoP("W5500 socket reopens / close timeouts / command timeouts: %u / %u / %u",
+                         (unsigned)KNX_NETIF.sendReopens(), (unsigned)KNX_NETIF.closeTimeouts(),
+                         (unsigned)KNX_NETIF.cmdTimeouts()); // driver wait bounds that expired
 #endif
                 // logInfoP("Mode: %s", phyMode().c_str()); currently not supported
 

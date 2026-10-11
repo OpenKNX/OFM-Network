@@ -535,9 +535,12 @@ namespace OpenKNX
 using NetworkModule = OpenKNX::Network::Module;
 extern NetworkModule openknxNetwork;
 
-#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
-// Whole-interface packet totals since boot (global scope, defined in Module.cpp). RP2040 + wired LAN only:
-// the ESP32 ETH class exposes no such counters, and lwIP's MIB2 byte counters are off in the prebuilt core.
+// Whole-interface packet totals since boot (global scope, defined in Module.cpp). On RP2040 the W5500 driver
+// counts them. The ESP32 ETH class exposes none, so with wired LAN the module counts at the lwIP netif; that
+// is built only for a device with a display, or with OPENKNX_NET_PACKET_COUNT.
+#if (defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)) || \
+    (defined(ARDUINO_ARCH_ESP32) && defined(KNX_IP_LAN) && (defined(DEVICE_DISPLAY_MODULE) || defined(OPENKNX_NET_PACKET_COUNT)))
+#define OPENKNX_NET_HAVE_LAN_TRAFFIC 1
 void openknxLanTraffic(uint32_t &rxPackets, uint32_t &txPackets);
 #endif
 #endif

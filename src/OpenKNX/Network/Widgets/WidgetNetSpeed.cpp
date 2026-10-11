@@ -3,15 +3,12 @@
 #include "WidgetNetSpeed.h"
 #include "OpenKNX.h"
 
-#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
-// total LAN packet counters, provided by NetworkModule (lwIP byte counters aren't available: prebuilt core)
-#include "OpenKNX/Network/Module.h" // openknxLanTraffic() -- this widget now ships with the module that owns the counters
+// Total LAN packet counters, provided by NetworkModule (lwIP byte counters aren't available: prebuilt core).
+// RP2040 takes them from the W5500 driver, ESP32 with wired LAN counts at the lwIP netif. A build without
+// them (WiFi) shows "n/a".
+#include "OpenKNX/Network/Module.h" // openknxLanTraffic(), OPENKNX_NET_HAVE_LAN_TRAFFIC
+#ifdef OPENKNX_NET_HAVE_LAN_TRAFFIC
 #define WIDGET_NETSPEED_HAVE_COUNTERS 1
-#else
-// TODO(esp-netspeed): no whole-interface packet counter exists on ESP32 -- ETH/WiFi/esp_netif expose none,
-// and LWIP_STATS/MIB2 are disabled in the prebuilt arduino-esp32 core (would need a full core rebuild). To
-// enable the graph here, add a KNX-IP-layer packet counter -- note it measures only KNX/IP traffic, not the
-// whole interface like the RP2040 Wiznet driver does. Until then the widget shows "n/a" on this platform.
 #endif
 
 WidgetNetSpeed::WidgetNetSpeed(uint32_t displayTime, WidgetFlags action)
@@ -70,7 +67,7 @@ void WidgetNetSpeed::loop()
     }
 }
 
-// Read the lwIP byte counters, turn the per-window delta into bytes/s, push into the history ring.
+// Read the packet counters, turn the per-window delta into packets/s, push into the history ring.
 void WidgetNetSpeed::sampleRates()
 {
     const uint32_t now = millis();
@@ -79,17 +76,17 @@ void WidgetNetSpeed::sampleRates()
     _lastSample = now;
 
     uint32_t rxCount = 0, txCount = 0;
-#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+#ifdef OPENKNX_NET_HAVE_LAN_TRAFFIC
     openknxLanTraffic(rxCount, txCount); // cumulative packet counters
 #endif
 
     if (_haveBase && dtMs > 0)
     {
-        _rxRate = (uint32_t)((uint64_t)(rxCount - _lastRxBytes) * 1000u / dtMs); // uint32 delta wraps safely
-        _txRate = (uint32_t)((uint64_t)(txCount - _lastTxBytes) * 1000u / dtMs);
+        _rxRate = (uint32_t)((uint64_t)(rxCount - _lastRxPackets) * 1000u / dtMs); // uint32 delta wraps safely
+        _txRate = (uint32_t)((uint64_t)(txCount - _lastTxPackets) * 1000u / dtMs);
     }
-    _lastRxBytes = rxCount;
-    _lastTxBytes = txCount;
+    _lastRxPackets = rxCount;
+    _lastTxPackets = txCount;
     _haveBase = true;
 
     _rxHist[_histHead] = (uint16_t)(_rxRate > 0xFFFF ? 0xFFFF : _rxRate);
@@ -149,20 +146,20 @@ void WidgetNetSpeed::draw()
     g->setTextColor(WHITE);
 
 #ifndef WIDGET_NETSPEED_HAVE_COUNTERS
-    // ESP32: no packet-counter source (see TODO(esp-netspeed) above). Show a short note instead of a
-    // permanently-zero graph, and log the reminder once -- only while the widget is actually on screen.
+    // No packet counter in this build (WiFi): show a short note instead of a permanently-zero graph, and
+    // log it once -- only while the widget is actually on screen.
     static bool warnedNoCounters = false;
     if (!warnedNoCounters)
     {
         warnedNoCounters = true;
-        logInfoP("net-speed: no packet counter on ESP32 (prebuilt core) -- TODO(esp-netspeed): add a KNX-IP-layer counter");
+        logInfoP("net-speed: this build has no packet counter");
     }
     g->setTextSize(1);
     g->setCursor(12, 0);
     g->print("NETZWERK");
     g->drawLine(0, 10, W, 10, WHITE);
     g->setCursor(0, 16);
-    g->print("Speed: n/a (ESP32)");
+    g->print("Speed: n/a");
     _display->displayBuff();
     return;
 #endif
