@@ -1,6 +1,6 @@
 # Changes
 
-## ec/v0.9.0-beta.1: 2026-10-11
+## ec/v0.9.0-beta.1: 2026-10-15
 
 ### From upstream v1dev (merged)
 
@@ -82,6 +82,9 @@ Everything below is on `ec/v1dev-ec` and has not been released upstream yet.
 * feature: the browser tab shows the hostname instead of "OpenKNX", so several devices can be told apart in tabs, bookmarks and history -- the name mDNS and DHCP already use, changeable in ETS
 * fix: the hostname is HTML-escaped in the title and in the overview row -- it is the one value on those pages that comes from an ETS parameter
 * change: the HTML escaper is one inline function in `Webserver.h` instead of a copy per page
+
+**Display**
+* change: the network widgets are named Network and NETWORK. The display stores widget settings by name, so the renamed widget starts once with its default order, visibility and duration
 
 **Post-merge audit**
 * fix: OTA gate, establish debounce, KNX-IP LED and OTA RX contention — four defects found by re-tracing the paths after the upstream merge
