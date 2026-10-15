@@ -66,6 +66,7 @@
 #if defined(KNX_IP_LAN)
 #include "W5500lwIP.h"
 #include <lwip/apps/mdns.h> // RP2040 mDNS via the lwIP API directly (SimpleMDNS.addServiceTxt broken on arduino-pico)
+#include <lwip/init.h>
 #include <lwip/netif.h>
 // OPENKNX_ETH_W5500_MAINLOOP_RX: build the driver WITHOUT the INT pin so RX is NOT IRQ-driven; we pump the chip
 // from the main loop (pumpEthernet) instead. Fixes two W5500+lwIP bugs with one root -- RX/timers running in a
@@ -559,6 +560,10 @@ namespace OpenKNX
                 logErrorP("Invalid IP settings");
                 logIndentDown();
             }
+
+            // The core initializes lwIP only in begin(); with a W5500 silent at boot, MDNS.begin() got no pcb from
+            // the uninitialized pools and panicked (watchdog loop, then auto-erase of the KNX flash). Repeat calls are no-ops.
+            lwip_init();
 
             // Bounded W5500 bring-up (setSPISpeed + begin live inside tryBeginEth); on failure go degraded and
             // let loop()->ethSelfHeal() keep retrying a clean bring-up -- no reboot, no fatalError brick.
