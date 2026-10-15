@@ -77,6 +77,7 @@ Everything below is on `ec/v1dev-ec` and has not been released upstream yet.
 * change (RP2040, W5500): the module runs its own copy of the arduino-pico W5500 driver (`src/driver/W5500Drv`, BSD-3, differences listed in `W5500Drv.md`). Register and frame data move in SPI blocks, a frame's SENDOK is awaited before the next send instead of after its own, and every wait on the chip has a bound, so a chip that stops answering no longer hangs the main loop in `sendFrame()`, `end()` or `setSn_CR()`; a corrupt received frame length is dropped instead of moving the receive pointer
 * feature: `net` shows the W5500 socket reopens, close timeouts and command timeouts since boot
 * change (RP2040): the module hands its lwIP interface to the knx platform (`setNetif()`); it needs the matching knx version
+* fix (RP2040, W5500): a W5500 that does not answer at boot no longer puts the device into a watchdog loop. lwIP was initialised only when the chip came up, so mDNS ran on an uninitialised stack and panicked; after five resets the watchdog auto-erase cleared the KNX programming. The device now starts without network and the self-heal keeps trying
 
 **Web UI**
 * feature: the browser tab shows the hostname instead of "OpenKNX", so several devices can be told apart in tabs, bookmarks and history -- the name mDNS and DHCP already use, changeable in ETS
