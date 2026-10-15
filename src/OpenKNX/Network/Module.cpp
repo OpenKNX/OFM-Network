@@ -1190,7 +1190,7 @@ namespace OpenKNX
                 // Host, IP and link state also belong to this module, not to the system-info
                 // widget of OGM-Common, which must not reach into OFM-Network.
                 auto *netInfo = new WidgetNetInfo(10000, WidgetFlags::DefaultWidget);
-                netInfo->setName("Netzwerk");
+                netInfo->setName("Network");
                 if (!openknxDisplayModule.tryAddWidget(netInfo))
                     logDebugP("WidgetNetInfo not registered (no display/manager)");
             }

@@ -51,7 +51,7 @@ class WidgetNetInfo : public Widget
     uint32_t _displayTime;
     WidgetFlags _action;
     i2cDisplay *_display;
-    std::string _name = "Netzwerk";
+    std::string _name = "Network";
 
     static constexpr uint32_t REDRAW_INTERVAL_MS = 500;
     uint32_t _lastDraw = 0;

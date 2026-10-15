@@ -156,7 +156,7 @@ void WidgetNetSpeed::draw()
     }
     g->setTextSize(1);
     g->setCursor(12, 0);
-    g->print("NETZWERK");
+    g->print("NETWORK");
     g->drawLine(0, 10, W, 10, WHITE);
     g->setCursor(0, 16);
     g->print("Speed: n/a");
@@ -178,7 +178,7 @@ void WidgetNetSpeed::draw()
     g->fillRect(7, 4, 2, 3, WHITE);
     g->setTextSize(1);
     g->setCursor(12, 0); // left, right after the 3-bar icon (x 1..8)
-    g->print("NETZWERK");
+    g->print("NETWORK");
     g->drawLine(0, 10, W, 10, WHITE);
 
     // two big values: TX (up) left, RX (down) right
