@@ -459,9 +459,11 @@ namespace OpenKNX
 
         void Webserver::addMenuItem(const std::string& label, const std::string& uri, int8_t priority)
         {
-            _menu.push_back({label, uri, priority});
-            std::stable_sort(_menu.begin(), _menu.end(),
-                             [](const WebMenuItem& a, const WebMenuItem& b) { return a.priority < b.priority; });
+            // The list stays sorted: insert after every item of lower or equal priority, so equal priorities
+            // keep registration order -- the order std::stable_sort gave, without its template code.
+            size_t pos = _menu.size();
+            while (pos > 0 && _menu[pos - 1].priority > priority) --pos;
+            _menu.insert(_menu.begin() + pos, WebMenuItem{label, uri, priority});
         }
 
         // Same lock as the writers: clients is mutated from the httpd task (ESP32) and
