@@ -26,6 +26,8 @@ void WidgetNetSpeed::start()
     if (_state == WidgetState::RUNNING) return;
     _state = WidgetState::RUNNING;
     _forceRedraw = true;
+    _haveBase = false; // the first sample only takes the base; a rate over the time off would stand for the whole gap
+    _haveRate = false;
 }
 
 void WidgetNetSpeed::stop()
@@ -49,6 +51,8 @@ void WidgetNetSpeed::resume()
     {
         _state = WidgetState::RUNNING;
         _forceRedraw = true;
+        _haveBase = false;
+        _haveRate = false;
     }
 }
 
@@ -80,14 +84,17 @@ void WidgetNetSpeed::sampleRates()
     openknxLanTraffic(rxCount, txCount); // cumulative packet counters
 #endif
 
-    if (_haveBase && dtMs > 0)
+    const bool haveBase = _haveBase;
+    if (haveBase && dtMs > 0)
     {
         _rxRate = (uint32_t)((uint64_t)(rxCount - _lastRxPackets) * 1000u / dtMs); // uint32 delta wraps safely
         _txRate = (uint32_t)((uint64_t)(txCount - _lastTxPackets) * 1000u / dtMs);
+        _haveRate = true;
     }
     _lastRxPackets = rxCount;
     _lastTxPackets = txCount;
     _haveBase = true;
+    if (!haveBase) return; // first sample after start/resume only takes the base, it pushes no bar
 
     _rxHist[_histHead] = (uint16_t)(_rxRate > 0xFFFF ? 0xFFFF : _rxRate);
     _txHist[_histHead] = (uint16_t)(_txRate > 0xFFFF ? 0xFFFF : _txRate);
@@ -114,12 +121,13 @@ void WidgetNetSpeed::drawArrow(int16_t x, int16_t y, bool up)
         _display->display->fillTriangle(x, y, x + 2, y + 5, x + 4, y, WHITE);
 }
 
-// One rate inside [x, xEnd): value in size 2 while value and unit fit, else size 1.
+// One rate inside [x, xEnd): value in size 2 while value and unit fit, else size 1; "-" until the first rate.
 void WidgetNetSpeed::drawRate(int16_t x, int16_t xEnd, uint32_t pps)
 {
     auto *g = _display->display;
     char val[12], unit[8];
     fmtParts(pps, val, sizeof(val), unit, sizeof(unit));
+    if (!_haveRate) snprintf(val, sizeof(val), "-");
     const int16_t len = (int16_t)strlen(val);
     const uint8_t size = (x + len * 12 + (int16_t)strlen(unit) * 6 <= xEnd) ? 2 : 1;
     g->setTextSize(size);

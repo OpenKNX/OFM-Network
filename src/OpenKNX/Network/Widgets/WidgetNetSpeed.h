@@ -63,6 +63,7 @@ class WidgetNetSpeed : public Widget
     uint32_t _lastRxPackets = 0, _lastTxPackets = 0;
     uint32_t _rxRate = 0, _txRate = 0; // packets/s
     bool _haveBase = false;
+    bool _haveRate = false; // a rate was measured since the last start/resume
 
     // history ring (packets/s), auto-scaled at draw time
     uint16_t _rxHist[SPARK_LEN] = {0};
