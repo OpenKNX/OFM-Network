@@ -659,6 +659,11 @@ namespace OpenKNX
                 setEthOtaPump(false); // restore the main-loop RX pump (defensive: a restart below could be deferred)
 #endif
                 _otaPercent = 100;
+#if defined(ARDUINO_ARCH_RP2040) && OPENKNX_LITTLE_FS
+                // Update.end() has committed the bootloader command for the core's "firmware.bin"; naming it lets
+                // the next start release the image once the bootloader has run it.
+                if (ArduinoOTA.getCommand() == U_FLASH) openknx.hardware.noteStagedUpdate("firmware.bin");
+#endif
                 logIndentUp();
                 logInfo("OTA", "Update complete");
                 logIndentDown();
