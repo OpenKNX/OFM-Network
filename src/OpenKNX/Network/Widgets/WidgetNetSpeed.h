@@ -74,6 +74,7 @@ class WidgetNetSpeed : public Widget
     void draw();
     void drawMirror(int16_t y, int16_t h, uint32_t scale);    // TX up / RX down from a centre baseline
     void drawArrow(int16_t x, int16_t y, bool up);            // small up/down triangle
+    void drawRate(int16_t x, int16_t xEnd, uint32_t pps);     // one rate value + unit inside [x, xEnd)
     static void fmtParts(uint32_t rate, char *val, size_t vN, char *unit, size_t uN);
 };
 

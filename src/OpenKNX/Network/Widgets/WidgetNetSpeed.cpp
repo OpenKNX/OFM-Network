@@ -114,6 +114,22 @@ void WidgetNetSpeed::drawArrow(int16_t x, int16_t y, bool up)
         _display->display->fillTriangle(x, y, x + 2, y + 5, x + 4, y, WHITE);
 }
 
+// One rate inside [x, xEnd): value in size 2 while value and unit fit, else size 1.
+void WidgetNetSpeed::drawRate(int16_t x, int16_t xEnd, uint32_t pps)
+{
+    auto *g = _display->display;
+    char val[12], unit[8];
+    fmtParts(pps, val, sizeof(val), unit, sizeof(unit));
+    const int16_t len = (int16_t)strlen(val);
+    const uint8_t size = (x + len * 12 + (int16_t)strlen(unit) * 6 <= xEnd) ? 2 : 1;
+    g->setTextSize(size);
+    g->setCursor(x, size == 2 ? 12 : 16); // 1 px clear of the divider at y=10; size 1 sits on the unit line
+    g->print(val);
+    g->setTextSize(1);
+    g->setCursor(x + len * 6 * size, 16);
+    g->print(unit);
+}
+
 // Mirror graph in [0,y,W,h]: centre baseline, TX bars up, RX bars down, shared scale, newest at the right.
 void WidgetNetSpeed::drawMirror(int16_t y, int16_t h, uint32_t scale)
 {
@@ -181,31 +197,11 @@ void WidgetNetSpeed::draw()
     g->print("NETWORK");
     g->drawLine(0, 10, W, 10, WHITE);
 
-    // two big values: TX (up) left, RX (down) right
-    char val[12], unit[8];
-    g->setTextSize(1);
+    // two big values: TX (up) left up to the RX arrow, RX (down) right up to the edge
     drawArrow(2, 14, true);
-    fmtParts(_txRate, val, sizeof(val), unit, sizeof(unit));
-    g->setTextSize(2);
-    g->setCursor(8, 12);   // 1 px clear of the divider at y=10
-    g->print(val);
-    g->setTextSize(1);
-    g->setCursor(8 + (int16_t)strlen(val) * 12, 16);
-    g->print(unit);
-
+    drawRate(8, 66, _txRate);
     drawArrow(66, 14, false);
-    fmtParts(_rxRate, val, sizeof(val), unit, sizeof(unit));
-    g->setTextSize(2);
-    g->setCursor(72, 12);
-    g->print(val);
-    g->setTextSize(1);
-    // clamp: a 3- or 4-digit value pushed the unit past x=127 and it was cut off
-    {
-        const int16_t ux = 72 + (int16_t)strlen(val) * 12;
-        const int16_t umax = W - (int16_t)strlen(unit) * 6;
-        g->setCursor(ux < umax ? ux : umax, 16);
-    }
-    g->print(unit);
+    drawRate(72, W, _rxRate);
 
     // mirror history + peak label
     drawMirror(32, 32, scale);
