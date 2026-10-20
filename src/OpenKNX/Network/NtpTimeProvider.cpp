@@ -13,6 +13,10 @@
 
 OpenKNX::Network::NtpTimeProvider* OpenKNX::Network::NtpTimeProvider::currentInstance = nullptr;
 #endif
+#ifdef ARDUINO_ARCH_RP2040
+#include <lwip/apps/sntp.h>
+#include <lwip_wrap.h> // LWIPMutex: makes the ethernet IRQ defer
+#endif
 
 namespace OpenKNX
 {
@@ -92,32 +96,50 @@ namespace OpenKNX
             }
         }
 
+        /**
+         * @brief Non-blocking on RP2040: lwIP SNTP resolves the server and sets the clock in the background;
+         *        reachability bit 0 is set after each answered poll, loop() only reports it.
+         */
         void NtpTimeProvider::loop()
         {
 #ifdef ARDUINO_ARCH_RP2040
-            if (_syncInProgress) return;
-            if (!_initialized) return;
-
-            if (openknxNetwork.established() && (!_lastSync || delayCheck(_lastSync, 3600000))) // check every 1 hour
+            switch (_state)
             {
-                _syncInProgress = true;
-                logInfoP("Synchronize time with ntp server");
-                openknx.common.skipLooptimeWarning();
-                openknx.loop();
-                NTP.begin((const char*)ParamNET_NTPServer, (const char*)ParamNET_NTPServer); // not working on setup()
-                const bool synced = NTP.waitSet(
-                    []() {
-                        openknx.common.skipLooptimeWarning();
-                        openknx.loop();
-                    });
-                openknx.common.skipLooptimeWarning();
-                // Without an answer the clock is still unset (1970) -- don't report it.
-                if (synced)
-                    timeSet();
-                else
-                    logErrorP("No answer from %s", (const char*)ParamNET_NTPServer);
-                _lastSync = millis();
-                _syncInProgress = false;
+                case State::Idle:
+                    if (!_initialized || !openknxNetwork.established()) return;
+                    {
+                        LWIPMutex m;
+                        sntp_stop();
+                        sntp_setoperatingmode(SNTP_OPMODE_POLL);
+                        sntp_setservername(0, (const char*)ParamNET_NTPServer);
+                        sntp_init();
+                    }
+                    logInfoP("Synchronize time with ntp server");
+                    _state = State::Waiting;
+                    _timer = millis();
+                    return;
+                case State::Waiting:
+                case State::WaitingLogged:
+                    if (sntp_getreachability(0) & 1)
+                    {
+                        timeSet();
+                        _state = State::Synced;
+                        _timer = millis();
+                    }
+                    else if (_state == State::Waiting && delayCheck(_timer, 60000))
+                    {
+                        logErrorP("No answer from %s", (const char*)ParamNET_NTPServer);
+                        _state = State::WaitingLogged;
+                    }
+                    return;
+                case State::Synced:
+                    if (!delayCheck(_timer, 3600000)) return;
+                    _timer = millis();
+                    if (sntp_getreachability(0) & 1)
+                        timeSet();
+                    else
+                        logErrorP("No answer from %s", (const char*)ParamNET_NTPServer);
+                    return;
             }
 #endif
         }

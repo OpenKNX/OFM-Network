@@ -16,8 +16,9 @@ namespace OpenKNX
           protected:
             bool _initialized = false;
 #ifdef ARDUINO_ARCH_RP2040
-            int32_t _lastSync = 0;
-            bool _syncInProgress = false;
+            enum class State : uint8_t { Idle, Waiting, WaitingLogged, Synced };
+            State _state = State::Idle;
+            uint32_t _timer = 0;
 #endif
 
             const std::string logPrefix() override;
