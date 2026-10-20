@@ -641,6 +641,9 @@ namespace OpenKNX
             ArduinoOTA.setRebootOnSuccess(false);
             ArduinoOTA.onStart([&]() {
                 _otaActive = true; // display OTA overlay takes over (SYSTEM priority)
+#ifdef OPENKNX_OTA_EXCLUSIVE
+                openknx.common.setOtaActive(true); // all other loops stay silent until onEnd/onError
+#endif
                 _otaPercent = 0;
 #if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
                 phyToolAbort(); // loop() returns before the state machine while OTA runs
@@ -652,9 +655,15 @@ namespace OpenKNX
                     logInfo("OTA", "Start updating firmware");
                 else // U_SPIFFS
                     logInfo("OTA", "Start updating filesystem");
+#ifdef OPENKNX_OTA_EXCLUSIVE
+                logInfo("OTA", "KNX and all other services paused until the update ends");
+#endif
             });
             ArduinoOTA.onEnd([&]() {
                 _otaActive = false;
+#ifdef OPENKNX_OTA_EXCLUSIVE
+                openknx.common.setOtaActive(false);
+#endif
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
                 setEthOtaPump(false); // restore the main-loop RX pump (defensive: a restart below could be deferred)
 #endif
@@ -683,6 +692,9 @@ namespace OpenKNX
             });
             ArduinoOTA.onError([&](ota_error_t error) {
                 _otaActive = false; // release the display overlay so normal operation resumes
+#ifdef OPENKNX_OTA_EXCLUSIVE
+                openknx.common.setOtaActive(false);
+#endif
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
                 setEthOtaPump(false); // restore the main-loop RX pump -- device keeps running after an OTA error
 #endif

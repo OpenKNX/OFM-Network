@@ -28,6 +28,7 @@ This module provides the network functionality for the OpenKNX stack.
 | OPENKNX_WEBCLIENT_TIMEOUT| 10000   | Request timeout in milliseconds      |                                              |
 | OPENKNX_WEBCLIENT_TASK_STACK | 6144| ESP32 FreeRTOS task stack size (bytes) | SSL handshake requires ~4 KB             |
 | OPENKNX_WEBCLIENT_MAX_BODY | 4096  | Max request body size (bytes)        |                                              |
+| OPENKNX_OTA_EXCLUSIVE    |         | Dev/test aid: pause KNX and all other modules during OTA | Not for production; needs the OGM-Common version that provides it, see OTA below |
 
 ## IP LED
 
@@ -68,6 +69,11 @@ upload_port = XXX.XXX.XXX.XXX # IP Address or Hostname
 ```
 
 Note: The device hostname can be set in ETS under the Network → mDNS section.
+
+Dev/test aid `-D OPENKNX_OTA_EXCLUSIVE` (not for production): from OTA start to end or error, OGM-Common's `loop()`
+runs only watchdog, LEDs and display; KNX and all other modules pause. OTA calls `openknx.loop()` after every received
+chunk, so a module that blocks there stalls the transfer until espota aborts after 10 s. If OTA fails without the
+switch and passes with it, a blocking module is the cause; fix that module, the switch is not the fix.
 
 ## Webserver
 
