@@ -1452,8 +1452,8 @@ namespace OpenKNX
                 return true;
             }
 
-#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
-            // 'net phy [ver|reset [ms]|pin [s]]' -- W5500 SPI/RSTn diagnostics.
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN) && defined(OPENKNX_CONSOLE_DEV)
+            // 'net phy [ver|reset [ms]|pin [s]]' -- W5500 SPI/RSTn diagnostics (developer console).
             else if (cmd == "net phy" || cmd.compare(0, 8, "net phy ") == 0)
             {
                 std::string arg = (cmd.length() > 8) ? cmd.substr(8) : "";
@@ -1501,7 +1501,7 @@ namespace OpenKNX
                     logErrorP("net phy [ver|reset [ms]|pin [s]]");
                 return true;
             }
-#elif defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_ETH_W5500)
+#elif defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_ETH_W5500) && defined(OPENKNX_CONSOLE_DEV)
             else if (cmd == "net phy" || cmd.compare(0, 8, "net phy ") == 0)
             {
                 logErrorP("net phy: not available on ESP32 -- esp_eth owns the W5500 SPI bus");
@@ -1531,7 +1531,7 @@ namespace OpenKNX
             }
 #endif
 
-#ifdef OPENKNX_SSL_STEP_PROFILE
+#if defined(OPENKNX_SSL_STEP_PROFILE) && defined(OPENKNX_CONSOLE_DEV)
             // Measurement helper for the TLS handshake stall (see doc/CONCEPT-OFM-EMail.md, V1).
             // "net tls <host> [port] [cert]" -- "cert" validates against /tls-root.pem on LittleFS.
             else if (cmd.compare(0, 8, "net tls ") == 0)
@@ -1640,7 +1640,7 @@ namespace OpenKNX
                 return true;
             }
 #endif
-#ifdef OPENKNX_WEBSERVER
+#if defined(OPENKNX_WEBSERVER) && defined(OPENKNX_CONSOLE_DEV)
             else if (cmd == "webserver log")
             {
                 bool enabled = !webserver.accessLog();
@@ -1718,7 +1718,7 @@ namespace OpenKNX
 // }
 #endif
 
-#ifdef OPENKNX_WEBCLIENT_TEST
+#if defined(OPENKNX_WEBCLIENT_TEST) && defined(OPENKNX_CONSOLE_DEV)
             // "http get <url> [path]" -- same job the web interface arms, see httpFetchStart().
             else if (cmd.compare(0, 9, "http get ") == 0)
             {
@@ -1851,10 +1851,10 @@ namespace OpenKNX
             openknx.console.printHelpLine("wifi SSID PSK", "Set SSID and PSK");
             openknx.console.printHelpLine("erase wifi", "Erase WiFi settings");
 #endif
-#ifdef OPENKNX_WEBCLIENT_TEST
+#if defined(OPENKNX_WEBCLIENT_TEST) && defined(OPENKNX_CONSOLE_DEV)
             openknx.console.printHelpLine("http get <url> [path]", "Download to /flash, sd/ or efc/ (test aid)");
 #endif
-#ifdef OPENKNX_WEBSERVER
+#if defined(OPENKNX_WEBSERVER) && defined(OPENKNX_CONSOLE_DEV)
             openknx.console.printHelpLine("webserver log", "Toggle webserver access log (2xx/3xx)");
 #endif
 #ifdef OPENKNX_PING
@@ -1870,8 +1870,8 @@ namespace OpenKNX
 #if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
             openknx.console.printHelpLine("net mc [address|reset]", "Get/Set multicast address");
 #endif
-#ifdef OPENKNX_SSL_STEP_PROFILE
-            openknx.console.printHelpLine("net tls <host> [port] [cert]", "TLS handshake stall measurement");
+#if defined(OPENKNX_SSL_STEP_PROFILE) && defined(OPENKNX_CONSOLE_DEV)
+            openknx.console.printHelpLine("net tls <host> [port]", "TLS handshake stall measurement; add 'cert' to check /tls-root.pem");
 #endif
 #ifdef KNX_IP_LAN
             openknx.console.printHelpLine("net eth", "Show the current ETH link mode");
@@ -1883,12 +1883,12 @@ namespace OpenKNX
             openknx.console.printHelpLine("net eth 10 [half|full]", "Force a fixed 10 Mbit link (default half)");
             openknx.console.printHelpLine("net eth 100 [half|full]", "Force a fixed 100 Mbit link (default half)");
 #endif
-#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
+#if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN) && defined(OPENKNX_CONSOLE_DEV)
             openknx.console.printHelpLine("net phy", "W5500 status: VERSIONR, PHYCFGR, RSTn pin, SPI clock");
             openknx.console.printHelpLine("net phy ver", "Read VERSIONR at 1 MHz (rules out SPI signal quality)");
             openknx.console.printHelpLine("net phy reset [ms]", "Pulse RSTn (default 100ms) and report VERSIONR before/after");
             openknx.console.printHelpLine("net phy pin [s]", "Toggle RSTn at 1 Hz (default 30s) to measure at the chip");
-#elif defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_ETH_W5500)
+#elif defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_ETH_W5500) && defined(OPENKNX_CONSOLE_DEV)
             openknx.console.printHelpLine("net phy", "W5500 status (not available on ESP32: esp_eth owns the SPI bus)");
 #endif
         }
