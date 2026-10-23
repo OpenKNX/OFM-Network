@@ -528,6 +528,10 @@ namespace OpenKNX
             static constexpr uint32_t ETH_ESP_HEAL_INTERVAL_MAX_MS = 120000;
 #endif
 
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_WIFI)
+            void startWifiJoin();     // requests the client join
+            void clearWifiLinkFlag(); // client link flag down until the driver reports the next association
+#endif
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
             // Feed PHY link edges to lwIP; arduino-pico's W5500 driver doesn't, leaving DHCP on a stale lease.
             void setLwipLinkState(bool up);
@@ -621,6 +625,13 @@ namespace OpenKNX
             int8_t _wifiRssi = 0;
             uint8_t _wifiChannel = 0;
             uint8_t _wifiSecurity = 255;
+#ifdef ARDUINO_ARCH_RP2040
+            bool _wifiJoinPending = false; // left, finishWifiJoinCycle() joins once the leave settled and no scan runs
+            uint32_t _wifiLeftAt = 0;      // start of the pending join cycle (its leave)
+            uint32_t _wifiFailedSince = 0; // first tick with a failure driver state, 0 = none
+            void startWifiJoinCycle();
+            void finishWifiJoinCycle();
+#endif
             static constexpr uint8_t WIFI_HIST_LEN = 60;
             int8_t _wifiRssiHist[WIFI_HIST_LEN] = {}; // one sample per 10 s, 0 = no connection
             uint8_t _wifiRssiHead = 0;

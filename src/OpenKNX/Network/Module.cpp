@@ -578,9 +578,11 @@ namespace OpenKNX
             {
                 KNX_NETIF.config(_staticLocalIP, _staticNameServerIP, _staticGatewayIP, _staticSubnetMask);
                 logInfoP("Connecting to WiFi \"%s\"", _wifiSSID);
-                KNX_NETIF.setTimeout(2000); // 2000 ms = 4 seconds (timeout is multiplied by 2)
-                KNX_NETIF.begin(_wifiSSID, _wifiPassphrase[0] ? _wifiPassphrase : nullptr); // nullptr = open network (WPA2 otherwise)
-                KNX_NETIF.noLowPowerMode(); // power save delays received frames (tunnel ACKs) by the beacon interval
+                KNX_NETIF.setTimeout(2000); // core join loop: bounds a failed WPA2 request; an open network waits for the result
+                startWifiJoin();
+#ifdef OPENKNX_WIFI_AP
+                _wifiRetryAt = millis(); // the first rejoin waits a full interval for this join
+#endif
             }
 #else
 
@@ -934,6 +936,30 @@ namespace OpenKNX
         }
 #endif
 
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_WIFI)
+        /**
+         * @brief Requests the client join; WPA2 returns without waiting for the result, an open network once the join has one.
+         *        The core sets the link flag before association and reports a WPA2 join as done once requested.
+         */
+        void Module::startWifiJoin()
+        {
+            KNX_NETIF.beginNoBlock(_wifiSSID, _wifiPassphrase[0] ? _wifiPassphrase : nullptr); // nullptr = open network (WPA2 otherwise)
+            if (_wifiPassphrase[0]) clearWifiLinkFlag(); // open: the core returned associated, the flag is right
+        }
+
+        /**
+         * @brief Clears the client netif's link flag; the driver sets it again on the next association, a real edge that
+         *        restarts DHCP at once.
+         */
+        void Module::clearWifiLinkFlag()
+        {
+            struct netif *sta = __getCYW43Netif();
+            if (sta == nullptr || !netif_is_up(sta)) return; // failed join request: the core removed the netif
+            LWIPMutex m;
+            netif_set_link_down(sta);
+        }
+#endif
+
 #ifdef OPENKNX_NETWORK_AUTOIP
         // AutoIP: lwIP self-assigns 169.254/16 when no DHCP answers. Report the method actually in use in
         // PID_CURRENT_IP_ASSIGNMENT_METHOD (03_08_03 2.5.5: 8=AutoIP, 4=DHCP); driven by the address, not the edge.
@@ -1275,7 +1301,7 @@ namespace OpenKNX
                 openknx.common.extendedHeartbeatValue &= 0b01111111;
 
 #ifdef OPENKNX_WIFI_AP
-            // last: the RP2040 rejoin in there blocks, the next tick reads the link again
+            // last: an RP2040 begin() in there can block, the next tick reads the link again
             if (_wifiScanRequested)
             {
                 startWifiScan(false);

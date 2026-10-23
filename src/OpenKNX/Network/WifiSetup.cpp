@@ -45,8 +45,12 @@ static constexpr uint32_t WIFI_SCAN_MAX_MS = 15000; // a scan without an end eve
 static DNSServer s_wifiApDns;                          // captive portal of the setup AP: every name resolves to the AP
 static constexpr uint32_t WIFI_AP_FALLBACK_MS = 30000; // uptime without a client link before the setup AP fallback
 static constexpr uint8_t WIFI_AP_FALLBACK_CHANNEL = 1; // own AP when the channel scan fails
-static constexpr uint32_t WIFI_REJOIN_MS = 30000;       // RP2040: driver rejoin interval while the client interface exists
-static constexpr uint32_t WIFI_RETRY_MS = 120000;       // RP2040: blocking join when the interface is gone; ESP32: join
+static constexpr uint32_t WIFI_REJOIN_MS = 30000;        // RP2040: rejoin interval (from the join request or the last link) while the driver joins
+static constexpr uint32_t WIFI_REJOIN_FAILED_MS = 10000; // RP2040: the same once the driver state reports a failure
+static constexpr uint32_t WIFI_FAILED_HOLD_MS = 3000;    // RP2040: a failure state counts after this long (BADAUTH can pass, the driver's disassoc follows)
+static constexpr uint32_t WIFI_LEAVE_SETTLE_MS = 500;    // RP2040: least time between leave and join, for the leave's driver events
+static constexpr uint32_t WIFI_JOIN_DROP_MS = 10000;     // RP2040: a pending join is dropped when the link stays up this long after the leave
+static constexpr uint32_t WIFI_RETRY_MS = 120000;        // RP2040: begin() when the interface is gone; ESP32: join
 static constexpr uint32_t WIFI_AP_RETRY_MS = 300000;    // fallback setup AP without a station: try the client again
 static constexpr uint32_t WIFI_AP_PROG_IDLE_MS = 600000; // setup AP from the prog button: closes after this long without a station
 static constexpr uint32_t WIFI_PROG_AP_DELAY_MS = 5000; // prog mode without a link this long opens the setup AP
@@ -587,8 +591,8 @@ namespace OpenKNX
         }
 
         /**
-         * @brief (Re)joins the configured network. ESP32: returns once the driver runs (a few ms, at most 1 s). RP2040: blocks in the core join loop
-         *        (2 s, up to 4 s with DHCP, longer while the AP keeps timing out the key exchange).
+         * @brief (Re)joins the configured network. ESP32: returns once the driver runs (a few ms, at most 1 s). RP2040: starts
+         *        startWifiJoinCycle() and returns at once.
          */
         void Module::beginWifiClient()
         {
@@ -597,14 +601,47 @@ namespace OpenKNX
             WiFi.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP);
             WiFi.begin(_wifiSSID, _wifiPassphrase[0] ? _wifiPassphrase : nullptr);
             WiFi.setSleep(false);
+            _wifiRetryAt = millis();
 #else
-            forgetOpenknxMdns(); // begin() removes and re-adds the interface; its old service slot is gone
-            WiFi.config(_staticLocalIP, _staticNameServerIP, _staticGatewayIP, _staticSubnetMask);
-            WiFi.begin(_wifiSSID, _wifiPassphrase[0] ? _wifiPassphrase : nullptr);
-            WiFi.noLowPowerMode();
+            startWifiJoinCycle();
 #endif
+        }
+
+#ifdef ARDUINO_ARCH_RP2040
+        /**
+         * @brief Rejoin in two steps: leave, then loopWifiClient() calls finishWifiJoinCycle() once WIFI_LEAVE_SETTLE_MS
+         *        passed and no scan runs. Leaving first starts the join from a clean driver state. Returns at once.
+         */
+        void Module::startWifiJoinCycle()
+        {
+            const struct netif *sta = __getCYW43Netif();
+            if (sta != nullptr && netif_is_up(sta)) cyw43_wifi_leave(&cyw43_state, CYW43_ITF_STA);
+            _wifiLeftAt = millis();
+            _wifiRetryAt = _wifiLeftAt;
+            _wifiFailedSince = 0;
+            _wifiJoinPending = true;
+        }
+
+        /**
+         * @brief Second step of startWifiJoinCycle(). Interface in place: driver join. Interface gone (failed join
+         *        request, AP ran): begin() rebuilds it.
+         */
+        void Module::finishWifiJoinCycle()
+        {
+            _wifiJoinPending = false;
+            if (_wifiApActive || wifiOwnApConfigured()) return; // an AP started meanwhile
+            const struct netif *sta = __getCYW43Netif();
+            if (sta != nullptr && netif_is_up(sta))
+                rejoinWifiDriver();
+            else
+            {
+                forgetOpenknxMdns(); // begin() removes and re-adds the interface; its old service slot is gone
+                WiFi.config(_staticLocalIP, _staticNameServerIP, _staticGatewayIP, _staticSubnetMask);
+                startWifiJoin();
+            }
             _wifiRetryAt = millis();
         }
+#endif
 
         /**
          * @brief From the 500 ms link tick: prog mode switched on without a link, and 5 s later still on without one,
@@ -640,8 +677,9 @@ namespace OpenKNX
 
         /**
          * @brief Client mode, from the 500 ms link tick: caches RSSI/channel/security, keeps the RSSI history and,
-         *        rejoins while there is no link. RP2040: every 30 s in the driver while the interface exists, else every
-         *        2 min with the blocking begin(). ESP32: every 2 min on top of the driver's own reconnect.
+         *        rejoins while there is no link. RP2040: startWifiJoinCycle() while the interface exists, 30 s after the
+         *        join request or the last link, 10 s once the driver state held a failure for 3 s; every 2 min while the
+         *        interface is gone. ESP32: every 2 min on top of the driver's own reconnect.
          */
         void Module::loopWifiClient(bool up)
         {
@@ -680,23 +718,46 @@ namespace OpenKNX
             {
                 _wifiRetryAt = now;
                 _wifiRejoinLogged = false;
+#ifdef ARDUINO_ARCH_RP2040
+                _wifiFailedSince = 0;
+                if (_wifiJoinPending && now - _wifiLeftAt > WIFI_JOIN_DROP_MS)
+                {
+                    // the leave did not take the link down: drop the join instead of running it on a later loss
+                    _wifiJoinPending = false;
+                    logInfoP("WiFi: still connected, rejoin dropped");
+                }
+#endif
                 return;
             }
 #ifdef ARDUINO_ARCH_RP2040
+            if (_wifiJoinPending)
+            {
+                if (!_wifiScanRunning && now - _wifiLeftAt >= WIFI_LEAVE_SETTLE_MS) finishWifiJoinCycle();
+                return;
+            }
             if (_wifiScanRunning || _wifiProgPendingSince != 0) return;
             const struct netif *sta = __getCYW43Netif();
             if (sta != nullptr && netif_is_up(sta))
             {
-                // The interface outlived the link loss: rejoin in the driver, returns at once; link and DHCP follow as
-                // events. Associated without an address is DHCP's/AutoIP's job: a join would restart their wait.
-                if (netif_is_link_up(sta) || now - _wifiRetryAt < WIFI_REJOIN_MS) return;
-                _wifiRetryAt = now;
-                if (!_wifiRejoinLogged) logInfoP("WiFi: no connection, rejoining \"%s\" every %us", _wifiSSID, (unsigned)(WIFI_REJOIN_MS / 1000));
+                // The interface outlived the link loss: rejoin cycle (leave, join), link and DHCP follow as events.
+                // Associated without an address is DHCP's/AutoIP's job: a join would restart their wait.
+                // The driver state decides, not the link flag alone (a failed join can leave it as it was); a failure
+                // (NONET/FAIL/BADAUTH, or DOWN after a lost link or a failed internal rejoin) held for WIFI_FAILED_HOLD_MS
+                // gets the shorter interval.
+                const bool joining = cyw43_wifi_link_status(&cyw43_state, CYW43_ITF_STA) == CYW43_LINK_JOIN;
+                if (joining)
+                    _wifiFailedSince = 0;
+                else if (_wifiFailedSince == 0)
+                    _wifiFailedSince = now | 1; // 0 means none
+                if (joining && netif_is_link_up(sta)) return;
+                const bool failed = _wifiFailedSince != 0 && now - _wifiFailedSince >= WIFI_FAILED_HOLD_MS;
+                if (now - _wifiRetryAt < (failed ? WIFI_REJOIN_FAILED_MS : WIFI_REJOIN_MS)) return;
+                if (!_wifiRejoinLogged) logInfoP("WiFi: no connection, rejoining \"%s\"", _wifiSSID);
                 _wifiRejoinLogged = true;
-                rejoinWifiDriver();
+                startWifiJoinCycle();
                 return;
             }
-            // Interface gone (failed first join, or an AP ran): only begin() rebuilds it, and it blocks
+            // Interface gone (failed join request, or an AP ran): only begin() rebuilds it, and it can block
             if (now - _wifiRetryAt < WIFI_RETRY_MS) return;
             logInfoP("WiFi: no connection, joining \"%s\" again", _wifiSSID);
             beginWifiClient();
@@ -717,6 +778,7 @@ namespace OpenKNX
          */
         void Module::rejoinWifiDriver()
         {
+            clearWifiLinkFlag(); // left before (startWifiJoinCycle()): the next association comes from this join, a real link edge
             const size_t pskLen = strlen(_wifiPassphrase);
             cyw43_wifi_join(&cyw43_state, strlen(_wifiSSID), (const uint8_t *)_wifiSSID, pskLen, pskLen ? (const uint8_t *)_wifiPassphrase : nullptr,
                             pskLen ? CYW43_AUTH_WPA2_AES_PSK : CYW43_AUTH_OPEN, nullptr, CYW43_CHANNEL_NONE);
@@ -857,7 +919,7 @@ namespace OpenKNX
 
         /**
          * @brief Console 'net wifi reconnect': joins the configured network now, closing an open setup AP first.
-         *        RP2040: on the existing interface without blocking, else begin() (blocks a few seconds); ESP32: driver reconnect.
+         *        RP2040: startWifiJoinCycle(); ESP32: driver reconnect.
          */
         void Module::reconnectWifi()
         {
@@ -889,18 +951,11 @@ namespace OpenKNX
                 leaveWifiAp();
                 return;
             }
-            _wifiRetryAt = millis();
 #ifdef ARDUINO_ARCH_RP2040
-            const struct netif *sta = __getCYW43Netif();
-            if (sta != nullptr && netif_is_up(sta))
-            {
-                logInfoP("WiFi: rejoining \"%s\"", _wifiSSID);
-                rejoinWifiDriver();
-                return;
-            }
-            logInfoP("WiFi: joining \"%s\" (blocks a few seconds)", _wifiSSID);
-            beginWifiClient();
+            logInfoP("WiFi: rejoining \"%s\"", _wifiSSID);
+            startWifiJoinCycle();
 #else
+            _wifiRetryAt = millis();
             if (WiFi.reconnect())
                 logInfoP("WiFi: reconnecting \"%s\"", _wifiSSID);
             else
