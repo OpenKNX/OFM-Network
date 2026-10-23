@@ -600,6 +600,7 @@ namespace OpenKNX
             volatile bool _wifiScanRequested = false; // /wifi/scan?start=1, picked up by the link tick
             bool startWifiScan(bool toConsole);
             void loopWifiScan();
+            static void formatBssid(const uint8_t *bssid, char (&out)[18]);
             uint8_t wifiScanResult(uint8_t *out, uint8_t maxLen); // function property 160/5 command 4
 #endif
 #ifdef OPENKNX_WIFI_AP
@@ -627,7 +628,9 @@ namespace OpenKNX
             uint32_t _wifiInfoAt = 0;        // last RSSI/channel read
             int8_t _wifiRssi = 0;
             uint8_t _wifiChannel = 0;
+            uint8_t _wifiBssid[6] = {}; // AP of the client link, zero = none read yet
             uint8_t _wifiSecurity = 255;
+            void noteWifiBssid(const uint8_t *bssid); // cache refresh; logs an AP change
 #ifdef ARDUINO_ARCH_RP2040
             bool _wifiJoinPending = false; // left, finishWifiJoinCycle() joins once the leave settled and no scan runs
             uint32_t _wifiLeftAt = 0;      // start of the pending join cycle (its leave)

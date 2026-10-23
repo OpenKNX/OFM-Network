@@ -2011,7 +2011,9 @@ namespace OpenKNX
                 // logInfoP("Mode: %s", phyMode().c_str()); currently not supported
 
 #ifdef OPENKNX_WIFI_AP
-                logInfoP("WiFi: %s, %d dBm, channel %u (details: net wifi)", _wifiSSID, (int)_wifiRssi, (unsigned)_wifiChannel);
+                char bssid[18];
+                formatBssid(_wifiBssid, bssid);
+                logInfoP("WiFi: %s, AP %s, %d dBm, channel %u (details: net wifi)", _wifiSSID, bssid, (int)_wifiRssi, (unsigned)_wifiChannel);
 #elif defined(KNX_IP_WIFI)
                 std::string wifiInfo = std::string(_wifiSSID) + " (" + std::to_string(KNX_NETIF.RSSI()) + "dBm)";
                 logInfoP("Wifi: %s", wifiInfo.c_str());

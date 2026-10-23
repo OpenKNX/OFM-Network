@@ -182,6 +182,14 @@ namespace OpenKNX
         } // namespace
 
         /**
+         * @brief "AA:BB:CC:DD:EE:FF".
+         */
+        void Module::formatBssid(const uint8_t *bssid, char (&out)[18])
+        {
+            snprintf(out, sizeof(out), "%02X:%02X:%02X:%02X:%02X:%02X", bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+        }
+
+        /**
          * @brief Starts an asynchronous WiFi scan; loopWifiScan() collects the result.
          * @return false when the scan could not be started.
          */
@@ -250,6 +258,15 @@ namespace OpenKNX
                 return;
             }
 
+            struct ScanAp // console listing: every AP, not only the strongest per network
+            {
+                std::string ssid;
+                int8_t rssi;
+                uint8_t channel;
+                uint8_t security;
+                uint8_t bssid[6];
+            };
+            std::vector<ScanAp> aps;
             uint32_t score[14] = {};
             uint32_t score5[4] = {}; // 36, 40, 44, 48: 20 MHz channels without overlap
             std::vector<WifiScanNet> nets;
@@ -283,6 +300,12 @@ namespace OpenKNX
                     nets.push_back(net);
                 else if (net.rssi > it->rssi)
                     *it = net;
+                if (_wifiScanToConsole)
+                {
+                    ScanAp ap{ssid, net.rssi, ch, net.security, {}};
+                    WiFi.BSSID(i, ap.bssid);
+                    aps.push_back(ap);
+                }
             }
             WiFi.scanDelete();
             std::sort(nets.begin(), nets.end(), [](const WifiScanNet &a, const WifiScanNet &b) { return a.rssi > b.rssi; });
@@ -315,10 +338,15 @@ namespace OpenKNX
 
             if (!_wifiScanToConsole) return;
             _wifiScanToConsole = false;
-            logInfoP("WiFi scan: %u networks", (unsigned)_wifiScanNets.size());
+            std::sort(aps.begin(), aps.end(), [](const ScanAp &a, const ScanAp &b) { return a.rssi > b.rssi; });
+            logInfoP("WiFi scan: %u networks, %u access points", (unsigned)_wifiScanNets.size(), (unsigned)aps.size());
             logIndentUp();
-            for (const auto &w : _wifiScanNets)
-                logInfoP("%4d dBm  ch %2u  %-10s  %s", (int)w.rssi, (unsigned)w.channel, wifiSecurityText(w.security), w.ssid.c_str());
+            for (const auto &a : aps)
+            {
+                char bssid[18];
+                formatBssid(a.bssid, bssid);
+                logInfoP("%4d dBm  ch %2u  %-10s  %s  %s", (int)a.rssi, (unsigned)a.channel, wifiSecurityText(a.security), bssid, a.ssid.c_str());
+            }
             logIndentDown();
         }
 
@@ -644,6 +672,24 @@ namespace OpenKNX
 #endif
 
         /**
+         * @brief Stores the AP of the client link; a change while the cache already held one is logged (roaming or rejoin elsewhere).
+         */
+        void Module::noteWifiBssid(const uint8_t *bssid)
+        {
+            const bool known = _wifiBssid[0] | _wifiBssid[1] | _wifiBssid[2] | _wifiBssid[3] | _wifiBssid[4] | _wifiBssid[5];
+            const bool valid = bssid[0] | bssid[1] | bssid[2] | bssid[3] | bssid[4] | bssid[5];
+            if (!valid || memcmp(bssid, _wifiBssid, sizeof(_wifiBssid)) == 0) return;
+            if (known)
+            {
+                char from[18], to[18];
+                formatBssid(_wifiBssid, from);
+                formatBssid(bssid, to);
+                logInfoP("WiFi: AP changed %s -> %s (%d dBm, channel %u)", from, to, (int)_wifiRssi, (unsigned)_wifiChannel);
+            }
+            memcpy(_wifiBssid, bssid, sizeof(_wifiBssid));
+        }
+
+        /**
          * @brief From the 500 ms link tick: prog mode switched on without a link, and 5 s later still on without one,
          *        opens the setup AP: the way back onto a device whose network is gone (not in own AP mode, not when
          *        the ETS switched it off). Only the switch-on arms it, so prog mode left on does not reopen it.
@@ -676,7 +722,7 @@ namespace OpenKNX
         }
 
         /**
-         * @brief Client mode, from the 500 ms link tick: caches RSSI/channel/security, keeps the RSSI history and,
+         * @brief Client mode, from the 500 ms link tick: caches RSSI/channel/security/AP, keeps the RSSI history and,
          *        rejoins while there is no link. RP2040: startWifiJoinCycle() while the interface exists, 30 s after the
          *        join request or the last link, 10 s once the driver state held a failure for 3 s; every 2 min while the
          *        interface is gone. ESP32: every 2 min on top of the driver's own reconnect.
@@ -700,11 +746,14 @@ namespace OpenKNX
                     _wifiRssi = ap.rssi < 0 ? ap.rssi : -1; // 0 marks a gap in the history
                     _wifiChannel = ap.primary;
                     _wifiSecurity = authSecurity(ap.authmode);
+                    noteWifiBssid(ap.bssid);
                 }
 #else
                 _wifiRssi = (int8_t)std::max<int32_t>(-127, std::min<int32_t>(-1, WiFi.RSSI()));
                 _wifiChannel = (uint8_t)WiFi.channel();
                 _wifiSecurity = _wifiPassphrase[0] ? 3 : 0; // the core joins WPA2-AES or open only
+                uint8_t bssid[6];
+                noteWifiBssid(WiFi.BSSID(bssid)); // all zero while not connected
 #endif
             }
             if (now - _wifiRssiAt >= WIFI_RSSI_SAMPLE_MS)
@@ -904,6 +953,9 @@ namespace OpenKNX
                     const uint8_t level = r >= -55 ? 4 : r >= -65 ? 3 : r >= -75 ? 2 : 1; // same thresholds as ETS, page and display
                     logInfoP("State:     connected to \"%s\"", info.ssid);
                     logInfoP("Signal:    %d dBm (%s), channel %u, %s", (int)r, levels[level], (unsigned)info.channel, wifiSecurityText(info.security));
+                    char bssid[18];
+                    formatBssid(_wifiBssid, bssid);
+                    logInfoP("AP:        %s", bssid);
                     logInfoP("Address:   %s, gateway %s", localIP().toString().c_str(), gatewayIP().toString().c_str());
                     if (netReconnects())
                         logInfoP("Connected: %s, reconnects %u, last outage %s", humanDuration(netUptimeSec()).c_str(), (unsigned)netReconnects(),
