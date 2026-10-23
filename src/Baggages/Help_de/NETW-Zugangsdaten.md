@@ -2,10 +2,10 @@
 
 Zugangsdaten für die Betriebsart *Mit vorhandenem WiFi verbinden*.
 
-- *Netzname (SSID)*: Name des WiFi-Netzes, 1 bis 32 Zeichen. Per *Netze suchen* und *Übernehmen* oder von Hand.
+- *Netzname (SSID)*: Name des WiFi-Netzes, 1 bis 32 Zeichen. Per *WiFi-Netze suchen* und *Übernehmen* oder von Hand.
 - *Passwort*: 8 bis 63 Zeichen; bei einem offenen Netz leer lassen.
 
-*Übertragen* schickt beides direkt ins Gerät, bei Geräten mit TP-Anschluss auch über TP. Nach erfolgreichem Übertragen werden die Felder und die Liste der gefundenen Netze im Projekt geleert; die Zugangsdaten liegen dann nur im Gerät. Geräte mit Raspberry-Pi-Pico-Chip legen sie im Dateisystem ab. Dort sind sie über den Dateimanager der Weboberfläche lesbar, sofern vorhanden und der Webserver eingeschaltet ist, und bei Geräten mit Dateiübertragung auch über den Bus. Das Gerät startet neu und verbindet sich mit dem WiFi.
+*Zugangsdaten übertragen* schickt beides direkt ins Gerät, bei Geräten mit TP-Anschluss auch über TP. Nach erfolgreichem Übertragen werden die Felder und die Liste der gefundenen Netze im Projekt geleert; die Zugangsdaten liegen dann nur im Gerät. Geräte mit Raspberry-Pi-Pico-Chip legen sie im Dateisystem ab. Dort sind sie über den Dateimanager der Weboberfläche lesbar, sofern vorhanden und der Webserver eingeschaltet ist, und bei Geräten mit Dateiübertragung auch über den Bus. Das Gerät startet neu und verbindet sich mit dem WiFi.
 
 **Andere Wege**
 

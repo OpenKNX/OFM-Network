@@ -115,7 +115,7 @@
               </Union>
               <!-- not stored: only used by the ETS scripts -->
               <Parameter Id="%AID%_P-%TT%01000" Name="SelectHelper" ParameterType="%AID%_PT-CheckBox" Text="" Value="0" Access="None" />
-              <Parameter Id="%AID%_P-%TT%01001" Name="HasWifi"      ParameterType="%AID%_PT-OnOffYesNo" Text="WiFi-Schnittstelle vorhanden" Value="0" />
+              <Parameter Id="%AID%_P-%TT%01001" Name="HasWifi"      ParameterType="%AID%_PT-OnOffYesNo" Text="WiFi-Schnittstelle" Value="0" />
               <Parameter Id="%AID%_P-%TT%01002" Name="ClientSsid"   ParameterType="%AID%_PT-NetwSsid" Text="Netzname (SSID)" Value="" />
               <Parameter Id="%AID%_P-%TT%01003" Name="ClientPsk"    ParameterType="%AID%_PT-NetwPsk"  Text="Passwort" Value="" />
               <Parameter Id="%AID%_P-%TT%01004" Name="ApPassword"   ParameterType="%AID%_PT-NetwPsk"  Text="Passwort" Value="" />
@@ -233,9 +233,9 @@
                 <ParameterRefRef RefId="%AID%_P-%TT%01000_R-%TT%0100000" />
                 <ParameterRefRef RefId="%AID%_P-%TT%01005_R-%TT%0100500" />
                 <ParameterRefRef RefId="%AID%_P-%TT%01006_R-%TT%0100600" />
-                <ParameterRefRef RefId="%AID%_P-%TT%01001_R-%TT%0100100" HelpContext="NETW-WiFi" />
+                <ParameterRefRef RefId="%AID%_P-%TT%01001_R-%TT%0100100" IndentLevel="1" HelpContext="NETW-WiFi" />
               </ParameterBlock>
-              <!-- WiFi page, shown with "WiFi-Schnittstelle vorhanden: Ja" -->
+              <!-- WiFi page, shown with "WiFi-Schnittstelle: Ja" -->
               <choose ParamRefId="%AID%_P-%TT%01001_R-%TT%0100100">
                 <when test="1">
                   <ParameterBlock Id="%AID%_PB-nnn" Name="Wifi" Text="WiFi" Icon="wifi" HelpContext="NETW-WiFi">
@@ -244,17 +244,16 @@
                     <choose ParamRefId="%AID%_UP-%TT%00001_R-%TT%0000101">
                       <!-- client -->
                       <when test="0">
-                        <ParameterSeparator Id="%AID%_PS-nnn" Text="Hier lassen sich WiFi-Netze am Einbauort suchen und die WiFi-Zugangsdaten auf das Gerät übertragen. Diese Einstellungen sind nur für Geräte mit WiFi-Schnittstelle vorgesehen." UIHint="Information" />
                         <ParameterSeparator Id="%AID%_PS-nnn" Text="WiFi-Zugangsdaten" UIHint="Headline" />
                         <ParameterBlock Id="%AID%_PB-nnn" Name="Scan" Inline="true" Layout="Grid">
                           <Rows>
                             <Row Id="%AID%_PB-nnn_R-1" Name="Row1" />
                           </Rows>
                           <Columns>
-                            <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="46%" />
-                            <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="53%" />
+                            <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="45%" />
+                            <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="57%" />
                           </Columns>
-                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00001" Text="Netze suchen" EventHandlerOnline="ConnectionOriented" EventHandler="NETW_scan" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
+                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00001" Text="WiFi-Netze suchen" EventHandlerOnline="ConnectionOriented" EventHandler="NETW_scan" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
                         </ParameterBlock>
                         <choose ParamRefId="%AID%_P-%TT%01006_R-%TT%0100600">
                           <when test="1">
@@ -378,12 +377,12 @@
                             <Row Id="%AID%_PB-nnn_R-1" Name="Row1" />
                           </Rows>
                           <Columns>
-                            <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="46%" />
-                            <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="53%" />
+                            <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="45%" />
+                            <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="57%" />
                           </Columns>
-                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00002" Text="Übertragen" EventHandlerOnline="ConnectionOriented" EventHandler="NETW_sendClient" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
+                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00002" Text="Zugangsdaten übertragen" EventHandlerOnline="ConnectionOriented" EventHandler="NETW_sendClient" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
                         </ParameterBlock>
-                        <ParameterSeparator Id="%AID%_PS-nnn" Text="„Netze suchen“ und „Übertragen“ gehen erst, wenn das Gerät programmiert ist; Seite danach neu betreten. Die Zugangsdaten gehen online ins Gerät, mit TP-Anschluss auch über TP; danach werden die Felder und die Liste im Projekt geleert." UIHint="Information" />
+                        <ParameterSeparator Id="%AID%_PS-nnn" Text="Die Schaltflächen gehen erst, wenn das Gerät programmiert ist; danach die Seite neu öffnen." UIHint="Information" />
                         <ParameterSeparator Id="%AID%_PS-nnn" Text="Einrichtung" UIHint="Headline" />
                         <ParameterRefRef RefId="%AID%_UP-%TT%00002_R-%TT%0000201" IndentLevel="1" HelpContext="NETW-Einrichtungs-WiFi" />
                         <choose ParamRefId="%AID%_UP-%TT%00002_R-%TT%0000201">
@@ -427,12 +426,12 @@
                             <Row Id="%AID%_PB-nnn_R-1" Name="Row1" />
                           </Rows>
                           <Columns>
-                            <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="46%" />
-                            <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="53%" />
+                            <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="45%" />
+                            <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="57%" />
                           </Columns>
-                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00003" Text="Übertragen" EventHandlerOnline="ConnectionOriented" EventHandler="NETW_sendApPassword" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
+                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00003" Text="Passwort übertragen" EventHandlerOnline="ConnectionOriented" EventHandler="NETW_sendApPassword" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
                         </ParameterBlock>
-                        <ParameterSeparator Id="%AID%_PS-nnn" Text="„Übertragen“ geht erst, wenn das Gerät programmiert ist; Seite danach neu betreten. Das Passwort (8 bis 63 Zeichen) geht online ins Gerät; danach wird das Feld im Projekt geleert. Ohne Passwort startet das WiFi nicht. Adresse des Geräts: 10.42.0.1." UIHint="Information" />
+                        <ParameterSeparator Id="%AID%_PS-nnn" Text="Die Schaltfläche geht erst, wenn das Gerät programmiert ist; danach die Seite neu öffnen." UIHint="Information" />
                       </when>
                     </choose>
                   </ParameterBlock>

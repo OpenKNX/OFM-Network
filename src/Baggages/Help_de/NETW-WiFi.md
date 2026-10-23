@@ -1,6 +1,6 @@
 ### WiFi
 
-**WiFi-Schnittstelle vorhanden** (Seite *Netzwerk > Allgemein*): Nur bei Geräten mit WiFi-Schnittstelle auf *Ja* stellen; dann erscheint die Seite *WiFi*. Bei Geräten ohne WiFi-Schnittstelle bleibt die Einstellung auf *Nein*, die WiFi-Einstellungen hätten dort keine Wirkung.
+**WiFi-Schnittstelle** (Seite *Netzwerk > Allgemein*): Nur bei Geräten mit WiFi-Schnittstelle auf *Ja* stellen; dann erscheint die Seite *WiFi*. Bei Geräten ohne WiFi-Schnittstelle bleibt die Einstellung auf *Nein*, die WiFi-Einstellungen hätten dort keine Wirkung.
 
 **WiFi-Betriebsart: zwei Einsatzfälle**
 
@@ -13,7 +13,7 @@ Nur eine Betriebsart zur Zeit: Das Gerät arbeitet entweder als Teilnehmer in ei
 
 Entfernung, Wände, Decken und andere Netze auf demselben Kanal kosten Signal; ein Verteiler aus Metall dämpft stark. Bei schwachem Signal kommen Telegramme später an oder gehen verloren. Deshalb am Einbauort auf gute WiFi-Abdeckung achten.
 
-- Signal mindestens *gut* (−65 dBm oder besser). Anzeige unter *Netze suchen* und auf der Seite *WiFi* der Weboberfläche.
+- Signal mindestens *gut* (−65 dBm oder besser). Anzeige unter *WiFi-Netze suchen* und auf der Seite *WiFi* der Weboberfläche.
 - Standort prüfen: Die Seite *WiFi* der Weboberfläche zeigt Signalverlauf, Antwortzeit und Verluste zum WiFi-Router.
 - KNX IP Routing nutzt Multicast: Darüber laufen die Gruppentelegramme von KNX-IP-Geräten und die Verbindung von Router zu Router. Diese Telegramme sendet das WiFi in der Regel ohne Wiederholung; ein schwaches Signal führt hier zuerst zu Verlusten. Tunneling-Verbindungen (Programmierung, Visualisierung) wiederholt das WiFi bei Bedarf.
 
@@ -40,4 +40,4 @@ Die Funktion *Netzwerkstatus* zeigt weiter den Netzwerkzustand insgesamt: grün 
 
 **Online-Funktionen**
 
-*Netze suchen* und *Übertragen* arbeiten online mit dem Gerät, bei Geräten mit TP-Anschluss auch über TP. Voraussetzung: Das Gerät ist programmiert (physikalische Adresse und Applikation geladen). Danach die Seite neu betreten.
+*WiFi-Netze suchen*, *Zugangsdaten übertragen* und *Passwort übertragen* arbeiten online mit dem Gerät, bei Geräten mit TP-Anschluss auch über TP. Voraussetzung: Das Gerät ist programmiert (physikalische Adresse und Applikation geladen). Danach die Seite neu betreten.
