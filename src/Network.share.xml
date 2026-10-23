@@ -306,7 +306,7 @@ Geräte, die ausschließlich per TP angebunden sind, benötigen hier keine Konfi
                 <!-- LanMode -->
                 <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000">
                   <when test="!=%NET_LanMode%">
-                    <ParameterRefRef RefId="%AID%_UP-%TT%00052_R-%TT%0005201" IndentLevel="1" HelpContext="%DOC%" />
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00052_R-%TT%0005201" IndentLevel="1" HelpContext="NET-LAN-Modus" />
                   </when>
                 </choose>
 
