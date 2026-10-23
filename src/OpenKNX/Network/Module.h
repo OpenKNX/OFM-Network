@@ -531,6 +531,9 @@ namespace OpenKNX
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_WIFI)
             void startWifiJoin();     // requests the client join
             void clearWifiLinkFlag(); // client link flag down until the driver reports the next association
+#ifdef OPENKNX_NETWORK_AUTOIP
+            void stopStaleWifiAutoIp(); // AutoIP only with a link and never over a DHCP address
+#endif
 #endif
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
             // Feed PHY link edges to lwIP; arduino-pico's W5500 driver doesn't, leaving DHCP on a stale lease.

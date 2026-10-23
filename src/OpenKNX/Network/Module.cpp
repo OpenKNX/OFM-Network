@@ -76,6 +76,12 @@
 #include <lwip/init.h>
 #include <lwip/netif.h>
 #include <lwip_wrap.h> // LWIPMutex
+#if defined(KNX_IP_WIFI) && defined(OPENKNX_NETWORK_AUTOIP)
+#include <lwip/acd.h>
+#include <lwip/autoip.h>
+#include <lwip/dhcp.h>
+#include <lwip/prot/autoip.h> // AUTOIP_STATE_OFF
+#endif
 
 #if defined(KNX_IP_LAN)
 #include "W5500lwIP.h"
@@ -958,6 +964,25 @@ namespace OpenKNX
             LWIPMutex m;
             netif_set_link_down(sta);
         }
+
+#ifdef OPENKNX_NETWORK_AUTOIP
+        /**
+         * @brief Stops AutoIP while the client link flag is down, and a running AutoIP check once DHCP holds an address.
+         *        DHCP starts AutoIP after its tries even without a link, and dhcp_bind() does not stop a running check,
+         *        whose result then replaced the DHCP address.
+         */
+        void Module::stopStaleWifiAutoIp()
+        {
+            struct netif *sta = __getCYW43Netif();
+            if (sta == nullptr || !netif_is_up(sta)) return;
+            struct autoip *autoip = netif_autoip_data(sta);
+            if (autoip == nullptr || autoip->state == AUTOIP_STATE_OFF) return;
+            if (netif_is_link_up(sta) && !(autoip->state == AUTOIP_STATE_CHECKING && dhcp_supplied_address(sta))) return;
+            LWIPMutex m;
+            acd_stop(&autoip->acd); // autoip_stop() leaves the check running, its result would bind the address
+            autoip_stop(sta);
+        }
+#endif
 #endif
 
 #ifdef OPENKNX_NETWORK_AUTOIP
@@ -1291,6 +1316,9 @@ namespace OpenKNX
 
 #ifdef OPENKNX_NETWORK_AUTOIP
             // every tick, not just the edge: AutoIP takes over after the DHCP tries, with the link up all along.
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_WIFI)
+            stopStaleWifiAutoIp();
+#endif
             if (_currentLinkState) checkIpAssignmentMethod();
 #endif
 
