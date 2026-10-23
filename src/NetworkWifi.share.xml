@@ -1,0 +1,447 @@
+<?xml version="1.0" encoding="utf-8"?>
+<?xml-model href="../../Organization/knxprod-support/knx_project_20/knx-editor.xsd" type="application/xml" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<KNX xmlns:op="http://github.com/OpenKNX/OpenKNXproducer" xmlns="http://knx.org/xml/project/20" CreatedBy="KNX MT" ToolVersion="5.1.255.16695">
+  <!-- WiFi settings for products with a WiFi interface (firmware: OFM-Network, OPENKNX_WIFI_AP).
+       Only operating mode, setup AP, AP name and AP channel are stored in parameter memory.
+       Client credentials and the AP password go online into the device file system (function
+       property 160/5) and are never part of the project or readable over the bus. -->
+  <!-- Suppress warnings for helper functions that are only called from JS, not from XML -->
+  <op:nowarn id="3" regex="NETW_utf8Encode" />
+  <op:nowarn id="3" regex="NETW_utf8Decode" />
+  <op:nowarn id="3" regex="NETW_call" />
+  <op:nowarn id="3" regex="NETW_fillRows" />
+  <!-- 2.4 and 5 GHz channel share one byte; the band selects which one is shown -->
+  <op:nowarn id="10" regex="Parameter NETW_Channel5?" />
+  <!-- 1 = show band selection and 5 GHz channels (hardware with 5 GHz, e.g. ESP32-C5); memory is reserved either way -->
+  <op:config name="%Wifi5GHz%" value="0" />
+  <ManufacturerData>
+    <Manufacturer>
+      <ApplicationPrograms>
+        <ApplicationProgram>
+          <Static>
+            <ParameterTypes>
+              <ParameterType Id="%AID%_PT-NetwMode" Name="NetwMode">
+                <TypeRestriction Base="Value" SizeInBit="1">
+                  <Enumeration Text="Mit vorhandenem WiFi verbinden" Value="0" Id="%ENID%" />
+                  <Enumeration Text="Eigenes WiFi (Access Point)" Value="1" Id="%ENID%" />
+                </TypeRestriction>
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-NetwBand" Name="NetwBand">
+                <TypeRestriction Base="Value" SizeInBit="2">
+                  <Enumeration Text="2,4 GHz" Value="0" Id="%ENID%" />
+                  <Enumeration Text="5 GHz" Value="1" Id="%ENID%" />
+                </TypeRestriction>
+              </ParameterType>
+              <!-- 5 GHz without DFS (EU indoor): 36-48 -->
+              <ParameterType Id="%AID%_PT-NetwChannel5" Name="NetwChannel5">
+                <TypeRestriction Base="Value" SizeInBit="8">
+                  <Enumeration Text="Automatisch" Value="0" Id="%ENID%" />
+                  <Enumeration Text="36" Value="36" Id="%ENID%" />
+                  <Enumeration Text="40" Value="40" Id="%ENID%" />
+                  <Enumeration Text="44" Value="44" Id="%ENID%" />
+                  <Enumeration Text="48" Value="48" Id="%ENID%" />
+                </TypeRestriction>
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-NetwChannel" Name="NetwChannel">
+                <TypeRestriction Base="Value" SizeInBit="8">
+                  <Enumeration Text="Automatisch" Value="0" Id="%ENID%" />
+                  <Enumeration Text="1" Value="1" Id="%ENID%" />
+                  <Enumeration Text="2" Value="2" Id="%ENID%" />
+                  <Enumeration Text="3" Value="3" Id="%ENID%" />
+                  <Enumeration Text="4" Value="4" Id="%ENID%" />
+                  <Enumeration Text="5" Value="5" Id="%ENID%" />
+                  <Enumeration Text="6" Value="6" Id="%ENID%" />
+                  <Enumeration Text="7" Value="7" Id="%ENID%" />
+                  <Enumeration Text="8" Value="8" Id="%ENID%" />
+                  <Enumeration Text="9" Value="9" Id="%ENID%" />
+                  <Enumeration Text="10" Value="10" Id="%ENID%" />
+                  <Enumeration Text="11" Value="11" Id="%ENID%" />
+                  <Enumeration Text="12" Value="12" Id="%ENID%" />
+                  <Enumeration Text="13" Value="13" Id="%ENID%" />
+                </TypeRestriction>
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-NetwSsid" Name="NetwSsid">
+                <TypeText SizeInBit="256" />
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-NetwPsk" Name="NetwPsk">
+                <TypeText SizeInBit="504" />
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-NetwInfo" Name="NetwInfo">
+                <TypeText SizeInBit="320" />
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-NetwSignal" Name="NetwSignal">
+                <TypeRestriction Base="Value" SizeInBit="8">
+                  <Enumeration Text="" Value="0" Id="%ENID%" />
+                  <Enumeration Text="schwach" Value="1" Id="%ENID%" />
+                  <Enumeration Text="mittel" Value="2" Id="%ENID%" />
+                  <Enumeration Text="gut" Value="3" Id="%ENID%" />
+                  <Enumeration Text="sehr gut" Value="4" Id="%ENID%" />
+                </TypeRestriction>
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-NetwSecurity" Name="NetwSecurity">
+                <TypeRestriction Base="Value" SizeInBit="8">
+                  <Enumeration Text="offen" Value="0" Id="%ENID%" />
+                  <Enumeration Text="WEP" Value="1" Id="%ENID%" />
+                  <Enumeration Text="WPA" Value="2" Id="%ENID%" />
+                  <Enumeration Text="WPA2" Value="3" Id="%ENID%" />
+                  <Enumeration Text="WPA/WPA2" Value="4" Id="%ENID%" />
+                  <Enumeration Text="WPA3" Value="5" Id="%ENID%" />
+                  <Enumeration Text="WPA2/WPA3" Value="6" Id="%ENID%" />
+                  <Enumeration Text="Enterprise" Value="7" Id="%ENID%" />
+                  <Enumeration Text="unbekannt" Value="255" Id="%ENID%" />
+                </TypeRestriction>
+              </ParameterType>
+              <ParameterType Id="%AID%_PT-NetwCount" Name="NetwCount">
+                <TypeNumber SizeInBit="8" Type="unsignedInt" minInclusive="0" maxInclusive="8" />
+              </ParameterType>
+              <!-- Status LEDs: the WiFi state as its own function, merged into the common LED function list -->
+              <ParameterType Id="%AID%_PT-SLEDFunc" Name="SLEDFunc">
+                <TypeRestriction Base="Value" SizeInBit="16" UIHint="DropDown">
+                  <Enumeration Text="WiFi-Status" Value="12" Id="%ENID%" />
+                </TypeRestriction>
+              </ParameterType>
+            </ParameterTypes>
+            <Parameters>
+              <!-- stored: byte 0 mode, setup AP, band, custom AP name; byte 1 channel (2.4 or 5 GHz view); bytes 2..33 AP name -->
+              <Union SizeInBit="272">
+                <Memory CodeSegment="%MID%" Offset="0" BitOffset="0" />
+                <Parameter Id="%AID%_UP-%TT%00001" Name="Mode"    ParameterType="%AID%_PT-NetwMode"    Offset="0" BitOffset="0" Text="WiFi-Betriebsart" Value="0" />
+                <Parameter Id="%AID%_UP-%TT%00002" Name="SetupAp" ParameterType="%AID%_PT-CheckBox"    Offset="0" BitOffset="1" Text="Einrichtungs-WiFi" Value="1" SuffixText="Ein" />
+                <Parameter Id="%AID%_UP-%TT%00006" Name="Band"    ParameterType="%AID%_PT-NetwBand"    Offset="0" BitOffset="2" Text="Frequenzband" Value="0" />
+                <Parameter Id="%AID%_UP-%TT%00003" Name="Channel" ParameterType="%AID%_PT-NetwChannel" Offset="1" BitOffset="0" Text="Kanal (2,4 GHz)" Value="0" />
+                <Parameter Id="%AID%_UP-%TT%00007" Name="Channel5" ParameterType="%AID%_PT-NetwChannel5" Offset="1" BitOffset="0" Text="Kanal (5 GHz)" Value="0" />
+                <Parameter Id="%AID%_UP-%TT%00005" Name="CustomApSsid" ParameterType="%AID%_PT-OnOffYesNo" Offset="0" BitOffset="6" Text="Netzname anpassen" Value="0" />
+                <Parameter Id="%AID%_UP-%TT%00004" Name="ApSsid"  ParameterType="%AID%_PT-NetwSsid"    Offset="2" BitOffset="0" Text="Netzname (SSID)" Value="" />
+              </Union>
+              <!-- not stored: only used by the ETS scripts -->
+              <Parameter Id="%AID%_P-%TT%01000" Name="SelectHelper" ParameterType="%AID%_PT-CheckBox" Text="" Value="0" Access="None" />
+              <Parameter Id="%AID%_P-%TT%01001" Name="HasWifi"      ParameterType="%AID%_PT-OnOffYesNo" Text="WiFi-Schnittstelle vorhanden" Value="0" />
+              <Parameter Id="%AID%_P-%TT%01002" Name="ClientSsid"   ParameterType="%AID%_PT-NetwSsid" Text="Netzname (SSID)" Value="" />
+              <Parameter Id="%AID%_P-%TT%01003" Name="ClientPsk"    ParameterType="%AID%_PT-NetwPsk"  Text="Passwort" Value="" />
+              <Parameter Id="%AID%_P-%TT%01004" Name="ApPassword"   ParameterType="%AID%_PT-NetwPsk"  Text="Passwort" Value="" />
+              <Parameter Id="%AID%_P-%TT%01006" Name="ScanNone"     ParameterType="%AID%_PT-CheckBox" Text="" Value="0" Access="None" />
+              <Parameter Id="%AID%_P-%TT%01005" Name="ScanCount"    ParameterType="%AID%_PT-NetwCount" Text="" Value="0" Access="None" />
+              <Parameter Id="%AID%_P-%TT%01011" Name="ScanSsid1" ParameterType="%AID%_PT-NetwSsid" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01012" Name="ScanSsid2" ParameterType="%AID%_PT-NetwSsid" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01013" Name="ScanSsid3" ParameterType="%AID%_PT-NetwSsid" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01014" Name="ScanSsid4" ParameterType="%AID%_PT-NetwSsid" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01015" Name="ScanSsid5" ParameterType="%AID%_PT-NetwSsid" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01016" Name="ScanSsid6" ParameterType="%AID%_PT-NetwSsid" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01017" Name="ScanSsid7" ParameterType="%AID%_PT-NetwSsid" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01018" Name="ScanSsid8" ParameterType="%AID%_PT-NetwSsid" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01021" Name="ScanInfo1" ParameterType="%AID%_PT-NetwInfo" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01022" Name="ScanInfo2" ParameterType="%AID%_PT-NetwInfo" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01023" Name="ScanInfo3" ParameterType="%AID%_PT-NetwInfo" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01024" Name="ScanInfo4" ParameterType="%AID%_PT-NetwInfo" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01025" Name="ScanInfo5" ParameterType="%AID%_PT-NetwInfo" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01026" Name="ScanInfo6" ParameterType="%AID%_PT-NetwInfo" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01027" Name="ScanInfo7" ParameterType="%AID%_PT-NetwInfo" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01028" Name="ScanInfo8" ParameterType="%AID%_PT-NetwInfo" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01031" Name="ScanChan1" ParameterType="%AID%_PT-NetwInfo" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01032" Name="ScanChan2" ParameterType="%AID%_PT-NetwInfo" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01033" Name="ScanChan3" ParameterType="%AID%_PT-NetwInfo" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01034" Name="ScanChan4" ParameterType="%AID%_PT-NetwInfo" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01035" Name="ScanChan5" ParameterType="%AID%_PT-NetwInfo" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01036" Name="ScanChan6" ParameterType="%AID%_PT-NetwInfo" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01037" Name="ScanChan7" ParameterType="%AID%_PT-NetwInfo" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01038" Name="ScanChan8" ParameterType="%AID%_PT-NetwInfo" Text="" Value="" />
+              <Parameter Id="%AID%_P-%TT%01041" Name="ScanSec1" ParameterType="%AID%_PT-NetwSecurity" Text="" Value="255" />
+              <Parameter Id="%AID%_P-%TT%01042" Name="ScanSec2" ParameterType="%AID%_PT-NetwSecurity" Text="" Value="255" />
+              <Parameter Id="%AID%_P-%TT%01043" Name="ScanSec3" ParameterType="%AID%_PT-NetwSecurity" Text="" Value="255" />
+              <Parameter Id="%AID%_P-%TT%01044" Name="ScanSec4" ParameterType="%AID%_PT-NetwSecurity" Text="" Value="255" />
+              <Parameter Id="%AID%_P-%TT%01045" Name="ScanSec5" ParameterType="%AID%_PT-NetwSecurity" Text="" Value="255" />
+              <Parameter Id="%AID%_P-%TT%01046" Name="ScanSec6" ParameterType="%AID%_PT-NetwSecurity" Text="" Value="255" />
+              <Parameter Id="%AID%_P-%TT%01047" Name="ScanSec7" ParameterType="%AID%_PT-NetwSecurity" Text="" Value="255" />
+              <Parameter Id="%AID%_P-%TT%01048" Name="ScanSec8" ParameterType="%AID%_PT-NetwSecurity" Text="" Value="255" />
+              <Parameter Id="%AID%_P-%TT%01051" Name="ScanSig1" ParameterType="%AID%_PT-NetwSignal" Text="" Value="0" />
+              <Parameter Id="%AID%_P-%TT%01052" Name="ScanSig2" ParameterType="%AID%_PT-NetwSignal" Text="" Value="0" />
+              <Parameter Id="%AID%_P-%TT%01053" Name="ScanSig3" ParameterType="%AID%_PT-NetwSignal" Text="" Value="0" />
+              <Parameter Id="%AID%_P-%TT%01054" Name="ScanSig4" ParameterType="%AID%_PT-NetwSignal" Text="" Value="0" />
+              <Parameter Id="%AID%_P-%TT%01055" Name="ScanSig5" ParameterType="%AID%_PT-NetwSignal" Text="" Value="0" />
+              <Parameter Id="%AID%_P-%TT%01056" Name="ScanSig6" ParameterType="%AID%_PT-NetwSignal" Text="" Value="0" />
+              <Parameter Id="%AID%_P-%TT%01057" Name="ScanSig7" ParameterType="%AID%_PT-NetwSignal" Text="" Value="0" />
+              <Parameter Id="%AID%_P-%TT%01058" Name="ScanSig8" ParameterType="%AID%_PT-NetwSignal" Text="" Value="0" />
+            </Parameters>
+            <ParameterRefs>
+              <ParameterRef Id="%AID%_UP-%TT%00001_R-%TT%0000101" RefId="%AID%_UP-%TT%00001" />
+              <ParameterRef Id="%AID%_UP-%TT%00002_R-%TT%0000201" RefId="%AID%_UP-%TT%00002" />
+              <ParameterRef Id="%AID%_UP-%TT%00003_R-%TT%0000301" RefId="%AID%_UP-%TT%00003" />
+              <ParameterRef Id="%AID%_UP-%TT%00004_R-%TT%0000401" RefId="%AID%_UP-%TT%00004" />
+              <ParameterRef Id="%AID%_UP-%TT%00005_R-%TT%0000501" RefId="%AID%_UP-%TT%00005" />
+              <ParameterRef Id="%AID%_UP-%TT%00006_R-%TT%0000601" RefId="%AID%_UP-%TT%00006" />
+              <ParameterRef Id="%AID%_UP-%TT%00007_R-%TT%0000701" RefId="%AID%_UP-%TT%00007" />
+              <ParameterRef Id="%AID%_P-%TT%01000_R-%TT%0100000" RefId="%AID%_P-%TT%01000" />
+              <ParameterRef Id="%AID%_P-%TT%01001_R-%TT%0100100" RefId="%AID%_P-%TT%01001" />
+              <ParameterRef Id="%AID%_P-%TT%01002_R-%TT%0100200" RefId="%AID%_P-%TT%01002" />
+              <ParameterRef Id="%AID%_P-%TT%01003_R-%TT%0100300" RefId="%AID%_P-%TT%01003" />
+              <ParameterRef Id="%AID%_P-%TT%01004_R-%TT%0100400" RefId="%AID%_P-%TT%01004" />
+              <ParameterRef Id="%AID%_P-%TT%01005_R-%TT%0100500" RefId="%AID%_P-%TT%01005" />
+              <ParameterRef Id="%AID%_P-%TT%01006_R-%TT%0100600" RefId="%AID%_P-%TT%01006" />
+              <ParameterRef Id="%AID%_P-%TT%01011_R-%TT%0101100" RefId="%AID%_P-%TT%01011" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01012_R-%TT%0101200" RefId="%AID%_P-%TT%01012" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01013_R-%TT%0101300" RefId="%AID%_P-%TT%01013" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01014_R-%TT%0101400" RefId="%AID%_P-%TT%01014" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01015_R-%TT%0101500" RefId="%AID%_P-%TT%01015" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01016_R-%TT%0101600" RefId="%AID%_P-%TT%01016" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01017_R-%TT%0101700" RefId="%AID%_P-%TT%01017" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01018_R-%TT%0101800" RefId="%AID%_P-%TT%01018" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01021_R-%TT%0102100" RefId="%AID%_P-%TT%01021" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01022_R-%TT%0102200" RefId="%AID%_P-%TT%01022" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01023_R-%TT%0102300" RefId="%AID%_P-%TT%01023" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01024_R-%TT%0102400" RefId="%AID%_P-%TT%01024" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01025_R-%TT%0102500" RefId="%AID%_P-%TT%01025" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01026_R-%TT%0102600" RefId="%AID%_P-%TT%01026" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01027_R-%TT%0102700" RefId="%AID%_P-%TT%01027" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01028_R-%TT%0102800" RefId="%AID%_P-%TT%01028" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01031_R-%TT%0103100" RefId="%AID%_P-%TT%01031" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01032_R-%TT%0103200" RefId="%AID%_P-%TT%01032" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01033_R-%TT%0103300" RefId="%AID%_P-%TT%01033" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01034_R-%TT%0103400" RefId="%AID%_P-%TT%01034" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01035_R-%TT%0103500" RefId="%AID%_P-%TT%01035" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01036_R-%TT%0103600" RefId="%AID%_P-%TT%01036" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01037_R-%TT%0103700" RefId="%AID%_P-%TT%01037" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01038_R-%TT%0103800" RefId="%AID%_P-%TT%01038" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01041_R-%TT%0104100" RefId="%AID%_P-%TT%01041" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01042_R-%TT%0104200" RefId="%AID%_P-%TT%01042" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01043_R-%TT%0104300" RefId="%AID%_P-%TT%01043" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01044_R-%TT%0104400" RefId="%AID%_P-%TT%01044" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01045_R-%TT%0104500" RefId="%AID%_P-%TT%01045" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01046_R-%TT%0104600" RefId="%AID%_P-%TT%01046" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01047_R-%TT%0104700" RefId="%AID%_P-%TT%01047" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01048_R-%TT%0104800" RefId="%AID%_P-%TT%01048" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01051_R-%TT%0105100" RefId="%AID%_P-%TT%01051" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01052_R-%TT%0105200" RefId="%AID%_P-%TT%01052" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01053_R-%TT%0105300" RefId="%AID%_P-%TT%01053" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01054_R-%TT%0105400" RefId="%AID%_P-%TT%01054" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01055_R-%TT%0105500" RefId="%AID%_P-%TT%01055" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01056_R-%TT%0105600" RefId="%AID%_P-%TT%01056" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01057_R-%TT%0105700" RefId="%AID%_P-%TT%01057" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01058_R-%TT%0105800" RefId="%AID%_P-%TT%01058" Access="Read" />
+            </ParameterRefs>
+            <ComObjectTable>
+            </ComObjectTable>
+            <ComObjectRefs>
+            </ComObjectRefs>
+            <Script>
+              <op:include href="NetworkWifi.script.js" prefix="NETW" type="script" />
+            </Script>
+          </Static>
+          <Dynamic>
+            <Channel Id="%AID%_CH-%PREFIX%" Number="%PREFIX%" Name="Main" Text="WiFi" Icon="wifi" HelpContext="NETW-WiFi">
+              <!-- Folded into the "Allgemein" page of the network channel by the product template -->
+              <ParameterBlock Id="%AID%_PB-nnn" Name="NetworkInject" Text="WiFi" Icon="wifi" HelpContext="NETW-WiFi">
+                <ParameterRefRef RefId="%AID%_P-%TT%01000_R-%TT%0100000" />
+                <ParameterRefRef RefId="%AID%_P-%TT%01005_R-%TT%0100500" />
+                <ParameterRefRef RefId="%AID%_P-%TT%01006_R-%TT%0100600" />
+                <ParameterRefRef RefId="%AID%_P-%TT%01001_R-%TT%0100100" HelpContext="NETW-WiFi" />
+              </ParameterBlock>
+              <!-- WiFi page, shown with "WiFi-Schnittstelle vorhanden: Ja" -->
+              <choose ParamRefId="%AID%_P-%TT%01001_R-%TT%0100100">
+                <when test="1">
+                  <ParameterBlock Id="%AID%_PB-nnn" Name="Wifi" Text="WiFi" Icon="wifi" HelpContext="NETW-WiFi">
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="Betriebsart" UIHint="Headline" />
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00001_R-%TT%0000101" IndentLevel="1" HelpContext="NETW-WiFi" />
+                    <choose ParamRefId="%AID%_UP-%TT%00001_R-%TT%0000101">
+                      <!-- client -->
+                      <when test="0">
+                        <ParameterSeparator Id="%AID%_PS-nnn" Text="Hier lassen sich WiFi-Netze am Einbauort suchen und die WiFi-Zugangsdaten auf das Gerät übertragen. Diese Einstellungen sind nur für Geräte mit WiFi-Schnittstelle vorgesehen." UIHint="Information" />
+                        <ParameterSeparator Id="%AID%_PS-nnn" Text="WiFi-Zugangsdaten" UIHint="Headline" />
+                        <ParameterBlock Id="%AID%_PB-nnn" Name="Scan" Inline="true" Layout="Grid">
+                          <Rows>
+                            <Row Id="%AID%_PB-nnn_R-1" Name="Row1" />
+                          </Rows>
+                          <Columns>
+                            <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="46%" />
+                            <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="53%" />
+                          </Columns>
+                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00001" Text="Netze suchen" EventHandlerOnline="ConnectionOriented" EventHandler="NETW_scan" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
+                        </ParameterBlock>
+                        <choose ParamRefId="%AID%_P-%TT%01006_R-%TT%0100600">
+                          <when test="1">
+                            <ParameterSeparator Id="%AID%_PS-nnn" Text="Kein Netz gefunden. Access Point näher an das Gerät bringen oder den Netznamen von Hand eintragen." UIHint="Information" />
+                          </when>
+                        </choose>
+                        <choose ParamRefId="%AID%_P-%TT%01005_R-%TT%0100500">
+                          <when test="&gt;=1">
+                            <ParameterBlock Id="%AID%_PB-nnn" Name="ScanTable" Inline="true" Layout="Grid" HelpContext="NETW-Netze-suchen">
+                              <Rows>
+                                <Row Id="%AID%_PB-nnn_R-1" Name="Header" />
+                                <Row Id="%AID%_PB-nnn_R-2" Name="Net1" />
+                                <Row Id="%AID%_PB-nnn_R-3" Name="Net2" />
+                                <Row Id="%AID%_PB-nnn_R-4" Name="Net3" />
+                                <Row Id="%AID%_PB-nnn_R-5" Name="Net4" />
+                                <Row Id="%AID%_PB-nnn_R-6" Name="Net5" />
+                                <Row Id="%AID%_PB-nnn_R-7" Name="Net6" />
+                                <Row Id="%AID%_PB-nnn_R-8" Name="Net7" />
+                                <Row Id="%AID%_PB-nnn_R-9" Name="Net8" />
+                              </Rows>
+                              <Columns>
+                                <Column Id="%AID%_PB-nnn_C-1" Name="Ssid"   Width="35%" />
+                                <Column Id="%AID%_PB-nnn_C-2" Name="Signal" Width="10%" />
+                                <Column Id="%AID%_PB-nnn_C-3" Name="Pegel"  Width="10%" />
+                                <Column Id="%AID%_PB-nnn_C-4" Name="Kanal"  Width="8%" />
+                                <Column Id="%AID%_PB-nnn_C-5" Name="Sicher" Width="15%" />
+                                <Column Id="%AID%_PB-nnn_C-6" Name="Button" Width="20%" />
+                              </Columns>
+                              <ParameterSeparator Id="%AID%_PS-nnn" Text="Netzname (SSID)" UIHint="Headline" Cell="1,1" />
+                              <ParameterSeparator Id="%AID%_PS-nnn" Text="Signal"     UIHint="Headline" Cell="1,2" />
+                              <ParameterSeparator Id="%AID%_PS-nnn" Text="Pegel"      UIHint="Headline" Cell="1,3" />
+                              <ParameterSeparator Id="%AID%_PS-nnn" Text="Kanal"      UIHint="Headline" Cell="1,4" />
+                              <ParameterSeparator Id="%AID%_PS-nnn" Text="Sicherheit" UIHint="Headline" Cell="1,5" />
+                            <choose ParamRefId="%AID%_P-%TT%01005_R-%TT%0100500">
+                              <when test="&gt;=1">
+                                <ParameterRefRef RefId="%AID%_P-%TT%01011_R-%TT%0101100" Cell="2,1" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01051_R-%TT%0105100" Cell="2,2" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01021_R-%TT%0102100" Cell="2,3" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01031_R-%TT%0103100" Cell="2,4" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01041_R-%TT%0104100" Cell="2,5" HelpContext="NETW-Netze-suchen" />
+                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00011" Text="Übernehmen" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 1 }" Cell="2,6" />
+                              </when>
+                            </choose>
+                            <choose ParamRefId="%AID%_P-%TT%01005_R-%TT%0100500">
+                              <when test="&gt;=2">
+                                <ParameterRefRef RefId="%AID%_P-%TT%01012_R-%TT%0101200" Cell="3,1" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01052_R-%TT%0105200" Cell="3,2" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01022_R-%TT%0102200" Cell="3,3" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01032_R-%TT%0103200" Cell="3,4" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01042_R-%TT%0104200" Cell="3,5" HelpContext="NETW-Netze-suchen" />
+                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00012" Text="Übernehmen" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 2 }" Cell="3,6" />
+                              </when>
+                            </choose>
+                            <choose ParamRefId="%AID%_P-%TT%01005_R-%TT%0100500">
+                              <when test="&gt;=3">
+                                <ParameterRefRef RefId="%AID%_P-%TT%01013_R-%TT%0101300" Cell="4,1" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01053_R-%TT%0105300" Cell="4,2" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01023_R-%TT%0102300" Cell="4,3" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01033_R-%TT%0103300" Cell="4,4" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01043_R-%TT%0104300" Cell="4,5" HelpContext="NETW-Netze-suchen" />
+                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00013" Text="Übernehmen" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 3 }" Cell="4,6" />
+                              </when>
+                            </choose>
+                            <choose ParamRefId="%AID%_P-%TT%01005_R-%TT%0100500">
+                              <when test="&gt;=4">
+                                <ParameterRefRef RefId="%AID%_P-%TT%01014_R-%TT%0101400" Cell="5,1" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01054_R-%TT%0105400" Cell="5,2" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01024_R-%TT%0102400" Cell="5,3" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01034_R-%TT%0103400" Cell="5,4" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01044_R-%TT%0104400" Cell="5,5" HelpContext="NETW-Netze-suchen" />
+                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00014" Text="Übernehmen" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 4 }" Cell="5,6" />
+                              </when>
+                            </choose>
+                            <choose ParamRefId="%AID%_P-%TT%01005_R-%TT%0100500">
+                              <when test="&gt;=5">
+                                <ParameterRefRef RefId="%AID%_P-%TT%01015_R-%TT%0101500" Cell="6,1" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01055_R-%TT%0105500" Cell="6,2" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01025_R-%TT%0102500" Cell="6,3" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01035_R-%TT%0103500" Cell="6,4" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01045_R-%TT%0104500" Cell="6,5" HelpContext="NETW-Netze-suchen" />
+                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00015" Text="Übernehmen" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 5 }" Cell="6,6" />
+                              </when>
+                            </choose>
+                            <choose ParamRefId="%AID%_P-%TT%01005_R-%TT%0100500">
+                              <when test="&gt;=6">
+                                <ParameterRefRef RefId="%AID%_P-%TT%01016_R-%TT%0101600" Cell="7,1" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01056_R-%TT%0105600" Cell="7,2" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01026_R-%TT%0102600" Cell="7,3" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01036_R-%TT%0103600" Cell="7,4" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01046_R-%TT%0104600" Cell="7,5" HelpContext="NETW-Netze-suchen" />
+                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00016" Text="Übernehmen" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 6 }" Cell="7,6" />
+                              </when>
+                            </choose>
+                            <choose ParamRefId="%AID%_P-%TT%01005_R-%TT%0100500">
+                              <when test="&gt;=7">
+                                <ParameterRefRef RefId="%AID%_P-%TT%01017_R-%TT%0101700" Cell="8,1" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01057_R-%TT%0105700" Cell="8,2" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01027_R-%TT%0102700" Cell="8,3" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01037_R-%TT%0103700" Cell="8,4" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01047_R-%TT%0104700" Cell="8,5" HelpContext="NETW-Netze-suchen" />
+                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00017" Text="Übernehmen" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 7 }" Cell="8,6" />
+                              </when>
+                            </choose>
+                            <choose ParamRefId="%AID%_P-%TT%01005_R-%TT%0100500">
+                              <when test="&gt;=8">
+                                <ParameterRefRef RefId="%AID%_P-%TT%01018_R-%TT%0101800" Cell="9,1" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01058_R-%TT%0105800" Cell="9,2" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01028_R-%TT%0102800" Cell="9,3" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01038_R-%TT%0103800" Cell="9,4" HelpContext="NETW-Netze-suchen" />
+                                <ParameterRefRef RefId="%AID%_P-%TT%01048_R-%TT%0104800" Cell="9,5" HelpContext="NETW-Netze-suchen" />
+                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00018" Text="Übernehmen" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 8 }" Cell="9,6" />
+                              </when>
+                            </choose>
+                            </ParameterBlock>
+                          </when>
+                        </choose>
+                        <ParameterRefRef RefId="%AID%_P-%TT%01002_R-%TT%0100200" IndentLevel="1" HelpContext="NETW-Zugangsdaten" />
+                        <ParameterRefRef RefId="%AID%_P-%TT%01003_R-%TT%0100300" IndentLevel="1" HelpContext="NETW-Zugangsdaten" />
+                        <ParameterBlock Id="%AID%_PB-nnn" Name="SendClient" Inline="true" Layout="Grid">
+                          <Rows>
+                            <Row Id="%AID%_PB-nnn_R-1" Name="Row1" />
+                          </Rows>
+                          <Columns>
+                            <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="46%" />
+                            <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="53%" />
+                          </Columns>
+                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00002" Text="Übertragen" EventHandlerOnline="ConnectionOriented" EventHandler="NETW_sendClient" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
+                        </ParameterBlock>
+                        <ParameterSeparator Id="%AID%_PS-nnn" Text="„Netze suchen“ und „Übertragen“ gehen erst, wenn das Gerät programmiert ist; Seite danach neu betreten. Die Zugangsdaten gehen online ins Gerät, mit TP-Anschluss auch über TP; danach werden die Felder und die Liste im Projekt geleert." UIHint="Information" />
+                        <ParameterSeparator Id="%AID%_PS-nnn" Text="Einrichtung" UIHint="Headline" />
+                        <ParameterRefRef RefId="%AID%_UP-%TT%00002_R-%TT%0000201" IndentLevel="1" HelpContext="NETW-Einrichtungs-WiFi" />
+                        <choose ParamRefId="%AID%_UP-%TT%00002_R-%TT%0000201">
+                          <when test="1">
+                            <ParameterSeparator Id="%AID%_PS-nnn" Text="Kennt das Gerät noch kein WiFi, oder ist das Netz weg und die Prog-Taste wird gedrückt, öffnet es ein offenes WiFi mit dem Hostnamen. Darüber lassen sich Netz und Passwort im Browser eintragen." UIHint="Information" />
+                          </when>
+                          <when test="0">
+                            <ParameterSeparator Id="%AID%_PS-nnn" Text="Kein Einrichtungs-WiFi, auch nicht über die Prog-Taste. Fehlen die Zugangsdaten, hilft nur noch die Programmierung über TP (bei Geräten mit TP-Anschluss) oder die Konsole." UIHint="Error" />
+                          </when>
+                        </choose>
+                      </when>
+                      <!-- own access point -->
+                      <when test="1">
+                        <ParameterSeparator Id="%AID%_PS-nnn" Text="Eigenes WiFi" UIHint="Headline" />
+                        <ParameterRefRef RefId="%AID%_UP-%TT%00005_R-%TT%0000501" IndentLevel="1" HelpContext="NETW-Eigenes-WiFi" />
+                        <choose ParamRefId="%AID%_UP-%TT%00005_R-%TT%0000501">
+                          <when test="1">
+                            <ParameterRefRef RefId="%AID%_UP-%TT%00004_R-%TT%0000401" IndentLevel="1" HelpContext="NETW-Eigenes-WiFi" />
+                          </when>
+                        </choose>
+                        <choose ParamRefId="%AID%_P-%TT%01000_R-%TT%0100000">
+                          <!-- %Wifi5GHz% = 1: band selection and 5 GHz channels -->
+                          <when test="!=%Wifi5GHz%">
+                            <ParameterRefRef RefId="%AID%_UP-%TT%00006_R-%TT%0000601" IndentLevel="1" HelpContext="NETW-Eigenes-WiFi" />
+                            <choose ParamRefId="%AID%_UP-%TT%00006_R-%TT%0000601">
+                              <when test="0">
+                                <ParameterRefRef RefId="%AID%_UP-%TT%00003_R-%TT%0000301" IndentLevel="1" HelpContext="NETW-Eigenes-WiFi" />
+                              </when>
+                              <when test="1">
+                                <ParameterRefRef RefId="%AID%_UP-%TT%00007_R-%TT%0000701" IndentLevel="1" HelpContext="NETW-Eigenes-WiFi" />
+                              </when>
+                            </choose>
+                          </when>
+                          <when test="%Wifi5GHz%">
+                            <ParameterRefRef RefId="%AID%_UP-%TT%00003_R-%TT%0000301" IndentLevel="1" HelpContext="NETW-Eigenes-WiFi" />
+                          </when>
+                        </choose>
+                        <ParameterRefRef RefId="%AID%_P-%TT%01004_R-%TT%0100400" IndentLevel="1" HelpContext="NETW-Eigenes-WiFi" />
+                        <ParameterBlock Id="%AID%_PB-nnn" Name="SendAp" Inline="true" Layout="Grid">
+                          <Rows>
+                            <Row Id="%AID%_PB-nnn_R-1" Name="Row1" />
+                          </Rows>
+                          <Columns>
+                            <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="46%" />
+                            <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="53%" />
+                          </Columns>
+                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00003" Text="Übertragen" EventHandlerOnline="ConnectionOriented" EventHandler="NETW_sendApPassword" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
+                        </ParameterBlock>
+                        <ParameterSeparator Id="%AID%_PS-nnn" Text="„Übertragen“ geht erst, wenn das Gerät programmiert ist; Seite danach neu betreten. Das Passwort (8 bis 63 Zeichen) geht online ins Gerät; danach wird das Feld im Projekt geleert. Ohne Passwort startet das WiFi nicht. Adresse des Geräts: 10.42.0.1." UIHint="Information" />
+                      </when>
+                    </choose>
+                  </ParameterBlock>
+                </when>
+              </choose>
+            </Channel>
+          </Dynamic>
+        </ApplicationProgram>
+      </ApplicationPrograms>
+    </Manufacturer>
+  </ManufacturerData>
+</KNX>
