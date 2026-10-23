@@ -7,6 +7,12 @@
 #include <cstdarg>
 #include <string>
 #include <vector>
+#ifdef ARDUINO_ARCH_RP2040
+#include <cyw43.h>
+#include <lwip_wrap.h> // LWIPMutex
+#endif
+
+static constexpr uint32_t WIFI_SCAN_MAX_MS = 15000; // a scan without an end event is given up after this long
 
 #ifdef OPENKNX_WIFI_AP
 #include "OpenKNX/Network/Webserver/Webserver.h"
@@ -184,6 +190,13 @@ namespace OpenKNX
             }
 #ifdef ARDUINO_ARCH_ESP32
             WiFi.enableSTA(true); // the ESP32 scans only with the client interface up (AP -> AP+STA, no connect)
+#else
+            // a scan given up by loopWifiScan() may still run in the driver: a new start clears the list its callback fills
+            if (cyw43_wifi_scan_active(&cyw43_state))
+            {
+                _wifiScanFailed = true;
+                return false;
+            }
 #endif
             // -1: started (RP2040: 0 = error, ESP32: -2 = failed)
             if (WiFi.scanNetworks(true) != -1)
@@ -192,6 +205,7 @@ namespace OpenKNX
                 return false;
             }
             _wifiScanRunning = true;
+            _wifiScanStartedAt = millis();
             _wifiScanFailed = false;
             _wifiScanToConsole = toConsole;
             if (toConsole) logInfoP("WiFi scan started");
@@ -205,12 +219,23 @@ namespace OpenKNX
         void Module::loopWifiScan()
         {
             const int16_t n = WiFi.scanComplete();
-            if (n == -1) return; // still running
+            if (n == -1 && millis() - _wifiScanStartedAt < WIFI_SCAN_MAX_MS) return; // still running
             if (n < 0)
             {
+                // not running any more: a rejoin held back by the scan goes on (loopWifiClient())
                 _wifiScanRunning = false;
                 _wifiScanFailed = true;
-                logErrorP("WiFi scan failed");
+                _wifiScanToConsole = false;
+                logErrorP(n == -1 ? "WiFi scan did not end, given up" : "WiFi scan failed");
+#ifdef ARDUINO_ARCH_RP2040
+                if (n == -1)
+                {
+                    // the driver ends a scan only on its final result event: release it, or startWifiScan() refuses every later scan;
+                    // its result callback runs only in state 1 and under this lock, so no late entry reaches the list
+                    LWIPMutex m;
+                    cyw43_state.wifi_scan_state = 0;
+                }
+#endif
 #ifdef OPENKNX_WIFI_AP
                 if (_wifiApAutoChannel)
                 {

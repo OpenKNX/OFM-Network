@@ -589,6 +589,7 @@ namespace OpenKNX
             bool _wifiScanRunning = false;
             bool _wifiScanFailed = false;
             bool _wifiScanToConsole = false;
+            uint32_t _wifiScanStartedAt = 0; // for the given-up limit of loopWifiScan()
             volatile bool _wifiScanRequested = false; // /wifi/scan?start=1, picked up by the link tick
             bool startWifiScan(bool toConsole);
             void loopWifiScan();
