@@ -8,7 +8,7 @@
 #include "Module.h"
 
 // Periodic IGMP re-report; the call differs per platform (see Module::refreshMulticastMembership).
-#if defined(KNX_IP_LAN)
+#if defined(KNX_IP_LAN) || defined(KNX_IP_WIFI)
     #include <lwip/igmp.h>
     #include <lwip/netif.h>
     #ifdef ARDUINO_ARCH_ESP32
@@ -20,6 +20,9 @@
     #include "DeviceDisplay.h"
     #include "Widgets/WidgetNetSpeed.h"
     #include "Widgets/WidgetNetInfo.h"
+    #ifdef OPENKNX_WIFI_AP
+        #include "Widgets/WidgetWifi.h"
+    #endif
 #endif
 
 // ESP32's prebuilt IDF ships autoip.c compiled out, so a -D cannot enable AutoIP -- guard against
@@ -52,6 +55,12 @@
 #define CALLBACK_EVENT WiFiEvent_t
 #endif
 
+#if defined(KNX_IP_WIFI) && defined(ARDUINO_ARCH_ESP32)
+#include <esp_wifi.h>
+#ifndef OPENKNX_WIFI_COUNTRY
+#define OPENKNX_WIFI_COUNTRY "DE"
+#endif
+#endif
 #if defined(KNX_IP_LAN)
 #include <ETH.h>
 #define KNX_NETIF ETH
@@ -63,11 +72,13 @@
 #elif defined(ARDUINO_ARCH_RP2040)
 #include <SimpleMDNS.h>
 
-#if defined(KNX_IP_LAN)
-#include "W5500lwIP.h"
 #include <lwip/apps/mdns.h> // RP2040 mDNS via the lwIP API directly (SimpleMDNS.addServiceTxt broken on arduino-pico)
 #include <lwip/init.h>
 #include <lwip/netif.h>
+#include <lwip_wrap.h> // LWIPMutex
+
+#if defined(KNX_IP_LAN)
+#include "W5500lwIP.h"
 // OPENKNX_ETH_W5500_MAINLOOP_RX: build the driver WITHOUT the INT pin so RX is NOT IRQ-driven; we pump the chip
 // from the main loop (pumpEthernet) instead. Fixes two W5500+lwIP bugs with one root -- RX/timers running in a
 // preemptive IRQ under a non-fair lock: the tunnel-flood watchdog reboot and the 30 s mDNS loop stall.
@@ -82,6 +93,11 @@ using KnxNetif = Wiznet5500lwIP;
 KnxNetif KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE, PIN_ETH_INT);
 #else
 KnxNetif KNX_NETIF(PIN_ETH_SS, ETH_SPI_INTERFACE);
+#endif
+
+#elif defined(KNX_IP_WIFI)
+#else
+#pragma warn "Missing KNX_IP_LAN or KNX_IP_WIFI"
 #endif
 
 // Board identity for the mDNS TXT record, same fallback order the console uses for "Device / Name".
@@ -105,10 +121,6 @@ static void _openknxMdnsTxtCb(struct mdns_service *service, void *txt_userdata)
     for (uint8_t i = 0; i < _openknxMdnsTxtCount; i++)
         mdns_resp_add_service_txtitem(service, _openknxMdnsTxt[i], (u8_t)strlen(_openknxMdnsTxt[i]));
 }
-#elif defined(KNX_IP_WIFI)
-#else
-#pragma warn "Missing KNX_IP_LAN or KNX_IP_WIFI"
-#endif
 
 WiFiUDP Udp;
 #else
@@ -224,6 +236,9 @@ namespace OpenKNX
         {
             logInfoP("Reset network adapter");
             logIndentUp();
+#ifdef OPENKNX_WIFI_AP
+            stopWifiAp(); // the re-init below decides again (loopWifiAp)
+#endif
             _ipShown = false; // let checkIpStatus() rebuild the KNXnet/IP endpoint after the bounce
             _ipStableSince = 0;
 
@@ -242,6 +257,9 @@ namespace OpenKNX
             KNX_NETIF.disconnect(true, true);
             KNX_NETIF.mode(WIFI_OFF);
 #else
+#ifdef ARDUINO_ARCH_RP2040
+            forgetOpenknxMdns(); // end() removes the interface and its services
+#endif
             KNX_NETIF.end();
 #endif
             delay(500);
@@ -530,11 +548,18 @@ namespace OpenKNX
 #ifdef KNX_IP_WIFI
             KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP);
             KNX_NETIF.mode(WIFI_STA);
+            esp_wifi_set_country_code(OPENKNX_WIFI_COUNTRY, false); // regulatory domain, e.g. "DE": channels 1-13
             KNX_NETIF.setAutoReconnect(true);
+#ifdef OPENKNX_WIFI_AP
+            if (strlen(_wifiSSID) > 0 && !wifiOwnApConfigured()) // no credentials or own AP: loopWifiAp() starts the AP
+                KNX_NETIF.begin(_wifiSSID, _wifiPassphrase[0] ? _wifiPassphrase : nullptr); // nullptr = open network
+#else
             if (strlen(_wifiSSID) > 0)
-                KNX_NETIF.begin(_wifiSSID, _wifiPassphrase);
+                KNX_NETIF.begin(_wifiSSID, _wifiPassphrase[0] ? _wifiPassphrase : nullptr);
             else
                 KNX_NETIF.begin();
+#endif
+            KNX_NETIF.setSleep(false); // power save delays received frames (tunnel ACKs) by the beacon interval
 #else
 #if defined(KNX_IP_LAN)
             _ethLink.applyBeforeBegin(); // apply the persisted (NVS) / build-flag fixed link mode BEFORE begin()
@@ -545,12 +570,17 @@ namespace OpenKNX
 
 #elif ARDUINO_ARCH_RP2040
 #ifdef KNX_IP_WIFI
+#ifdef OPENKNX_WIFI_AP
+            if (strlen(_wifiSSID) > 0 && !wifiOwnApConfigured()) // own AP: no client, loopWifiAp() starts the AP
+#else
             if (strlen(_wifiSSID) > 0)
+#endif
             {
                 KNX_NETIF.config(_staticLocalIP, _staticNameServerIP, _staticGatewayIP, _staticSubnetMask);
                 logInfoP("Connecting to WiFi \"%s\"", _wifiSSID);
                 KNX_NETIF.setTimeout(2000); // 2000 ms = 4 seconds (timeout is multiplied by 2)
-                KNX_NETIF.begin(_wifiSSID, _wifiPassphrase);
+                KNX_NETIF.begin(_wifiSSID, _wifiPassphrase[0] ? _wifiPassphrase : nullptr); // nullptr = open network (WPA2 otherwise)
+                KNX_NETIF.noLowPowerMode(); // power save delays received frames (tunnel ACKs) by the beacon interval
             }
 #else
 
@@ -597,6 +627,9 @@ namespace OpenKNX
 
             _ipLedFunc = openknx.ledFunctions.get(OPENKNX_LEDFUNC_NET_STATE);
             _knxIpLedFunc = openknx.ledFunctions.get(OPENKNX_LEDFUNC_KNXIP_STATE);
+#ifdef OPENKNX_WIFI_AP
+            _wifiLedFunc = openknx.ledFunctions.get(OPENKNX_LEDFUNC_WIFI_STATE);
+#endif
 
             if (!configured || ParamNET_mDNS)
             {
@@ -955,6 +988,9 @@ namespace OpenKNX
         void Module::checkIpStatus()
         {
             if (_ipShown || !established()) return;
+#ifdef OPENKNX_WIFI_AP
+            if (_wifiApActive && !_wifiOwnAp) return; // open setup AP: networkChanged() would re-enable KNXnet/IP
+#endif
 
             if (_ipStableSince == 0) _ipStableSince = millis();
             if ((uint32_t)(millis() - _ipStableSince) < NET_INFO_STABLE_MS) return;
@@ -1012,8 +1048,8 @@ namespace OpenKNX
          */
         void Module::refreshMulticastMembership(bool linkEstablished)
         {
-#if !defined(KNX_IP_LAN)
-            (void)linkEstablished; // WiFi reaches the netif differently; not covered yet
+#if !defined(KNX_IP_LAN) && !defined(KNX_IP_WIFI)
+            (void)linkEstablished;
             return;
 #else
             if (NET_IGMP_REPORT_MS == 0) return; // switched off for this product
@@ -1028,14 +1064,33 @@ namespace OpenKNX
 
             // Stamp only where the report was handed over: up front, a dropped dispatch costs an interval.
 #if defined(ARDUINO_ARCH_RP2040)
+#ifdef KNX_IP_LAN
             netif *intf = KNX_NETIF.getNetIf();
+#else
+            // WiFi client: no netif accessor, the interface is the one with the client address. An own AP is
+            // the network itself, no snooping switch in between.
+            if (wifiApActive()) return;
+            netif *intf = nullptr;
+            const uint32_t ip = (uint32_t)KNX_NETIF.localIP();
+            for (netif *n = netif_list; n != nullptr && ip != 0; n = n->next)
+                if (ip4_addr_get_u32(netif_ip4_addr(n)) == ip)
+                {
+                    intf = n;
+                    break;
+                }
+#endif
             if (intf == nullptr) return;
             igmp_report_groups(intf); // core-wrapped, takes the lwIP lock itself
             _lastIgmpReport = millis();
 #elif defined(ARDUINO_ARCH_ESP32)
             // Only the netif index is public; resolving it inside the callback keeps both lwIP calls in
             // the tcpip task. num is recycled, so a stray report on another netif is possible.
+#ifdef KNX_IP_LAN
             const int idx = esp_netif_get_netif_impl_index(KNX_NETIF.netif());
+#else
+            if (wifiApActive()) return; // own AP: the network itself, no snooping switch in between
+            const int idx = esp_netif_get_netif_impl_index(WiFi.STA.netif());
+#endif
             if (idx <= 0) return;
             // try_, not tcpip_callback(): that one blocks this task until the tcpip mailbox drains.
             const err_t posted = tcpip_try_callback([](void *arg) {
@@ -1071,12 +1126,20 @@ namespace OpenKNX
 
 #ifdef ARDUINO_ARCH_ESP32
             // Level-triggered: follows the link state every tick, so a failing join is retried every 500 ms.
-            if (establishedState != knxIpEnabled())
+            // Router masks only: on 0x07B0 controlKnxIp() leaves the endpoint to networkChanged().
+#if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
+#ifdef OPENKNX_WIFI_AP
+            const bool knxIpWanted = establishedState && !(_wifiApActive && !_wifiOwnAp); // open setup AP: no KNXnet/IP
+#else
+            const bool knxIpWanted = establishedState;
+#endif
+            if (knxIpWanted != knxIpEnabled())
             {
                 const IPAddress ip = localIP();
-                controlKnxIp(establishedState);
-                if (establishedState && knxIpEnabled()) _boundIp = ip; // a GOT_IP for this address skips the rebind while up
+                controlKnxIp(knxIpWanted);
+                if (knxIpWanted && knxIpEnabled()) _boundIp = ip; // a GOT_IP for this address skips the rebind while up
             }
+#endif
 #endif
 
             const bool newLinkState = establishedState || carrier;
@@ -1084,12 +1147,29 @@ namespace OpenKNX
 #if defined(KNX_IP_LAN) && defined(OPENKNX_ETH_AUTO_FALLBACK)
             _ethLink.tick(newLinkState, establishedState); // ~2 Hz link tick; walks the auto-fallback ladder
 #endif
-#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+#if defined(ARDUINO_ARCH_RP2040)
             // re-register mDNS on the link-up edge (the service is lost with the old netif on a W5500 recovery)
             if (establishedState && !_mdnsWasEstablished) registerOpenknxMdns();
             _mdnsWasEstablished = establishedState;
 #endif
 
+#ifdef OPENKNX_WIFI_AP
+            if (_wifiProgPendingSince != 0 || (_wifiApActive && !_wifiOwnAp))
+            {
+                // setup AP: blue pulsing; prog button pressed, setup AP about to start: blue fast blinking
+                const uint8_t state = _wifiProgPendingSince != 0 ? 6 : 5;
+                if (_ipLedState != state)
+                {
+                    _ipLedFunc->color(OpenKNX::Led::Color::Blue);
+                    if (state == 6)
+                        _ipLedFunc->blinking(200);
+                    else
+                        _ipLedFunc->pulsing(1000); // 2 s cycle
+                    _ipLedState = state;
+                }
+            }
+            else
+#endif
             if (newLinkState && establishedState)
             {
                 if (_ipLedState != 1)
@@ -1114,8 +1194,8 @@ namespace OpenKNX
             else
             {
 #ifdef KNX_IP_WIFI
-                // keine vollständigen Zugangsdaten hinterlegt
-                if (_wifiSSID[0] == 0 || _wifiPassphrase[0] == 0)
+                // no credentials stored (an empty passphrase means an open network)
+                if (_wifiSSID[0] == 0)
                 {
                     if (_ipLedState != 4)
                     {
@@ -1193,6 +1273,24 @@ namespace OpenKNX
                 openknx.common.extendedHeartbeatValue |= 0b10000000;
             else
                 openknx.common.extendedHeartbeatValue &= 0b01111111;
+
+#ifdef OPENKNX_WIFI_AP
+            // last: the RP2040 rejoin in there blocks, the next tick reads the link again
+            if (_wifiScanRequested)
+            {
+                startWifiScan(false);
+                _wifiScanRequested = false; // after the start: a poll in between still reads "running" (ESP32 httpd task)
+            }
+            checkWifiProgAp(carrier);
+            loopWifiClient(carrier);
+            updateWifiLed(carrier);
+#ifdef OPENKNX_WIFI_LED_PIN
+            updateWifiBoardLed(carrier);
+#endif
+#ifdef OPENKNX_PING
+            loopWifiPing();
+#endif
+#endif
         }
 
         void Module::loop(bool configured)
@@ -1204,10 +1302,20 @@ namespace OpenKNX
             if (!_netSpeedWidgetAdded && openknxDisplayModule.getWidgetManager() != nullptr)
             {
                 _netSpeedWidgetAdded = true;
+#ifdef KNX_IP_LAN
                 auto *netSpeed = new WidgetNetSpeed(10000, WidgetFlags::DefaultWidget);
                 netSpeed->setName("LAN-Speed");
                 if (!openknxDisplayModule.tryAddWidget(netSpeed))
                     logDebugP("WidgetNetSpeed not registered (no display/manager)");
+#endif
+#ifdef OPENKNX_WIFI_AP
+                auto *wifi = new WidgetWifi(10000, WidgetFlags::DefaultWidget);
+                wifi->setName("WiFi");
+                if (openknxDisplayModule.tryAddWidget(wifi))
+                    _wifiWidget = wifi;
+                else
+                    logDebugP("WidgetWifi not registered (no display/manager)");
+#endif
 
                 // Host, IP and link state also belong to this module, not to the system-info
                 // widget of OGM-Common, which must not reach into OFM-Network.
@@ -1258,6 +1366,12 @@ namespace OpenKNX
 #if defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32)
             OpenKNX::Network::DNS::loop();
 #endif
+#ifdef OPENKNX_WIFI_SCAN
+            if (_wifiScanRunning) loopWifiScan();
+#endif
+#ifdef OPENKNX_WIFI_AP
+            loopWifiAp();
+#endif
 #ifdef OPENKNX_WEBCLIENT
             if (established()) webclient.loop();
 #endif
@@ -1273,9 +1387,17 @@ namespace OpenKNX
 #endif
 
 #ifdef OPENKNX_WEBSERVER
+#ifdef OPENKNX_WIFI_AP
+            // the setup AP needs its page; the own AP follows the ETS like any network
+            const bool setupAp = _wifiApActive && !_wifiOwnAp;
+            if (ParamNET_HTTP || !knx.configured() || setupAp)
+            {
+                if (!webserver.isRunning() && (established() || setupAp))
+#else
             if (ParamNET_HTTP || !knx.configured())
             {
                 if (!webserver.isRunning() && established())
+#endif
                 {
                     webserver.setup();
 #ifdef OPENKNX_WEBCONSOLE
@@ -1286,6 +1408,9 @@ namespace OpenKNX
 #endif
 #if defined(OPENKNX_TELEGRAMJSON) && defined(OPENKNX_WEBMONITOR)
                     groupmonitor.setup();
+#endif
+#ifdef OPENKNX_WIFI_AP
+                    setupWifiRoutes();
 #endif
                     // Last, not in setup(): only now are all routes, menus and assets
                     // registered. On ESP32 httpd serves from its own task, so a request
@@ -1345,6 +1470,9 @@ namespace OpenKNX
                 if (ParamNET_OTAUpdate == 2) allowed = false;
                 if (ParamNET_OTAUpdate == 0) allowed = knx.progMode();
             }
+#ifdef OPENKNX_WIFI_AP
+            if (_wifiApActive && !_wifiOwnAp) allowed = false; // open setup AP: no firmware upload for anyone in radio range
+#endif
 
             if (_otaAllowed != allowed) // allowed changed
             {
@@ -1430,6 +1558,13 @@ namespace OpenKNX
         void Module::showInformations()
         {
             openknx.logger.logWithPrefixAndValues("Hostname", "%s", _hostName);
+#ifdef OPENKNX_WIFI_AP
+            if (_wifiApActive)
+            {
+                showWifiApInformation(false);
+                return;
+            }
+#endif
             if (established())
                 openknx.logger.logWithPrefixAndValues("Network", "Established (%s)", localIP().toString().c_str());
             else
@@ -1651,44 +1786,48 @@ namespace OpenKNX
 #endif
 
 #ifdef KNX_IP_WIFI
-            else if (cmd == "erase wifi")
+            else if (cmd == "net wifi erase" || cmd == "erase wifi") // "erase wifi": former name, still accepted
             {
                 saveWifiSettings("", "", true); // triggers the restart timer
                 logInfoP("Wifi settings erased");
                 return true;
             }
-            else if (cmd.compare(0, 4, "wifi") == 0 && cmd.length() > 6)
+            else if (cmd.compare(0, 12, "net wifi set") == 0 && cmd.length() > 13)
             {
-                // Command: "wifi<SEP><ssid><SEP><psk>" with <SEP>=" " compatible to previous command
-                char delimiter = cmd[4];
-                std::string ssid_psk = cmd.substr(5);
-                size_t pos = ssid_psk.find(delimiter);
-
-                if (pos != std::string::npos)
-                {
-                    std::string ssid = ssid_psk.substr(0, pos);
-                    std::string psk = ssid_psk.substr(pos + 1);
-
-                    // Grenzen wie in readWifiFile() und Network.share.xml
-                    if (ssid.length() > 32 || psk.length() > 63)
-                    {
-                        logErrorP("SSID max. 32, PSK max. 63 Zeichen");
-                        return false;
-                    }
-
-                    if (ssid.empty())
-                        logInfoP("Wifi settings erased");
-                    else
-                        logInfoP("WLAN SSID: %s", ssid.c_str());
-                    saveWifiSettings(ssid.c_str(), psk.c_str(), true); // triggers the restart timer
-
-                    return true;
-                }
-                else
-                {
-                    logErrorP("Expected format: wifi<Sep><SSID><Sep><PSK> with <Sep> single char not in <SSID>");
-                    return false;
-                }
+                return setWifiFromConsole(cmd.substr(12));
+            }
+#ifdef OPENKNX_WIFI_SCAN
+            else if (cmd == "net wifi scan")
+            {
+                if (!startWifiScan(true)) logErrorP("WiFi scan could not be started");
+                return true;
+            }
+            else if (cmd == "wifi scan") // moved; the credentials parser below would read "scan" as an SSID
+            {
+                logInfoP("Moved to: net wifi scan");
+                return true;
+            }
+#endif
+#ifdef OPENKNX_WIFI_AP
+            else if (cmd == "net wifi")
+            {
+                showWifiStatus();
+                return true;
+            }
+            else if (cmd == "net wifi reconnect")
+            {
+                reconnectWifi();
+                return true;
+            }
+            else if (cmd == "net wifi ap")
+            {
+                openWifiSetupAp();
+                return true;
+            }
+#endif
+            else if (cmd.compare(0, 4, "wifi") == 0 && cmd.length() > 6) // former name of "net wifi set", still accepted
+            {
+                return setWifiFromConsole(cmd.substr(4));
             }
 
 // else if (cmd == "net recon" && strlen(_wifiSSID) > 0)
@@ -1771,6 +1910,14 @@ namespace OpenKNX
             if (console)
             {
                 logInfoP("Hostname: %s", _hostName);
+#ifdef OPENKNX_WIFI_AP
+                if (_wifiApActive)
+                {
+                    showWifiApInformation(true);
+                    logEnd();
+                    return;
+                }
+#endif
                 logInfoP("Connection: %s", established() ? "Established" : "Disconnected");
                 logIndentUp();
             }
@@ -1809,7 +1956,9 @@ namespace OpenKNX
 #endif
                 // logInfoP("Mode: %s", phyMode().c_str()); currently not supported
 
-#ifdef KNX_IP_WIFI
+#ifdef OPENKNX_WIFI_AP
+                logInfoP("WiFi: %s, %d dBm, channel %u (details: net wifi)", _wifiSSID, (int)_wifiRssi, (unsigned)_wifiChannel);
+#elif defined(KNX_IP_WIFI)
                 std::string wifiInfo = std::string(_wifiSSID) + " (" + std::to_string(KNX_NETIF.RSSI()) + "dBm)";
                 logInfoP("Wifi: %s", wifiInfo.c_str());
 #endif
@@ -1848,8 +1997,8 @@ namespace OpenKNX
             openknx.console.printHelpLine("net ?", "Network commands (link, diagnostics, reset)");
 
 #ifdef KNX_IP_WIFI
-            openknx.console.printHelpLine("wifi SSID PSK", "Set SSID and PSK");
-            openknx.console.printHelpLine("erase wifi", "Erase WiFi settings");
+            openknx.console.printHelpLine("net wifi set SSID PSK", "Set SSID and PSK; any char not in the SSID may replace the space");
+            openknx.console.printHelpLine("net wifi erase", "Erase WiFi settings");
 #endif
 #if defined(OPENKNX_WEBCLIENT_TEST) && defined(OPENKNX_CONSOLE_DEV)
             openknx.console.printHelpLine("http get <url> [path]", "Download to /flash, sd/ or efc/ (test aid)");
@@ -1867,6 +2016,18 @@ namespace OpenKNX
         {
             openknx.console.printHelpLine("net, n", "Show network informations");
             openknx.console.printHelpLine("net reset", "Reset network adapter");
+#ifdef OPENKNX_WIFI_AP
+            openknx.console.printHelpLine("net wifi", "WiFi state: network, signal, channel, address, reconnects");
+            openknx.console.printHelpLine("net wifi reconnect", "Join the configured WiFi network now; closes an open setup AP");
+            openknx.console.printHelpLine("net wifi ap", "Open the setup AP now, credentials kept (drops a live link)");
+#endif
+#ifdef KNX_IP_WIFI
+            openknx.console.printHelpLine("net wifi set SSID PSK", "Set SSID and PSK; any char not in the SSID may replace the space");
+            openknx.console.printHelpLine("net wifi erase", "Erase WiFi settings");
+#endif
+#ifdef OPENKNX_WIFI_SCAN
+            openknx.console.printHelpLine("net wifi scan", "List visible WiFi networks");
+#endif
 #if MASK_VERSION == 0x091A || MASK_VERSION == 0x57B0
             openknx.console.printHelpLine("net mc [address|reset]", "Get/Set multicast address");
 #endif
@@ -1897,12 +2058,18 @@ namespace OpenKNX
         bool Module::connected()
         {
             if (_powerSave) return false;
+#ifdef OPENKNX_WIFI_AP
+            if (_wifiApActive) return true; // AP (never together with the client): the device is the network
+#endif
 
 #if defined(ARDUINO_ARCH_RP2040)
 #if defined(KNX_IP_LAN)
             return KNX_NETIF.isLinked();
 #elif defined(KNX_IP_WIFI)
-            return KNX_NETIF.isConnected();
+            // While a join runs (driver rejoin, key-timeout retry) the core reports JOIN and the old address stays;
+            // the interface's link flag only comes back once associated
+            const struct netif *sta = __getCYW43Netif();
+            return sta != nullptr && netif_is_link_up(sta) && KNX_NETIF.isConnected();
 #endif
 #elif defined(ARDUINO_ARCH_ESP32)
             return espConnected;
@@ -1912,6 +2079,9 @@ namespace OpenKNX
         // IP Status
         bool Module::established()
         {
+#ifdef OPENKNX_WIFI_AP
+            if (_wifiApActive) return true; // AP (never together with the client): the device is the network
+#endif
             if (!connected()) return false;
 
             return localIP() != IPAddress();
@@ -1934,16 +2104,25 @@ namespace OpenKNX
 
         IPAddress Module::localIP()
         {
+#ifdef OPENKNX_WIFI_AP
+            if (_wifiApActive) return WiFi.softAPIP();
+#endif
             return KNX_NETIF.localIP();
         }
 
         IPAddress Module::subnetMask()
         {
+#ifdef OPENKNX_WIFI_AP
+            if (_wifiApActive) return IPAddress(255, 255, 255, 0);
+#endif
             return KNX_NETIF.subnetMask();
         }
 
         IPAddress Module::gatewayIP()
         {
+#ifdef OPENKNX_WIFI_AP
+            if (_wifiApActive) return IPAddress(); // the AP is the end of the network
+#endif
             return KNX_NETIF.gatewayIP();
         }
 
@@ -2034,6 +2213,36 @@ namespace OpenKNX
                 _restartTimer = delayTimerInit();
         }
 
+        /**
+         * @brief Console "net wifi set<SEP><ssid><SEP><psk>" and its former name "wifi<SEP>...": <SEP> is any char not
+         *        in the SSID. Saves and schedules the restart.
+         */
+        bool Module::setWifiFromConsole(const std::string &arg)
+        {
+            const size_t pos = arg.find(arg[0], 1);
+            if (pos == std::string::npos)
+            {
+                logErrorP("Expected format: net wifi set<Sep><SSID><Sep><PSK> with <Sep> single char not in <SSID>");
+                return false;
+            }
+            const std::string ssid = arg.substr(1, pos - 1);
+            const std::string psk = arg.substr(pos + 1);
+
+            // limits as in readWifiFile() and Network.share.xml
+            if (ssid.length() > 32 || psk.length() > 63)
+            {
+                logErrorP("SSID max. 32, PSK max. 63 Zeichen");
+                return false;
+            }
+
+            if (ssid.empty())
+                logInfoP("Wifi settings erased");
+            else
+                logInfoP("WiFi SSID: %s", ssid.c_str());
+            saveWifiSettings(ssid.c_str(), psk.c_str(), true); // triggers the restart timer
+            return true;
+        }
+
         void Module::readWifiSettings()
         {
             logDebugP("Read WiFi settings");
@@ -2091,7 +2300,7 @@ namespace OpenKNX
             {
                 auto ssid = preferences.getString("SSID");
                 auto passphrase = preferences.getString("PSK");
-                if (ssid.length() > 0 && passphrase.length() > 0)
+                if (ssid.length() > 0) // empty passphrase = open network
                 {
                     copyBounded(_wifiSSID, sizeof(_wifiSSID), ssid.c_str(), ssid.length());
                     copyBounded(_wifiPassphrase, sizeof(_wifiPassphrase), passphrase.c_str(), passphrase.length());
@@ -2103,7 +2312,7 @@ namespace OpenKNX
 
             if (found > 0) logDebugP("SSID: %s", _wifiSSID);
             if (found == 2) logDebugP("Passphrase with %i chars", strlen(_wifiPassphrase));
-            if (found == 1) logErrorP("No wifi passphrase found");
+            if (found == 1) logInfoP("No wifi passphrase: open network");
         }
 #endif
 
@@ -2128,7 +2337,7 @@ namespace OpenKNX
                         logErrorP("Wifi settings: payload too short (%u)", length);
                         resultData[0] = 1;
                         resultLength = 1;
-                        return false;
+                        return true;
                     }
 
                     const uint8_t ssidLen = data[1];
@@ -2139,7 +2348,7 @@ namespace OpenKNX
                         logErrorP("Wifi settings: invalid lengths (ssid=%u psk=%u payload=%u)", ssidLen, pskLen, length);
                         resultData[0] = 1;
                         resultLength = 1;
-                        return false;
+                        return true;
                     }
 
                     // Bus-Daten sind nicht zwingend NUL-terminiert
@@ -2158,6 +2367,39 @@ namespace OpenKNX
                     resultLength = 1;
                     return true;
                 }
+#ifdef OPENKNX_WIFI_AP
+                case 2: // [1]=length, from [2] password of the own AP
+                {
+                    char psk[64] = {};
+                    if (length < 2 || data[1] < 8 || data[1] > 63 || (uint16_t)2 + data[1] > length)
+                    {
+                        logErrorP("Wifi AP password: invalid length");
+                        resultData[0] = 1;
+                        resultLength = 1;
+                        return true;
+                    }
+                    memcpy(psk, data + 2, data[1]);
+                    logInfoP("Received WiFi AP password");
+                    resultData[0] = saveWifiApPassword(psk) ? 0 : 1;
+                    memset(psk, 0, sizeof(psk));
+                    resultLength = 1;
+                    return true;
+                }
+#endif
+#ifdef OPENKNX_WIFI_SCAN
+                case 3: // start a scan
+                    resultData[0] = startWifiScan(false) ? 0 : 1;
+                    resultLength = 1;
+                    return true;
+                case 4: // scan state and result
+                {
+                    // A direct call grants what its frame carries; the chunking wrapper of OGM-Common grants 0 (256-byte buffer)
+                    const uint8_t room = (resultLength > 1 && resultLength < 255) ? resultLength - 1 : 254;
+                    resultData[0] = 0;
+                    resultLength = 1 + wifiScanResult(resultData + 1, room);
+                    return true;
+                }
+#endif
             }
 
             resultData[0] = 1;
@@ -2186,7 +2428,7 @@ namespace OpenKNX
         // physical Ethernet/IP link). Counterpart to controlKnxIp().
         bool Module::knxIpEnabled()
         {
-#if MASK_VERSION == 0x091A || MASK_VERSION == 0x07B0 // primary datalink = KNXnet/IP (091A router, 07B0 interface Bau07B0IP)
+#if MASK_VERSION == 0x091A || (MASK_VERSION == 0x07B0 && defined(KNX_TUNNELING)) // primary datalink = KNXnet/IP (091A router, 07B0 interface Bau07B0IP)
             return knx.bau().getPrimaryDataLinkLayer()->enabled();
 #elif MASK_VERSION == 0x57B0
             return knx.bau().getDataLinkLayer()->enabled();
@@ -2207,7 +2449,7 @@ namespace OpenKNX
             if (knxIpEnabled() && established())
                 newState = 1; // KNXnet/IP running AND link/IP up
             else if (established())
-                newState = 2; // link/IP up, but KNX-IP not running (router; on 0x07B0 knxIpEnabled is always true -> never here)
+                newState = 2; // link/IP up, but KNX-IP not running (router; on 0x07B0 while the setup AP has closed the endpoint, or until networkChanged() opens it)
             else
                 newState = 3; // no link / no IP (on 0x07B0 this is the "network down" state)
 
@@ -2781,12 +3023,22 @@ namespace OpenKNX
         }
 #endif
 
-#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+#if defined(ARDUINO_ARCH_RP2040)
         // (Re)register the _openknx mDNS service + TXT via lwIP. Idempotent (del-before-add) so a link flap or
         // W5500 recovery re-registers cleanly. Called from setup() and the link-up edge in checkLinkStatus().
+        void Module::forgetOpenknxMdns()
+        {
+            _openknxMdnsSlot = -1;
+            _openknxMdnsNetif = nullptr;
+            _mdnsWasEstablished = false;
+        }
+
         void Module::registerOpenknxMdns()
         {
             if (!(!knx.configured() || ParamNET_mDNS)) return; // mDNS disabled
+#ifdef KNX_IP_WIFI
+            LWIPMutex m; // lwIP runs in the async context on WiFi
+#endif
 
             // remove the previous registration if its netif still exists (skip after a recovery -> old netif gone)
             if (_openknxMdnsNetif != nullptr && _openknxMdnsSlot >= 0)

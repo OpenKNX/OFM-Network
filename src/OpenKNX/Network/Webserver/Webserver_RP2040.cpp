@@ -485,7 +485,11 @@ namespace OpenKNX
                 return;
             }
 
+#ifdef OPENKNX_WIFI_AP // open setup AP: no websocket (a webserver build may have no network module)
+            if (s->isWs && s->ws->hasSocket(s->uri) && openknxNetwork.wifiSetupPathAllowed(s->uri))
+#else
             if (s->isWs && s->ws->hasSocket(s->uri))
+#endif
             {
                 // WebSocket upgrade
                 char accept[64] = {};
@@ -579,6 +583,8 @@ namespace OpenKNX
             if (statusCode == 404) statusText = "Not Found";
             else if (statusCode == 301)
                 statusText = "Moved Permanently";
+            else if (statusCode == 302)
+                statusText = "Found";
             else if (statusCode == 303)
                 statusText = "See Other";
             else if (statusCode == 400)

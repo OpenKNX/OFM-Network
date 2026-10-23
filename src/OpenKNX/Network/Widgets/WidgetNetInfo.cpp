@@ -55,7 +55,7 @@ void WidgetNetInfo::draw()
     // The label carries the assignment method, so it costs no extra row. Showing an IP while the
     // link is down would only ever be a stale one.
     if (up)
-        drawKeyValueRow(1, openknxNetwork.localUsesStaticIp() ? "FIX" : "DHCP",
+        drawKeyValueRow(1, openknxNetwork.wifiApActive() ? "AP" : (openknxNetwork.localUsesStaticIp() ? "FIX" : "DHCP"),
                         std::string(openknxNetwork.localIP().toString().c_str()));
     else
         drawKeyValueRow(1, "IP", dash);

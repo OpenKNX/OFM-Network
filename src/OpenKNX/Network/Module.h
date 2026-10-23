@@ -8,6 +8,21 @@
 #ifndef OPENKNX_LEDFUNC_KNXIP_STATE
 #define OPENKNX_LEDFUNC_KNXIP_STATE 11
 #endif
+// WiFi-Status LED function id (value 12, entry from NetworkWifi.share.xml)
+#ifndef OPENKNX_LEDFUNC_WIFI_STATE
+#define OPENKNX_LEDFUNC_WIFI_STATE 12
+#endif
+
+// Opt-in WiFi tools: OPENKNX_WIFI_SCAN (console "net wifi scan"), OPENKNX_WIFI_AP (open setup AP + page)
+#if defined(OPENKNX_WIFI_AP) && !defined(OPENKNX_WIFI_SCAN)
+    #define OPENKNX_WIFI_SCAN // the setup page lists the scanned networks
+#endif
+#if defined(OPENKNX_WIFI_SCAN) && !defined(KNX_IP_WIFI)
+    #error "OPENKNX_WIFI_SCAN / OPENKNX_WIFI_AP need KNX_IP_WIFI"
+#endif
+#if defined(OPENKNX_WIFI_AP) && !defined(OPENKNX_WEBSERVER)
+    #error "OPENKNX_WIFI_AP needs OPENKNX_WEBSERVER for the setup page"
+#endif
 
 // Interval of the periodic IGMP re-report, OPT-IN: 0 = off. Only earns its keep behind a snooping switch
 // without a querier; set it per product, well under the switch's group timer (3:14 seen on a TP-Link).
@@ -45,6 +60,12 @@
 #endif
 #include "strings.h"
 #include <functional>
+#if defined(OPENKNX_WIFI_AP) && defined(DEVICE_DISPLAY_MODULE)
+class Widget;
+#endif
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_WIFI)
+struct netif *__getCYW43Netif(); // arduino-pico (lwIP_CYW43): the client interface, null before the first begin()
+#endif
 
 #if defined(KNX_IP_LAN) && (defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32))
 #include "driver/EthLinkManager.h" // ETH link mode + auto-fallback ladder (self-guarded: W5500 LAN only)
@@ -155,6 +176,7 @@ namespace OpenKNX
 #ifdef KNX_IP_WIFI
             void saveWifiSettings(const char *ssid, const char *passphrase, bool scheduleRebootToTakeEffect);
             void readWifiSettings();
+            bool setWifiFromConsole(const std::string &arg); // "<SEP><ssid><SEP><psk>"
 #endif
 
 #ifdef OPENKNX_NETWORK_USB_EXCHANGE
@@ -191,6 +213,35 @@ namespace OpenKNX
             // reaches its TP-UART via getDataLinkLayer(); a TP+IP router (0x091A)
             // via getSecondaryDataLinkLayer() -- getDataLinkLayer() there is the IP side.
             TPUart::DataLinkLayer &tpUart();
+#endif
+
+#ifdef OPENKNX_WIFI_AP
+            bool wifiApActive() const { return _wifiApActive; } // device runs its own AP (setup or operating mode)
+            bool wifiSetupPathAllowed(const std::string &path) const; // open setup AP: only the setup page
+
+            enum class WifiState : uint8_t
+            {
+                Offline, // client configured, no connection
+                Client,
+                SetupAp,
+                OwnAp
+            };
+            /**
+             * @brief WiFi state for the display: values cached by the loop, no radio access.
+             */
+            struct WifiInfo
+            {
+                WifiState state;
+                const char *ssid; // client network or running AP
+                int8_t rssi;      // client only
+                uint8_t channel;
+                uint8_t security; // client only, as WifiScanNet::security
+                uint8_t clients;  // AP only
+            };
+            WifiInfo wifiInfo() const;
+#else
+            bool wifiApActive() const { return false; }
+            bool wifiSetupPathAllowed(const std::string &) const { return true; }
 #endif
 
 #ifdef DEVICE_DISPLAY_MODULE
@@ -454,10 +505,11 @@ namespace OpenKNX
             static constexpr uint16_t PHY_TOOL_PIN_S_DEFAULT = 30;
             static constexpr uint16_t PHY_TOOL_PIN_S_MAX = 120;
 #endif
-#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
+#if defined(ARDUINO_ARCH_RP2040)
             // RP2040 mDNS via the lwIP API directly (SimpleMDNS.addServiceTxt is broken on arduino-pico ->
             // TXT silently dropped). Idempotent so a link flap / W5500 recovery re-registers cleanly.
             void registerOpenknxMdns();
+            void forgetOpenknxMdns(); // the interface (and its services) goes away: the next registration starts fresh
             bool _mdnsWasEstablished = false; // rising edge for the re-registration in checkLinkStatus()
 #endif
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_W5500) && defined(OPENKNX_ETH_W5500_MAINLOOP_RX)
@@ -524,6 +576,86 @@ namespace OpenKNX
 #ifdef KNX_IP_WIFI
             char _wifiSSID[33] = {};
             char _wifiPassphrase[64] = {};
+#endif
+#ifdef OPENKNX_WIFI_SCAN
+            struct WifiScanNet
+            {
+                std::string ssid;
+                int8_t rssi;
+                uint8_t channel;
+                uint8_t security; // 0 open, 1 WEP, 2 WPA, 3 WPA2, 4 WPA/WPA2, 5 WPA3, 6 WPA2/WPA3, 7 enterprise, 255 unknown
+            };
+            std::vector<WifiScanNet> _wifiScanNets; // last result: strongest entry per SSID, sorted by RSSI
+            bool _wifiScanRunning = false;
+            bool _wifiScanFailed = false;
+            bool _wifiScanToConsole = false;
+            volatile bool _wifiScanRequested = false; // /wifi/scan?start=1, picked up by the link tick
+            bool startWifiScan(bool toConsole);
+            void loopWifiScan();
+            uint8_t wifiScanResult(uint8_t *out, uint8_t maxLen); // function property 160/5 command 4
+#endif
+#ifdef OPENKNX_WIFI_AP
+            bool _wifiApChecked = false;
+            bool _wifiApActive = false;
+            bool _wifiOwnAp = false;         // AP is the operating mode (ETS), not the setup AP
+            bool _wifiApAutoChannel = false; // a scan picks the channel of the own AP
+            bool _wifiApAuto5GHz = false;    // that scan picks among the 5 GHz channels
+            uint32_t _wifiApSince = 0;       // start of the current client attempt, for the setup AP fallback
+            bool _wifiApByProg = false;      // setup AP opened on demand (prog button, console 'net wifi ap')
+            uint32_t _wifiApIdleSince = 0;   // AP start or last time a station was connected
+            uint32_t _wifiApPollAt = 0;      // last station count read
+            uint8_t _wifiApClients = 0;
+            OpenKNX::Led::FunctionGroup *_wifiLedFunc = nullptr; // "WiFi-Status" LED function
+            uint8_t _wifiLedState = 0;
+            void updateWifiLed(bool up);
+#ifdef OPENKNX_WIFI_LED_PIN
+            uint8_t _wifiBoardLed = 0xFF; // last level written to the onboard WiFi LED, 0xFF = not written yet
+            void updateWifiBoardLed(bool up);
+#endif
+            uint32_t _wifiProgPendingSince = 0; // prog mode without a link: start of the wait for the setup AP, 0 = none
+            bool _wifiProgWasOn = false;     // prog mode in the previous link tick (switch-on edge)
+            uint32_t _wifiRetryAt = 0;       // last client join or last time connected
+            bool _wifiRejoinLogged = false;  // the outage's rejoins are logged once
+            uint32_t _wifiInfoAt = 0;        // last RSSI/channel read
+            int8_t _wifiRssi = 0;
+            uint8_t _wifiChannel = 0;
+            uint8_t _wifiSecurity = 255;
+            static constexpr uint8_t WIFI_HIST_LEN = 60;
+            int8_t _wifiRssiHist[WIFI_HIST_LEN] = {}; // one sample per 10 s, 0 = no connection
+            uint8_t _wifiRssiHead = 0;
+            uint8_t _wifiRssiCount = 0;
+            uint32_t _wifiRssiAt = 0;
+#ifdef OPENKNX_PING
+            uint16_t _wifiPingHist[WIFI_HIST_LEN] = {}; // gateway RTT in ms, one per second, 0xFFFF = no answer
+            uint8_t _wifiPingHead = 0;
+            uint8_t _wifiPingCount = 0;
+            uint32_t _wifiPingAt = 0;
+            volatile uint32_t _wifiPingPolledAt = 0; // last /wifi/status request: the ping runs only while the page is open
+            bool _wifiPingBusy = false;
+            void loopWifiPing();
+#endif
+#ifdef DEVICE_DISPLAY_MODULE
+            Widget *_wifiWidget = nullptr;
+            uint32_t _wifiWidgetShowSince = 0; // setup AP started: bring the widget up once, 0 = done
+#endif
+            void checkWifiProgAp(bool up);
+            void loopWifiClient(bool up);
+            void rejoinWifiDriver(); // RP2040: non-blocking join on the existing client interface
+            void showWifiStatus();   // console 'net wifi'
+            void reconnectWifi();    // console 'net wifi reconnect'
+            void openWifiSetupAp();  // console 'net wifi ap'
+            void beginWifiClient();
+            void leaveWifiAp();
+            void stopWifiAp();
+            char _wifiApSsid[33] = {};       // name of the running AP, for info/net
+            void showWifiApInformation(bool console);
+            bool wifiOwnApConfigured() const;
+            void loopWifiAp();
+            void startWifiAp();
+            void startOwnAp(uint8_t channel);
+            void joinApMulticast();
+            void setupWifiRoutes();
+            bool saveWifiApPassword(const char *psk);
 #endif
 
             std::vector<NetworkChangeCallback> _callback;

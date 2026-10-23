@@ -508,8 +508,17 @@ namespace OpenKNX
                 path = path.substr(0, qpos);
 
             bool handled = false;
+            if (!openknxNetwork.wifiSetupPathAllowed(path))
+            {
+                // Open setup AP: everything but the setup page stays closed
+                res.setStatus(302);
+                res.setHeader("Location", "/wifi");
+                res.send("");
+                handled = true;
+            }
             for (auto& route : _routes)
             {
+                if (handled) break;
                 if (route.method != req.method) continue;
 
                 const std::string& pattern = route.uri;

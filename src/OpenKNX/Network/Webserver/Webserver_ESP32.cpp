@@ -332,7 +332,11 @@ namespace OpenKNX
                 httpd_req_get_hdr_value_str(req, "Upgrade", upgrade, sizeof(upgrade));
                 if (strcasecmp(upgrade, "websocket") == 0)
                 {
+#ifdef OPENKNX_WIFI_AP // open setup AP: no websocket (a webserver build may have no network module)
+                    if (!ws->hasSocket(uri.c_str()) || !openknxNetwork.wifiSetupPathAllowed(uri))
+#else
                     if (!ws->hasSocket(uri.c_str()))
+#endif
                     {
                         WebRequest wsReq;
                         wsReq.uri = uri;
@@ -409,6 +413,8 @@ namespace OpenKNX
             if (statusCode == 404) statusText = "Not Found";
             else if (statusCode == 301)
                 statusText = "Moved Permanently";
+            else if (statusCode == 302)
+                statusText = "Found";
             else if (statusCode == 303)
                 statusText = "See Other";
             else if (statusCode == 400)
