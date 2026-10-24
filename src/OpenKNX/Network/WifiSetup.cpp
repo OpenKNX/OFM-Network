@@ -524,8 +524,44 @@ namespace OpenKNX
             logInfoP("WiFi setup AP \"%s\" at http://%s/wifi", _hostName, WiFi.softAPIP().toString().c_str());
         }
 
+#ifdef ARDUINO_ARCH_RP2040
+        /**
+         * @brief Sets (set = true) or reads a per-BSS firmware variable of the AP (bsscfg index 1), sent on the STA
+         *        interface like the driver does. The driver ignores the firmware status, hence the read-back in setApWpa2Only().
+         * @return the value read (reply bytes for a set); 0xFFFFFFFF when the request failed.
+         */
+        static uint32_t apBssVar(const char *name, bool set, uint32_t value = 0)
+        {
+            uint8_t buf[32] = {}; // longest name "bsscfg:wpa_auth" + 8
+            const size_t n = strlen(name) + 1;
+            const uint32_t bss = 1; // little-endian, as the firmware expects
+            memcpy(buf, name, n);
+            memcpy(buf + n, &bss, 4);
+            memcpy(buf + n + 4, &value, 4);
+            if (cyw43_ioctl(&cyw43_state, set ? CYW43_IOCTL_SET_VAR : CYW43_IOCTL_GET_VAR, n + (set ? 8 : 4), buf, CYW43_ITF_STA) != 0)
+                return 0xFFFFFFFF;
+            memcpy(&value, buf, 4);
+            return value;
+        }
+
+        /**
+         * @brief Switches the running AP from WPA/WPA2 (what the driver sets for every WPA2 auth) to WPA2 only.
+         * @return true when the AP reads back as up with WPA2 only.
+         */
+        static bool setApWpa2Only()
+        {
+            static constexpr uint32_t WPA2_AUTH_PSK = 0x0080; // CYW43_WPA2_AUTH_PSK, defined in cyw43_ll.c only
+            apBssVar("bss", true, 0);
+            apBssVar("bsscfg:wpa_auth", true, WPA2_AUTH_PSK);
+            apBssVar("bss", true, 1);
+            return apBssVar("bss", false) == 1 && apBssVar("bsscfg:wpa_auth", false) == WPA2_AUTH_PSK;
+        }
+#endif
+
         /**
          * @brief Own AP as operating mode: WPA2 with the transferred password; name from the ETS ("Netzname anpassen") or the host name.
+         *        RP2040: the driver announces WPA and WPA2 (WPA1 IE in the beacon), which a Broadcom Windows client rejects;
+         *        the AP is switched to WPA2 only, or restarted with WPA/WPA2 when that fails.
          */
         void Module::startOwnAp(uint8_t channel)
         {
@@ -561,7 +597,15 @@ namespace OpenKNX
 #ifdef ARDUINO_ARCH_ESP32
             const bool ok = WiFi.softAP(ssid, psk, channel);
 #else
-            const bool ok = WiFi.beginAP(ssid, psk, channel) == WL_CONNECTED;
+            bool ok = WiFi.beginAP(ssid, psk, channel) == WL_CONNECTED;
+            _wifiApSecurity = 3; // WifiScanNet::security: WPA2
+            if (ok && !setApWpa2Only())
+            {
+                logErrorP("WiFi own AP: WPA2 only not applied, restarting with WPA/WPA2");
+                WiFi.disconnectAP();
+                ok = WiFi.beginAP(ssid, psk, channel) == WL_CONNECTED;
+                _wifiApSecurity = 4; // WPA/WPA2
+            }
 #endif
             memset(psk, 0, sizeof(psk));
             if (!ok)
@@ -937,7 +981,8 @@ namespace OpenKNX
                     logInfoP("State:     setup AP \"%s\", %u client(s), page http://%s/wifi", info.ssid, (unsigned)info.clients, localIP().toString().c_str());
                     break;
                 case WifiState::OwnAp:
-                    logInfoP("State:     own AP \"%s\", channel %u, %u client(s), %s", info.ssid, (unsigned)info.channel, (unsigned)info.clients, localIP().toString().c_str());
+                    logInfoP("State:     own AP \"%s\", %s, channel %u, %u client(s), %s", info.ssid, wifiSecurityText(info.security), (unsigned)info.channel,
+                             (unsigned)info.clients, localIP().toString().c_str());
                     break;
                 case WifiState::Offline:
                     if (info.ssid[0] && netDowntimeSec())
@@ -1080,6 +1125,7 @@ namespace OpenKNX
             {
                 info.state = _wifiOwnAp ? WifiState::OwnAp : WifiState::SetupAp;
                 info.ssid = _wifiApSsid;
+                info.security = _wifiOwnAp ? _wifiApSecurity : 0;
                 if (!_wifiOwnAp) info.channel = 0;
             }
             else if (_currentLinkState)

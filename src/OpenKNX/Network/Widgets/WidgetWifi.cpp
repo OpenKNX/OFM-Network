@@ -228,7 +228,7 @@ void WidgetWifi::drawOwnAp()
     drawHeader("WiFi AP");
     drawCentered(15, info.ssid);
     char line[24];
-    snprintf(line, sizeof(line), "WPA2   Ch %u", (unsigned)info.channel);
+    snprintf(line, sizeof(line), "%s   Ch %u", securityText(info.security), (unsigned)info.channel);
     drawCentered(27, line);
     snprintf(line, sizeof(line), "IP %s", openknxNetwork.localIP().toString().c_str());
     drawCentered(39, line);

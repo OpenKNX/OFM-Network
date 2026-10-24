@@ -156,7 +156,7 @@
         if (m == 'setup') s.innerHTML = bar('b', 'Einrichtungs-WiFi', [['Netzname', esc(st.ssid)], ['Ger\u00e4t', esc(st.ip)]]);
         else if (m == 'own') {
             s.innerHTML = bar('', 'Eigenes WiFi', [['Netzname', esc(st.ssid)], ['Ger\u00e4te', st.clients + ' verbunden'], ['Kanal', st.ch]]);
-            t.innerHTML = row('Netzname', esc(st.ssid)) + row('Sicherheit', 'WPA2') + row('Kanal', st.ch + (st.ch > 14 ? ' (5 GHz)' : ' (2,4 GHz)')) +
+            t.innerHTML = row('Netzname', esc(st.ssid)) + row('Sicherheit', SEC[st.sec] || '\u2013') + row('Kanal', st.ch + (st.ch > 14 ? ' (5 GHz)' : ' (2,4 GHz)')) +
                 row('Adresse', esc(st.ip)) + row('Verbundene Ger\u00e4te', st.clients);
         } else {
             var on = m == 'client';

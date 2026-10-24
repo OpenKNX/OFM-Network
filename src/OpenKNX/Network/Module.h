@@ -235,7 +235,7 @@ namespace OpenKNX
                 const char *ssid; // client network or running AP
                 int8_t rssi;      // client only
                 uint8_t channel;
-                uint8_t security; // client only, as WifiScanNet::security
+                uint8_t security; // client and own AP, as WifiScanNet::security
                 uint8_t clients;  // AP only
             };
             WifiInfo wifiInfo() const;
@@ -614,6 +614,7 @@ namespace OpenKNX
             uint32_t _wifiApIdleSince = 0;   // AP start or last time a station was connected
             uint32_t _wifiApPollAt = 0;      // last station count read
             uint8_t _wifiApClients = 0;
+            uint8_t _wifiApSecurity = 3; // own AP, as WifiScanNet::security: WPA2, RP2040 fallback WPA/WPA2
             OpenKNX::Led::FunctionGroup *_wifiLedFunc = nullptr; // "WiFi-Status" LED function
             uint8_t _wifiLedState = 0;
             void updateWifiLed(bool up);
