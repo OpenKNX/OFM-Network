@@ -63,8 +63,9 @@
               <ParameterType Id="%AID%_PT-NetwSsid" Name="NetwSsid">
                 <TypeText SizeInBit="256" />
               </ParameterType>
-              <ParameterType Id="%AID%_PT-NetwPsk" Name="NetwPsk">
-                <TypeText SizeInBit="504" />
+              <ParameterType Id="%AID%_PT-NetwPsk" Name="NetwPsk" ValidationErrorRef="%AID%_M-%TT%00001">
+                <!-- empty stays valid: the script clears the field after a transfer; the byte length (UTF-8) is checked by the script -->
+                <TypeText SizeInBit="504" Pattern="^$|^.{8,63}$" />
               </ParameterType>
               <ParameterType Id="%AID%_PT-NetwInfo" Name="NetwInfo">
                 <TypeText SizeInBit="320" />
@@ -222,6 +223,9 @@
             </ComObjectTable>
             <ComObjectRefs>
             </ComObjectRefs>
+            <Messages>
+              <Message Id="%AID%_M-%TT%00001" Name="InvalidPassword" Text="Passwort mit 8 bis 63 Zeichen eingeben oder leer lassen." />
+            </Messages>
             <Script>
               <op:include href="NetworkWifi.script.js" prefix="NETW" type="script" />
             </Script>
