@@ -82,6 +82,15 @@
             chart('Ein Ping pro Sekunde, letzte 60 s \u00b7 rot = keine Antwort', 70, gl, g) + '<p class="meta">L\u00e4uft nur, solange diese Seite offen ist.</p>';
     }
 
+    // ---- stations of the own WiFi ----
+    function staTable(l) {
+        var h = '<h2>Verbundene Ger\u00e4te</h2>';
+        if (!l.length) return h + '<p class="meta">Kein Ger\u00e4t verbunden.</p>';
+        h += '<div class="wf-stas"><table><thead><tr><th>IP-Adresse</th><th>MAC-Adresse</th></tr></thead><tbody>';
+        l.forEach(function (c) { h += '<tr><td>' + (c.ip ? esc(c.ip) : '<span class="gray">unbekannt</span>') + '</td><td>' + esc(c.mac) + '</td></tr>' });
+        return h + '</tbody></table></div>';
+    }
+
     // ---- network list ----
     function netTable() {
         var el = $('wf-n');
@@ -138,7 +147,7 @@
         else if (m == 'own')
             R.innerHTML = '<h1>WiFi</h1><div id="wf-s"></div><div class="wf-conn"><div><table class="attribute-table" id="wf-t"></table>' +
                 '<p class="meta" style="margin-top:12px">Name, Kanal und Passwort werden bei der Programmierung festgelegt.</p></div>' +
-                '<div class="wf-qr"><canvas id="wf-q"></canvas>Diese Seite auf dem Handy \u00f6ffnen</div></div>';
+                '<div class="wf-qr"><canvas id="wf-q"></canvas>Diese Seite auf dem Handy \u00f6ffnen</div></div><div id="wf-c"></div>';
         else
             R.innerHTML = '<h1>WiFi</h1><div id="wf-s"></div><div class="wf-conn"><div><table class="attribute-table" id="wf-t"></table><div id="wf-rc"></div></div>' +
                 '<div class="wf-qr"><canvas id="wf-q"></canvas>Diese Seite auf dem Handy \u00f6ffnen</div></div><div id="wf-p"></div>' +
@@ -158,6 +167,7 @@
             s.innerHTML = bar('', 'Eigenes WiFi', [['Netzname', esc(st.ssid)], ['Ger\u00e4te', st.clients + ' verbunden'], ['Kanal', st.ch]]);
             t.innerHTML = row('Netzname', esc(st.ssid)) + row('Sicherheit', SEC[st.sec] || '\u2013') + row('Kanal', st.ch + (st.ch > 14 ? ' (5 GHz)' : ' (2,4 GHz)')) +
                 row('Adresse', esc(st.ip)) + row('Verbundene Ger\u00e4te', st.clients);
+            $('wf-c').innerHTML = staTable(st.stas);
         } else {
             var on = m == 'client';
             s.innerHTML = on ? bar('', 'Verbunden', [['Netzname', esc(st.ssid)], ['Signal', bars(st.rssi) + LV[lvl(st.rssi)]], ['Kanal', st.ch]])

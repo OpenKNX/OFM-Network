@@ -33,11 +33,14 @@ static constexpr uint32_t WIFI_SCAN_MAX_MS = 15000; // a scan without an end eve
 #ifdef ARDUINO_ARCH_RP2040
 #include <LittleFS.h>
 #include <cyw43.h>
+#include <lwip/etharp.h>
 #include <lwip/igmp.h>
 #include <lwip/netif.h>
 #include <lwip_wrap.h> // LWIPMutex
 #else
 #include <Preferences.h>
+#include <esp_netif.h>
+#include <esp_wifi.h>
 #include <lwip/netif.h>
 #include <lwip/tcpip.h>
 #endif
@@ -404,7 +407,7 @@ namespace OpenKNX
                 const uint32_t now = millis();
                 if (now - _wifiApPollAt < 1000) return;
                 _wifiApPollAt = now;
-                _wifiApClients = (uint8_t)WiFi.softAPgetStationNum();
+                pollWifiApStations();
                 if (_wifiApClients) _wifiApIdleSince = now;
 #ifdef DEVICE_DISPLAY_MODULE
                 if (_wifiWidgetShowSince != 0)
@@ -508,6 +511,7 @@ namespace OpenKNX
             _wifiApActive = true;
             _wifiApIdleSince = millis();
             _wifiApClients = 0;
+            memset(_wifiApStas, 0, sizeof(_wifiApStas));
 #ifdef DEVICE_DISPLAY_MODULE
             _wifiWidgetShowSince = millis() | 1; // 0 means none
 #endif
@@ -617,6 +621,7 @@ namespace OpenKNX
             _wifiOwnAp = true;
             _wifiApIdleSince = millis();
             _wifiApClients = 0;
+            memset(_wifiApStas, 0, sizeof(_wifiApStas));
             _wifiChannel = channel;
             strncpy(_wifiApSsid, ssid, sizeof(_wifiApSsid) - 1);
             joinApMulticast();
@@ -972,6 +977,14 @@ namespace OpenKNX
         {
             static const char *const levels[] = {"", "weak", "fair", "good", "very good"};
             const WifiInfo info = wifiInfo();
+            auto showClients = [&]() {
+                for (uint8_t i = 0; i < info.clients; i++)
+                {
+                    char mac[18];
+                    formatBssid(_wifiApStas[i].mac, mac);
+                    logInfoP("Client:    %s  %s", mac, _wifiApStas[i].ip ? IPAddress(_wifiApStas[i].ip).toString().c_str() : "address unknown");
+                }
+            };
             logBegin();
             logInfoP("WiFi");
             logIndentUp();
@@ -979,10 +992,12 @@ namespace OpenKNX
             {
                 case WifiState::SetupAp:
                     logInfoP("State:     setup AP \"%s\", %u client(s), page http://%s/wifi", info.ssid, (unsigned)info.clients, localIP().toString().c_str());
+                    showClients();
                     break;
                 case WifiState::OwnAp:
                     logInfoP("State:     own AP \"%s\", %s, channel %u, %u client(s), %s", info.ssid, wifiSecurityText(info.security), (unsigned)info.channel,
                              (unsigned)info.clients, localIP().toString().c_str());
+                    showClients();
                     break;
                 case WifiState::Offline:
                     if (info.ssid[0] && netDowntimeSec())
@@ -1153,7 +1168,7 @@ namespace OpenKNX
         {
             char line[96];
             snprintf(line, sizeof(line), "%s \"%s\" (%s, %u clients)", _wifiOwnAp ? "WiFi AP" : "WiFi setup AP", _wifiApSsid,
-                     WiFi.softAPIP().toString().c_str(), (unsigned)WiFi.softAPgetStationNum());
+                     WiFi.softAPIP().toString().c_str(), (unsigned)_wifiApClients);
             if (console)
                 logInfoP("Connection: %s", line);
             else
@@ -1189,6 +1204,57 @@ namespace OpenKNX
             UNLOCK_TCPIP_CORE();
             if (!ok) logErrorP("WiFi AP: multicast join failed");
 #endif
+        }
+
+        /**
+         * @brief Refreshes the station list of the running AP (loopWifiAp, 1 s); the address comes from the ARP table
+         *        (RP2040, last known one kept while the station stays listed) or the DHCP server (ESP32), ip 0 = not known.
+         */
+        void Module::pollWifiApStations()
+        {
+            WifiApStation stas[WIFI_AP_STA_MAX] = {};
+            uint8_t num = 0;
+#ifdef ARDUINO_ARCH_RP2040
+            uint8_t macs[WIFI_AP_STA_MAX * 6] = {};
+            int count = WIFI_AP_STA_MAX; // in: buffer size, out: stations; left as is when the driver returns early
+            cyw43_wifi_ap_get_stas(&cyw43_state, &count, macs);
+            static const uint8_t none[6] = {};
+            LWIPMutex m;
+            // zero (driver returned early) or group bit set (echoed request after a firmware error): no station
+            for (uint8_t i = 0; i < count && (macs[i * 6] & 1) == 0 && memcmp(macs + i * 6, none, 6) != 0; i++, num++)
+            {
+                memcpy(stas[i].mac, macs + i * 6, 6);
+                for (size_t k = 0; k < ARP_TABLE_SIZE; k++)
+                {
+                    ip4_addr_t *ip;
+                    struct netif *netif;
+                    struct eth_addr *eth;
+                    if (etharp_get_entry(k, &ip, &netif, &eth) && memcmp(eth->addr, stas[i].mac, 6) == 0)
+                    {
+                        stas[i].ip = ip4_addr_get_u32(ip);
+                        break;
+                    }
+                }
+                for (uint8_t o = 0; stas[i].ip == 0 && o < WIFI_AP_STA_MAX; o++)
+                    if (memcmp(_wifiApStas[o].mac, stas[i].mac, 6) == 0) stas[i].ip = _wifiApStas[o].ip; // ARP entry aged out
+            }
+#else
+            wifi_sta_list_t list;
+            if (esp_wifi_ap_get_sta_list(&list) == ESP_OK && list.num > 0)
+            {
+                num = (uint8_t)std::min<int>(list.num, WIFI_AP_STA_MAX); // softAP() allows 4
+                esp_netif_pair_mac_ip_t pairs[WIFI_AP_STA_MAX] = {};
+                for (uint8_t i = 0; i < num; i++) memcpy(pairs[i].mac, list.sta[i].mac, 6);
+                esp_netif_dhcps_get_clients_by_mac(WiFi.AP.netif(), num, pairs); // unknown MACs keep ip 0
+                for (uint8_t i = 0; i < num; i++)
+                {
+                    memcpy(stas[i].mac, pairs[i].mac, 6);
+                    stas[i].ip = pairs[i].ip.addr;
+                }
+            }
+#endif
+            if (num) memcpy(_wifiApStas, stas, sizeof(stas)); // RP2040: a failed poll keeps the known addresses
+            _wifiApClients = num;
         }
 
         /**
@@ -1265,7 +1331,7 @@ namespace OpenKNX
                 static const char *const states[] = {"offline", "client", "setup", "own"};
                 const WifiInfo info = wifiInfo();
                 std::string j;
-                j.reserve(768);
+                j.reserve(1152);
                 addf(j, "{\"mode\":\"%s\",\"prog\":%d,\"ssid\":\"", states[(uint8_t)info.state], knx.progMode() ? 1 : 0);
                 jsonEscape(j, info.ssid);
                 addf(j, "\",\"rssi\":%d,\"ch\":%u,\"sec\":%u,\"clients\":%u,\"ip\":\"%s\",\"gw\":\"%s\",\"host\":\"", (int)info.rssi,
@@ -1277,8 +1343,17 @@ namespace OpenKNX
 #else
                 const int display = 0;
 #endif
-                addf(j, "\",\"mdns\":%d,\"cfg\":%d,\"disp\":%d,\"up\":%lu,\"rh\":[", (!knx.configured() || ParamNET_mDNS) ? 1 : 0,
+                addf(j, "\",\"mdns\":%d,\"cfg\":%d,\"disp\":%d,\"up\":%lu,\"stas\":[", (!knx.configured() || ParamNET_mDNS) ? 1 : 0,
                      knx.configured() ? 1 : 0, display, (unsigned long)netUptimeSec());
+                const uint8_t sn = info.state == WifiState::OwnAp ? info.clients : 0;
+                for (uint8_t i = 0; i < sn; i++)
+                {
+                    const WifiApStation st = _wifiApStas[i]; // ESP32: a rewrite by the loop task can garble rows for one refresh
+                    char mac[18];
+                    formatBssid(st.mac, mac);
+                    addf(j, "%s{\"mac\":\"%s\",\"ip\":\"%s\"}", i ? "," : "", mac, st.ip ? IPAddress(st.ip).toString().c_str() : "");
+                }
+                j += "],\"rh\":[";
                 const uint8_t rc = _wifiRssiCount, rh = _wifiRssiHead; // the loop task may advance them meanwhile (ESP32)
                 for (uint8_t i = 0; i < rc; i++)
                     addf(j, i ? ",%d" : "%d", (int)_wifiRssiHist[(rh + WIFI_HIST_LEN - rc + i) % WIFI_HIST_LEN]);

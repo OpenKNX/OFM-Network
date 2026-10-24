@@ -29,6 +29,8 @@ body.wf-band { flex-direction: column; padding-bottom: 0 }
 .wf-nets tr.sel td { background: #e8f3e7 }
 .wf-nets td { white-space: nowrap }
 .wf-nets td.n { font-weight: 600; white-space: normal }
+.wf-stas { overflow-x: auto }
+.wf-stas td { white-space: nowrap; font-variant-numeric: tabular-nums }
 .wf-form { display: grid; grid-template-columns: 9em minmax(0, 22em); gap: 10px 14px; align-items: center; font-size: .9em; margin-top: 1em }
 .wf-form label { color: #666 }
 .wf-form input[type=text], .wf-form input[type=password] { width: 100% }

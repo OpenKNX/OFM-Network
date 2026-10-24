@@ -613,8 +613,16 @@ namespace OpenKNX
             bool _wifiApByProg = false;      // setup AP opened on demand (prog button, console 'net wifi ap')
             uint32_t _wifiApIdleSince = 0;   // AP start or last time a station was connected
             uint32_t _wifiApPollAt = 0;      // last station count read
-            uint8_t _wifiApClients = 0;
+            uint8_t _wifiApClients = 0; // at most WIFI_AP_STA_MAX
+            static constexpr uint8_t WIFI_AP_STA_MAX = 8; // stations listed; the RP2040 AP has 8 DHCP leases
+            struct WifiApStation
+            {
+                uint8_t mac[6];
+                uint32_t ip; // lwIP byte order, 0 = not known
+            };
+            WifiApStation _wifiApStas[WIFI_AP_STA_MAX] = {}; // first _wifiApClients valid
             uint8_t _wifiApSecurity = 3; // own AP, as WifiScanNet::security: WPA2, RP2040 fallback WPA/WPA2
+            void pollWifiApStations();
             OpenKNX::Led::FunctionGroup *_wifiLedFunc = nullptr; // "WiFi-Status" LED function
             uint8_t _wifiLedState = 0;
             void updateWifiLed(bool up);
