@@ -79,6 +79,16 @@ Everything below is on `ec/v1dev-ec` and has not been released upstream yet.
 * change (RP2040): the module hands its lwIP interface to the knx platform (`setNetif()`); it needs the matching knx version
 * fix (RP2040, W5500): a W5500 that does not answer at boot no longer puts the device into a watchdog loop. lwIP was initialised only when the chip came up, so mDNS ran on an uninitialised stack and panicked; after five resets the watchdog auto-erase cleared the KNX programming. The device now starts without network and the self-heal keeps trying
 
+**WiFi**
+* feature: devices with a WiFi interface (RP2040 Pico W / Pico 2 W, ESP32) get the ETS module NETW: a setup access point without credentials or from the prog button, an own access point as operating mode, a network scan with "Übernehmen" in the ETS, a client rejoin, the page `/wifi` (signal history, gateway ping, QR code), a display widget, the LED function `WiFi-Status` and the console commands `net wifi ...`
+* feature: the ETS checks both WiFi password fields while typing: empty or 8 to 63 characters
+* feature: `net wifi` and the network information show the BSSID of the access point the client is joined to, a change of access point is logged, and `net wifi scan` lists every access point with its BSSID
+* fix (RP2040): a WPA2 client whose join failed is joined again -- the core reported the join as done once requested and set the link flag, so a failed join left the device without a connection; boot no longer blocks 4 s in the join
+* fix (RP2040): a WiFi scan without an end event from the driver is given up after 15 s -- it stayed marked as running, which also stopped the client rejoin
+* fix (RP2040): AutoIP no longer replaces an address from DHCP with 169.254/16 after a rejoin -- lwIP does not stop a running AutoIP check when DHCP binds; AutoIP is now also stopped while the client link is down
+* fix (RP2040): the own access point announces WPA2 only -- the WiFi driver announces WPA and WPA2, and a Broadcom WiFi adapter under Windows refused to connect; if the switch does not read back, the access point restarts with WPA/WPA2 and the page, the display and `net wifi` show that
+* feature: with an access point running, `net wifi` and the page `/wifi` (own access point) list the connected devices with IP and MAC address
+
 **Web UI**
 * feature: the browser tab shows the hostname instead of "OpenKNX", so several devices can be told apart in tabs, bookmarks and history -- the name mDNS and DHCP already use, changeable in ETS
 * fix: the hostname is HTML-escaped in the title and in the overview row -- it is the one value on those pages that comes from an ETS parameter
