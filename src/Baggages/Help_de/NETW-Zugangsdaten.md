@@ -9,10 +9,10 @@ Zugangsdaten für die Betriebsart *Mit vorhandenem WiFi verbinden*.
 
 **Andere Wege**
 
-Über das Einrichtungs-WiFi des Geräts oder die Konsole: `net wifi set SSID PSK`. Enthält der Netzname ein Leerzeichen, ein anderes Trennzeichen nehmen, das im Netznamen nicht vorkommt, z. B. `net wifi set;Mein Netz;Passwort`. `net wifi erase` löscht die Zugangsdaten.
+Über das Einrichtungs-WiFi des Geräts oder die Konsole: *net wifi set SSID PSK*. Enthält der Netzname ein Leerzeichen, ein anderes Trennzeichen nehmen, das im Netznamen nicht vorkommt, z. B. *net wifi set;Mein Netz;Passwort*. *net wifi erase* löscht die Zugangsdaten.
 
 Bei Geräten mit USB-Dateiaustausch auch per USB: Gerät am Rechner anschließen und die Prog-Taste doppelt drücken; das Gerät erscheint als Laufwerk. In der Datei *Wifi.txt* die erste Zeile durch den Netznamen und die zweite durch das Passwort ersetzen, speichern und die Prog-Taste erneut doppelt drücken. Das Gerät startet neu und verbindet sich. Offene Netze ohne Passwort gehen auf diesem Weg nicht.
 
 **Im Betrieb**
 
-Geht die Verbindung verloren, versucht das Gerät sie selbst wieder aufzubauen, bis das Netz wieder erreichbar ist. Die Seite *WiFi* der Weboberfläche zeigt Signal, Antwortzeit und Verluste zum WiFi-Router; auf der Konsole zeigt `net wifi` den Zustand, `net wifi reconnect` verbindet sofort neu.
+Geht die Verbindung verloren, versucht das Gerät sie selbst wieder aufzubauen, bis das Netz wieder erreichbar ist. Die Seite *WiFi* der Weboberfläche zeigt Signal, Antwortzeit und Verluste zum WiFi-Router; auf der Konsole zeigt *net wifi* den Zustand, *net wifi reconnect* verbindet sofort neu.

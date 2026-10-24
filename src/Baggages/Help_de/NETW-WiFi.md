@@ -21,16 +21,14 @@ Entfernung, Wände, Decken und andere Netze auf demselben Kanal kosten Signal; e
 
 Auf der Seite *LEDs*, Abschnitt *Info LEDs*, lässt sich einer Info-LED die Funktion **WiFi-Status** zuweisen:
 
-| LED | Bedeutung |
-|---|---|
-| grün | verbunden, Signal *gut* oder *sehr gut* |
-| gelb | verbunden, Signal *mittel* |
-| orange, blinkt langsam | verbunden, Signal *schwach* |
-| rot, blinkt | kein WiFi, das Gerät versucht es weiter |
-| rot | keine Zugangsdaten, oder das eigene WiFi startet nicht (kein Passwort) |
-| blau, pulsiert | Einrichtungs-WiFi offen |
-| blau, blinkt schnell | Prog-Modus ohne Netz: Einrichtungs-WiFi startet in 5 Sekunden |
-| türkis | eigenes WiFi aktiv |
+- **grün:** verbunden, Signal *gut* oder *sehr gut*
+- **gelb:** verbunden, Signal *mittel*
+- **orange, blinkt langsam:** verbunden, Signal *schwach*
+- **rot, blinkt:** kein WiFi, das Gerät versucht es weiter
+- **rot:** keine Zugangsdaten, oder das eigene WiFi startet nicht (kein Passwort)
+- **blau, pulsiert:** Einrichtungs-WiFi offen
+- **blau, blinkt schnell:** Prog-Modus ohne Netz: Einrichtungs-WiFi startet in 5 Sekunden
+- **türkis:** eigenes WiFi aktiv
 
 Eine einfarbige LED zeigt nur das Muster: an, blinkt oder pulsiert; „keine Zugangsdaten“ bleibt dunkel. Eine nicht dimmbare LED leuchtet statt zu pulsieren.
 

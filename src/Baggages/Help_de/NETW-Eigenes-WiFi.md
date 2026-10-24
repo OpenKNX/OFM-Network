@@ -11,9 +11,9 @@ Nicht zu verwechseln mit dem Einrichtungs-WiFi: Das ist offen und dient nur zum 
 
 **So geht's**
 
-1. Mit dem Notebook in das WiFi des Geräts einwählen. Das Notebook erhält seine Adresse automatisch vom Gerät.
-2. Bei Geräten mit KNX IP lässt sich das Gerät über dieses WiFi programmieren. Ein IP-Router oder eine IP-Schnittstelle steht unter der Adresse 10.42.0.1 als Verbindung bereit und macht die angeschlossene Linie erreichbar.
-3. Ist der Webserver eingeschaltet (*Netzwerk*), ist die Weboberfläche unter http://10.42.0.1 erreichbar.
+- **1.** Mit dem Notebook in das WiFi des Geräts einwählen. Das Notebook erhält seine Adresse automatisch vom Gerät.
+- **2.** Bei Geräten mit KNX IP lässt sich das Gerät über dieses WiFi programmieren. Ein IP-Router oder eine IP-Schnittstelle steht unter der Adresse 10.42.0.1 als Verbindung bereit und macht die angeschlossene Linie erreichbar.
+- **3.** Ist der Webserver eingeschaltet (*Netzwerk*), ist die Weboberfläche unter http://10.42.0.1 erreichbar.
 
 **Einstellungen**
 
