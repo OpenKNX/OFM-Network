@@ -1281,12 +1281,15 @@ namespace OpenKNX
 
         /**
          * @brief Setup page, scan and save routes plus the captive-portal probe URLs of the common OSes.
+         *        Registers once: Module::loop() calls it on every pass until the web server runs.
          */
         void Module::setupWifiRoutes()
         {
 #ifdef ARDUINO_ARCH_ESP32
-            if (s_scanLock == nullptr) s_scanLock = xSemaphoreCreateMutex(); // before webserver.start()
+            if (s_scanLock == nullptr) s_scanLock = xSemaphoreCreateMutex(); // before webserver.start(); retried while it fails
 #endif
+            if (_wifiRoutesAdded) return;
+            _wifiRoutesAdded = true;
             webserver.addMenuItem("WiFi", "/wifi");
 
             webserver.addRoute(WEB_GET, "/assets/wifi.css", Webserver::Asset(WebAssets::wifi_css_mime, WebAssets::wifi_css_gz, sizeof(WebAssets::wifi_css_gz)));

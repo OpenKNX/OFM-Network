@@ -682,6 +682,7 @@ namespace OpenKNX
             void startOwnAp(uint8_t channel);
             void joinApMulticast();
             void setupWifiRoutes();
+            bool _wifiRoutesAdded = false; // setupWifiRoutes() ran
             bool saveWifiApPassword(const char *psk);
 #endif
 
