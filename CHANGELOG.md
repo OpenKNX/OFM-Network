@@ -1,6 +1,6 @@
 # Changes
 
-## ec/v0.9.0-beta.1: 2026-10-15
+## ec/v0.9.0-beta.1: 2026-10-25
 
 ### From upstream v1dev (merged)
 
@@ -52,6 +52,8 @@ Everything below is on `ec/v1dev-ec` and has not been released upstream yet.
 * Feature: `WidgetNetInfo` shows host name, IP with its assignment method, link state and link age -- taken off the system-info widget of OGM-Common, which had to reach into this module for them
 * Change: both register from `loop()`, not `setup()`: this module is number 7 and DeviceDisplay is 10, so in `setup()` there is no widget manager yet
 * feature (ESP32, wired LAN): the LAN speed widget, the overview page (`Pakete RX/TX`) and `net` show the packet counters of the whole interface. The ESP32 ETH class exposes none, so the module counts at the lwIP netif, whose input and output functions it wraps in the tcpip task. Built only for a device with a display, or with `OPENKNX_NET_PACKET_COUNT`; before, the widget showed "n/a" on ESP32. Measured on an ESP32 interface: 20 echo requests raised the counters by 48 and 41
+* fix: the network speed widget keeps the rate values clear of the RX arrow and the right edge; a value that does not fit its half is drawn in the small font, and the unit is always shown
+* fix: the network speed widget takes a new rate base after start and resume -- the first rate after a rotation covered the whole time the widget was off and added one history bar for it; the values show "-" until the first rate is measured
 
 **Network configuration and diagnostics**
 * feature: mDNS announces the product, the KNX order number and the board — a scanner can name a device instead of showing a bare serial, and a tool can tell before an upload whether the image belongs to it
@@ -78,6 +80,13 @@ Everything below is on `ec/v1dev-ec` and has not been released upstream yet.
 * feature: `net` shows the W5500 socket reopens, close timeouts and command timeouts since boot
 * change (RP2040): the module hands its lwIP interface to the knx platform (`setNetif()`); it needs the matching knx version
 * fix (RP2040, W5500): a W5500 that does not answer at boot no longer puts the device into a watchdog loop. lwIP was initialised only when the chip came up, so mDNS ran on an uninitialised stack and panicked; after five resets the watchdog auto-erase cleared the KNX programming. The device now starts without network and the self-heal keeps trying
+* fix (RP2040): the NTP sync no longer blocks the main loop -- every hour it waited in a synchronous DNS lookup and up to 10 s for the answer, so with an unreachable server a network update stalled until espota gave up. lwIP SNTP now resolves the server and sets the clock in the background; "No answer from" is logged when the first answer is missing after 60 s
+* change: `net phy`, `net tls`, the webserver log and `http get` are built only with `OPENKNX_CONSOLE_DEV`; the setup, status and link commands (`net`, `net reset`, `net wifi ...`, `net mc`, `net eth ...`, `ping`) stay
+* fix: the LAN mode parameter opens its ETS help page `NET-LAN-Modus`; it referenced a placeholder as help context
+
+**OTA**
+* fix (RP2040): after a network update the image the core staged in LittleFS is noted, and OGM-Common releases it at the next start once the bootloader has run it; it stayed and blocked the next upload on a 2 MB RP2040
+* feature: with the dev/test switch `OPENKNX_OTA_EXCLUSIVE` a network update pauses KNX and the other modules through OGM-Common and logs that it does. Not for production
 
 **WiFi**
 * feature: devices with a WiFi interface (RP2040 Pico W / Pico 2 W, ESP32) get the ETS module NETW: a setup access point without credentials or from the prog button, an own access point as operating mode, a network scan with "Übernehmen" in the ETS, a client rejoin, the page `/wifi` (signal history, gateway ping, QR code), a display widget, the LED function `WiFi-Status` and the console commands `net wifi ...`
@@ -94,6 +103,7 @@ Everything below is on `ec/v1dev-ec` and has not been released upstream yet.
 * feature: the browser tab shows the hostname instead of "OpenKNX", so several devices can be told apart in tabs, bookmarks and history -- the name mDNS and DHCP already use, changeable in ETS
 * fix: the hostname is HTML-escaped in the title and in the overview row -- it is the one value on those pages that comes from an ETS parameter
 * change: the HTML escaper is one inline function in `Webserver.h` instead of a copy per page
+* change: a menu item is inserted at its sorted place instead of sorting the whole list -- the same order, 8798 bytes less template code
 
 **Display**
 * change: the network widgets are named Network and NETWORK. The display stores widget settings by name, so the renamed widget starts once with its default order, visibility and duration
