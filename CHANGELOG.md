@@ -1,5 +1,11 @@
 # Changes
 
+## ec/v0.9.0-beta.2: 2026-10-25
+
+One WiFi fix on top of `ec/v0.9.0-beta.1`.
+
+* fix: the WiFi routes are registered once; before the web server's first start the setup access point added the WiFi menu item and its 13 routes on every loop pass and drained the heap (ESP32-S3: mDNS failed, boot loop). Affects every build with `OPENKNX_WIFI_AP`
+
 ## ec/v0.9.0-beta.1: 2026-10-25
 
 ### From upstream v1dev (merged)
