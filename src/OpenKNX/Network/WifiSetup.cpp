@@ -1181,6 +1181,7 @@ namespace OpenKNX
          */
         void Module::joinApMulticast()
         {
+#ifdef USE_IP // no KNXnet/IP on this mask (e.g. TP-only 0x07B0), so no KNX multicast group to join
 #ifdef ARDUINO_ARCH_RP2040
             LWIPMutex m;
             const uint32_t apIp = (uint32_t)WiFi.softAPIP();
@@ -1204,6 +1205,7 @@ namespace OpenKNX
             UNLOCK_TCPIP_CORE();
             if (!ok) logErrorP("WiFi AP: multicast join failed");
 #endif
+#endif // USE_IP
         }
 
         /**
