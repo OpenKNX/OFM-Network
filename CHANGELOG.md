@@ -88,6 +88,7 @@ Everything below is on `ec/v1dev-ec` and has not been released upstream yet.
 * fix (RP2040): AutoIP no longer replaces an address from DHCP with 169.254/16 after a rejoin -- lwIP does not stop a running AutoIP check when DHCP binds; AutoIP is now also stopped while the client link is down
 * fix (RP2040): the own access point announces WPA2 only -- the WiFi driver announces WPA and WPA2, and a Broadcom WiFi adapter under Windows refused to connect; if the switch does not read back, the access point restarts with WPA/WPA2 and the page, the display and `net wifi` show that
 * feature: with an access point running, `net wifi` and the page `/wifi` (own access point) list the connected devices with IP and MAC address
+* fix: the WiFi module builds on a TP device without KNX/IP (WiFi for the web interface only, e.g. 0x07B0 without tunnelling); the access point skips the KNX multicast join there
 
 **Web UI**
 * feature: the browser tab shows the hostname instead of "OpenKNX", so several devices can be told apart in tabs, bookmarks and history -- the name mDNS and DHCP already use, changeable in ETS
