@@ -258,9 +258,7 @@ main a:hover {
     max-width: 960px;
 }
 
-/* Narrow window (phone): the sidebar stacks on top, the device block moves to a fixed footer.
-   Mostly overrides of wide-layout properties; body's padding-bottom and the fixed .nav-footer are new,
-   because the footer leaves the flow here and the content has to clear it. */
+/* Phone: stack page content and move device status into a fixed footer. */
 @media (max-width: 640px) {
     body {
         flex-direction: column;
@@ -271,20 +269,7 @@ main a:hover {
         width: auto;
         min-width: 0;
         height: auto;
-        position: static;
         box-shadow: 0 3px 4px rgba(0, 0, 0, .18);
-    }
-
-    .menu-container {
-        flex-direction: row;
-        flex-wrap: wrap;
-        justify-content: center;
-        margin: 6px 0;
-    }
-
-    nav a.menu {
-        width: auto;
-        padding: 10px 14px;
     }
 
     .nav-footer {
@@ -299,5 +284,94 @@ main a:hover {
         justify-content: center;
         gap: 6px 18px;
         padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); /* clears the iPhone home bar */
+    }
+}
+
+/* Phone: one bar with the logo left, the menu on one line and a burger at the right end; entries that
+   do not fit (and wiki/forum) move into the burger menu (base.js). The device block stays at the bottom. */
+.nav-burger, .nav-more { display: none; }
+
+@media (max-width: 640px) {
+    nav {
+        flex-direction: row;
+        align-items: center;
+        padding: 0 6px 0 12px;
+        position: sticky;
+        top: 0;
+        overflow: visible;
+    }
+
+    .logo {
+        width: auto;
+        padding: 0;
+        margin: 0 8px 0 0;
+        flex: none;
+    }
+
+    .logo img {
+        height: 30px;
+        width: auto;
+    }
+
+    .menu-container {
+        flex-direction: row;
+        flex-wrap: nowrap;
+        justify-content: flex-start;
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        margin: 0;
+        width: auto;
+    }
+
+    nav a.menu {
+        width: auto;
+        flex: none;
+        white-space: nowrap;
+        padding: 14px 10px 11px;
+        border-left: 0;
+        border-bottom: 3px solid transparent;
+    }
+
+    nav a.menu:hover, a.menu.active {
+        border-bottom-color: #449841;
+    }
+
+    .nav-wiki {
+        display: none;
+    }
+
+    .nav-burger {
+        display: block;
+        flex: none;
+        background: none;
+        border: 0;
+        color: #ddd;
+        font-size: 1.5em;
+        line-height: 1;
+        padding: 8px 10px;
+        cursor: pointer;
+    }
+
+    .nav-more.open {
+        display: flex;
+        flex-direction: column;
+        position: absolute;
+        right: 6px;
+        top: 100%;
+        min-width: 190px;
+        background: #000;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, .35);
+        z-index: 3;
+    }
+
+    .nav-more a.menu {
+        padding: 12px 16px;
+        border-bottom: 0;
+        border-left: 3px solid transparent;
+    }
+
+    .nav-more a.menu.active {
+        border-left-color: #449841;
     }
 }

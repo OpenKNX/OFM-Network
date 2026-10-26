@@ -222,4 +222,28 @@
             OpenKNX.send('prog', 't');
         });
     }
+
+    // Phone: the menu stays on one line; entries that do not fit, and wiki/forum, move behind a burger.
+    const navEl = document.querySelector('nav'), menuEl = document.querySelector('.menu-container');
+    if (navEl && menuEl) {
+        const burger = document.createElement('button'), more = document.createElement('div');
+        const items = Array.prototype.slice.call(menuEl.querySelectorAll('a.menu'));
+        const wikiEl = document.querySelector('.nav-wiki');
+        burger.type = 'button'; burger.className = 'nav-burger'; burger.textContent = '\u2630';
+        burger.setAttribute('aria-label', 'Weitere Menüpunkte');
+        more.className = 'nav-more';
+        menuEl.parentNode.insertBefore(burger, menuEl.nextSibling);
+        navEl.appendChild(more);
+        const fit = function () {
+            items.forEach(function (a) { menuEl.appendChild(a); });
+            more.textContent = ''; more.classList.remove('open');
+            if (!window.matchMedia('(max-width: 640px)').matches) return;
+            for (let i = items.length - 1; i > 0 && menuEl.scrollWidth > menuEl.clientWidth; i--) more.insertBefore(items[i], more.firstChild);
+            if (wikiEl) wikiEl.querySelectorAll('a').forEach(function (a) { const c = a.cloneNode(true); c.className = 'menu'; more.appendChild(c); });
+        };
+        burger.addEventListener('click', function (e) { e.stopPropagation(); more.classList.toggle('open'); });
+        document.addEventListener('click', function () { more.classList.remove('open'); });
+        window.addEventListener('resize', fit);
+        fit();
+    }
 })();
