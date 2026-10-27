@@ -1290,7 +1290,7 @@ namespace OpenKNX
 #endif
             if (_wifiRoutesAdded) return;
             _wifiRoutesAdded = true;
-            webserver.addMenuItem("WiFi", "/wifi");
+            webserver.addMenuItem("WiFi", "/wifi", 30);
 
             webserver.addRoute(WEB_GET, "/assets/wifi.css", Webserver::Asset(WebAssets::wifi_css_mime, WebAssets::wifi_css_gz, sizeof(WebAssets::wifi_css_gz)));
             webserver.addRoute(WEB_GET, "/assets/wifi.js", Webserver::Asset(WebAssets::wifi_js_mime, WebAssets::wifi_js_gz, sizeof(WebAssets::wifi_js_gz)));

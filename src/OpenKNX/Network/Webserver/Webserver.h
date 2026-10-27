@@ -169,6 +169,7 @@ namespace OpenKNX
             void addSocket(const std::string& uri, WebSocketHandler onMessage,
                            WebSocketConnectHandler onConnect = nullptr);
             void addMenuItem(const std::string& label, const std::string& uri, int8_t priority = 0);
+            void setDefaultPage(const std::string& uri) { _defaultPageUri = uri; }
             void addStylesheet(const char* uri);
             void addJavaScript(const char* uri);
 
@@ -238,6 +239,7 @@ namespace OpenKNX
             std::vector<WebRoute> _routes;
             std::vector<WebSocketRoute> _sockets;
             std::vector<WebMenuItem> _menu;
+            std::string _defaultPageUri;
             std::vector<std::string> _stylesheets;
             std::vector<std::string> _scripts;
 

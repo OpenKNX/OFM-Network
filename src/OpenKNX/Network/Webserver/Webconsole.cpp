@@ -21,7 +21,7 @@ namespace OpenKNX
             if (_initialized) return;
             _initialized = true;
 
-            openknxNetwork.webserver.addMenuItem("Gerätekonsole", "/console", 100);
+            openknxNetwork.webserver.addMenuItem("Gerätekonsole", "/console", 60);
 
             openknxNetwork.webserver.addRoute(WEB_GET, "/assets/console.css",
                                               Webserver::Asset(WebAssets::console_css_mime, WebAssets::console_css_gz, sizeof(WebAssets::console_css_gz)));

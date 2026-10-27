@@ -289,6 +289,7 @@ again would duplicate the route and the menu item.
 // 1. In your module's setup(), once:
 openknxNetwork.webserver.addMenuItem("My Page", "/mypage", 120);
 openknxNetwork.webserver.addRoute(WEB_GET, "/mypage", handler);
+openknxNetwork.webserver.setDefaultPage("/mypage"); // optional; unset keeps / on the overview
 openknxNetwork.webserver.addRoute(WEB_GET, "/assets/mypage.css",
     Webserver::Asset(WebAssets::mypage_css_mime, WebAssets::mypage_css_gz, sizeof(WebAssets::mypage_css_gz)));
 openknxNetwork.webserver.addStylesheet("/assets/mypage.css");

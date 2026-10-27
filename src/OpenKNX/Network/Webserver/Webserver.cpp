@@ -399,7 +399,7 @@ namespace OpenKNX
             if (_initialized) return;
             _initialized = true;
 
-            addMenuItem("Übersicht", "/", -127);
+            addMenuItem("Übersicht", "/overview", -127);
 
             addRoute(WEB_GET, "/assets/base.css", Asset(WebAssets::base_css_mime, WebAssets::base_css_gz, sizeof(WebAssets::base_css_gz)));
             addRoute(WEB_GET, "/assets/base.js", Asset(WebAssets::base_js_mime, WebAssets::base_js_gz, sizeof(WebAssets::base_js_gz)));
@@ -410,6 +410,20 @@ namespace OpenKNX
             addJavaScript("/assets/base.js");
 
             addRoute(WEB_GET, "/", [this](WebRequest&, WebResponse& res) {
+                if (!_defaultPageUri.empty() && _defaultPageUri != "/")
+                {
+                    for (const WebRoute& route : _routes)
+                    {
+                        if (route.method != WEB_GET || route.uri != _defaultPageUri) continue;
+                        res.setStatus(302);
+                        res.setHeader("Location", _defaultPageUri.c_str());
+                        res.sendStatic("");
+                        return;
+                    }
+                }
+                buildOverviewPage(res);
+            });
+            addRoute(WEB_GET, "/overview", [this](WebRequest&, WebResponse& res) {
                 buildOverviewPage(res);
             });
 
