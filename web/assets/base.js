@@ -59,6 +59,7 @@
         // this catch the reconnect would end there for good -- onclose never fires.
         try {
             ws = new WebSocket(scheme + location.host + '/openknx/ws');
+            ws.binaryType = 'arraybuffer';
         } catch (e) {
             ws = null;
             fire('closed', 'Socket nicht erzeugbar');
@@ -74,10 +75,19 @@
         ws.onmessage = function (e) {
             lastRx = nowMs();
             pingAt = 0;
-            const i = e.data.indexOf(':');
-            if (i < 0) return;
-            const key = e.data.slice(0, i);
-            const data = e.data.slice(i + 1);
+            let key, data;
+            if (typeof e.data === 'string') {
+                const i = e.data.indexOf(':');
+                if (i < 0) return;
+                key = e.data.slice(0, i);
+                data = e.data.slice(i + 1);
+            } else if (e.data instanceof ArrayBuffer) {
+                const bytes = new Uint8Array(e.data), i = bytes.indexOf(58);
+                if (i < 1 || i >= 24) return;
+                key = '';
+                for (let n = 0; n < i; n++) key += String.fromCharCode(bytes[n]);
+                data = bytes.subarray(i + 1);
+            } else return;
             // Ein kaputter Handler darf den Socket nicht mitreissen.
             (handlers[key] || []).forEach(function (cb) { try { cb(data); } catch (err) {} });
         };

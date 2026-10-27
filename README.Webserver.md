@@ -358,6 +358,11 @@ JSON without double-encoding.
 openknxNetwork.webserver.ui.sendMessage("tp", json);
 openknxNetwork.webserver.ui.sendMessage("log", line.data(), line.size());
 
+// Best-effort binary broadcast: wire payload is "key:" + prefix + raw bytes
+uint8_t header[] = {16, 64, 1};
+bool queued = openknxNetwork.webserver.ui.trySendBinaryMessage(
+    "displayFrame", header, sizeof(header), framebuffer, framebufferLen);
+
 // Receiving: every registrant sees every incoming message and checks the key itself
 openknxNetwork.webserver.ui.receiveMessage([](const char* key, const char* data, size_t len) {
     if (strcmp(key, "cmd") != 0) return;
@@ -371,6 +376,10 @@ if (!openknxNetwork.webserver.ui.hasClients()) return;
 // so subtract strlen(key) + 1 from your own payload budget
 size_t cap = openknxNetwork.webserver.ui.maxMessage();
 ```
+
+`base.js` dispatches text payloads as strings and binary payloads as `Uint8Array`s. Binary sends are
+best-effort: a busy ESP32 queue lock or insufficient reserved queue space returns `false` without
+waiting or evicting records; drop a live sample and send the next one.
 
 Everything specific to this socket lives on `ui`. The send queue underneath serves every
 `addSocket()` endpoint, so its `webserver.txCapacity()` / `webserver.txFree()` /

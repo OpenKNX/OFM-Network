@@ -92,11 +92,36 @@ namespace OpenKNX
 
         bool WsTxQueue::append(int16_t fd, uint8_t route, const char* key, const char* data, uint32_t len)
         {
+            return appendRecord(fd, route, key, nullptr, 0,
+                                reinterpret_cast<const uint8_t*>(data), len, false);
+        }
+
+        bool WsTxQueue::appendBinary(int16_t fd, uint8_t route, const char* key,
+                                     const uint8_t* prefix, uint32_t prefixLen,
+                                     const uint8_t* data, uint32_t len)
+        {
+            if (fd >= 0) return false;
+            return appendRecord(fd, route, key, prefix, prefixLen, data, len, true);
+        }
+
+        bool WsTxQueue::appendRecord(int16_t fd, uint8_t route, const char* key,
+                                     const uint8_t* prefix, uint32_t prefixLen,
+                                     const uint8_t* data, uint32_t len, bool binary)
+        {
             if (!_ring) return false;
 
-            uint32_t keyLen = key ? (uint32_t)strlen(key) : 0;
-            uint32_t payload = keyLen ? keyLen + 1 + len : len;
+            const size_t keyLen = key ? strlen(key) : 0;
+            if ((prefixLen && !prefix) || (len && !data)) return false;
+            if (prefixLen > UINT32_MAX - len) return false;
+            const uint32_t dataLen = prefixLen + len;
+            uint32_t payload = dataLen;
+            if (keyLen)
+            {
+                if (keyLen >= UINT32_MAX || keyLen + 1 > UINT32_MAX - payload) return false;
+                payload += (uint32_t)keyLen + 1;
+            }
             if (payload > maxRecord()) return false;
+            if (binary) fd = FD_BINARY_BROADCAST;
 
             // Payload nie über das Ringende hinweg: sonst müsste der Drain sie erst in
             // einen Zwischenpuffer kopieren, statt direkt in den Ring zu zeigen.
@@ -119,6 +144,11 @@ namespace OpenKNX
                 memcpy(dst, key, keyLen);
                 dst[keyLen] = ':';
                 dst += keyLen + 1;
+            }
+            if (prefixLen)
+            {
+                memcpy(dst, prefix, prefixLen);
+                dst += prefixLen;
             }
             if (len) memcpy(dst, data, len);
 
@@ -173,7 +203,7 @@ namespace OpenKNX
             return (int32_t)(_oldest - _clients[i].cursor) > 0;
         }
 
-        bool WsTxQueue::peek(int i, const uint8_t*& data, uint32_t& len)
+        bool WsTxQueue::peek(int i, const uint8_t*& data, uint32_t& len, bool& binary)
         {
             if (!_ring) return false;
             Client& c = _clients[i];
@@ -183,6 +213,7 @@ namespace OpenKNX
                 uint16_t recLen = readLen(c.cursor);
                 uint8_t route = readRoute(c.cursor);
                 int16_t recFd = readFd(c.cursor);
+                binary = recFd == FD_BINARY_BROADCAST;
 
                 bool mine = (route != ROUTE_PAD) &&
                             ((recFd >= 0) ? (recFd == c.fd) : (route == c.route));

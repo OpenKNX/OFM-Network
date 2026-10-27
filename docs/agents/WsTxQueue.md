@@ -24,6 +24,11 @@ momentarily full, and `Webconsole` was the only feature that worked around it.
 - **The payload never wraps**: if it would cross the ring end, a padding record (`ROUTE_PAD`) is
   inserted first. That keeps the drain able to hand the socket a pointer straight into the ring
   instead of reassembling into a scratch buffer. The 5-byte header may wrap and is read byte-wise.
+- **Text and binary are queue records, not separate send paths.** Binary broadcast records use a
+  reserved negative fd marker; the normal drain selects the WebSocket opcode and otherwise preserves
+  the same cursor, reserve, and backpressure rules. `Ui::trySendBinaryMessage()` acquires the ESP32
+  state lock with a zero-timeout try-lock and checks exact queue space before append, so a dropped
+  sample never waits or evicts older records.
 - **Skipping advances the cursor** — load-bearing, not an optimisation to remove. A client on a
   foreign endpoint walks to the write position every tick and therefore stays at the front; without
   it, traffic that does not concern it would overtake it and get it disconnected.

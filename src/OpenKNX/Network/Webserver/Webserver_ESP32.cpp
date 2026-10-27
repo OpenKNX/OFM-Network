@@ -78,11 +78,11 @@ namespace OpenKNX
 
         // WS-Textframe über den rohen Socket, aus jedem Task aufrufbar. MSG_DONTWAIT,
         // damit nichts blockiert.
-        static WsSendResult wsSendText(int fd, const char* data, size_t len)
+        static WsSendResult wsSendFrame(int fd, const char* data, size_t len, bool binary)
         {
             uint8_t hdr[10];
             int hLen = 0;
-            hdr[hLen++] = 0x81; // FIN + text opcode
+            hdr[hLen++] = binary ? 0x82 : 0x81; // FIN + binary/text opcode
             if (len < 126)
             {
                 hdr[hLen++] = (uint8_t)len;
@@ -597,10 +597,10 @@ namespace OpenKNX
 
         // Sends immediately, bypassing the queue -- only the drain calls this. Failed is
         // cleaned up by the drain so both platforms behave alike.
-        WsSendResult Webserver::wsSendNow(const char*, int fd, const char* data, size_t len)
+        WsSendResult Webserver::wsSendNow(const char*, int fd, const char* data, size_t len, bool binary)
         {
             if (!_server) return WsSendResult::Failed;
-            return wsSendText(fd, data, len);
+            return wsSendFrame(fd, data, len, binary);
         }
 
         // The socket does not expose the ACK state; TCP keepalive (~9 s) finds dead peers
@@ -626,6 +626,11 @@ namespace OpenKNX
         void Webserver::wsStateLock() const
         {
             if (_wsLock) xSemaphoreTakeRecursive((SemaphoreHandle_t)_wsLock, portMAX_DELAY);
+        }
+
+        bool Webserver::wsStateTryLock() const
+        {
+            return !_wsLock || xSemaphoreTakeRecursive((SemaphoreHandle_t)_wsLock, 0) == pdTRUE;
         }
 
         void Webserver::wsStateUnlock() const

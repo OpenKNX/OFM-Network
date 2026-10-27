@@ -315,13 +315,13 @@ namespace OpenKNX
 
         // Header and payload in one tcp_write: with two, an ERR_MEM on the second would
         // leave a header without payload in the stream. Too large = Failed, full = WouldBlock.
-        static WsSendResult wsTcpSend(tcp_pcb* pcb, const char* data, size_t len)
+        static WsSendResult wsTcpSend(tcp_pcb* pcb, const char* data, size_t len, bool binary)
         {
             // Stack buffer avoids heap fragmentation
             uint8_t frame[WS_FRAME_BUF];
 
             int hLen = 0;
-            frame[hLen++] = 0x81; // FIN + text opcode
+            frame[hLen++] = binary ? 0x82 : 0x81; // FIN + binary/text opcode
             if (len < 126)
             {
                 frame[hLen++] = (uint8_t)len;
@@ -1121,12 +1121,12 @@ namespace OpenKNX
         }
 
         // Bypasses the queue -- only the drain calls this, and it handles Failed.
-        WsSendResult Webserver::wsSendNow(const char*, int fd, const char* data, size_t len)
+        WsSendResult Webserver::wsSendNow(const char*, int fd, const char* data, size_t len, bool binary)
         {
             if (!_listenPcb) return WsSendResult::Failed;
             if (fd < 0 || fd >= MAX_CONN || !g_slots[fd].pcb || g_slots[fd].state != CS_WS)
                 return WsSendResult::Failed;
-            return wsTcpSend(g_slots[fd].pcb, data, len);
+            return wsTcpSend(g_slots[fd].pcb, data, len, binary);
         }
 
         uint32_t Webserver::wsPeerIdleMs(int fd) const

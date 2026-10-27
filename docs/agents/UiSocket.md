@@ -13,9 +13,14 @@ Two functions, and that is deliberately all:
 
 ```cpp
 openknxNetwork.webserver.ui.sendMessage(key, data, len = 0);   // always broadcast
+openknxNetwork.webserver.ui.trySendBinaryMessage(key, prefix, prefixLen, data, len); // best-effort, always broadcast
 openknxNetwork.webserver.ui.receiveMessage(cb);                // cb(key, data, len)
 ```
 
+- **Binary output is best-effort and never waits for the ESP32 state lock.** The queued WebSocket
+  binary payload is `key:` followed by the optional prefix and raw data. `base.js` splits that key
+  and passes the remaining bytes to the handler as a `Uint8Array`. A busy lock or insufficient queue
+  space returns `false`; producers should drop that sample rather than retry in a tight loop.
 - **The firmware stores no keys.** No table, no lookup, no "unknown key" branch: the dispatcher splits
   at the first `:` and hands `key`/`data`/`len` to every registrant, which filters by `strcmp` itself.
   Incoming traffic is rare, so the cost is a few comparisons per command. **Who only sends registers

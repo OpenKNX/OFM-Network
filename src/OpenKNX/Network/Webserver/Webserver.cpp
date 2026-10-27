@@ -38,6 +38,21 @@ namespace OpenKNX
                 explicit WsQueueGuard(const Webserver*) {}
 #endif
             };
+
+            struct WsQueueTryGuard
+            {
+#ifdef ARDUINO_ARCH_ESP32
+                const Webserver* ws;
+                bool locked;
+                explicit WsQueueTryGuard(const Webserver* w) : ws(w), locked(w->wsStateTryLock()) {}
+                ~WsQueueTryGuard() { if (locked) ws->wsStateUnlock(); }
+                explicit operator bool() const { return locked; }
+#else
+                LWIPMutex _lock;
+                explicit WsQueueTryGuard(const Webserver*) {}
+                explicit operator bool() const { return true; }
+#endif
+            };
         } // namespace
 
         // ── Layout ─────────────────────────────────────────────────────────
@@ -745,9 +760,10 @@ namespace OpenKNX
                     {
                         const uint8_t* data;
                         uint32_t len;
-                        while (_txQueue.peek(i, data, len))
+                        bool binary = false;
+                        while (_txQueue.peek(i, data, len, binary))
                         {
-                            WsSendResult res = wsSendNow(uri, fd, (const char*)data, len);
+                            WsSendResult res = wsSendNow(uri, fd, (const char*)data, len, binary);
                             if (res == WsSendResult::Ok)
                             {
                                 _txQueue.advance(i);
@@ -827,6 +843,35 @@ namespace OpenKNX
                              key, (unsigned)len, (unsigned)ws._txQueue.maxRecord());
                 }
             }
+        }
+
+        bool Webserver::Ui::trySendBinaryMessage(const char* key, const uint8_t* prefix, size_t prefixLen,
+                                                 const uint8_t* data, size_t len)
+        {
+            if (!key || !*key || (prefixLen && !prefix) || (len && !data)) return false;
+            if (prefixLen > UINT32_MAX || len > UINT32_MAX ||
+                prefixLen > UINT32_MAX - len) return false;
+
+            Webserver& ws = openknxNetwork.webserver;
+            WsQueueTryGuard guard(&ws);
+            if (!guard || ws._uiRouteIdx < 0 || !ws._txQueue.active() ||
+                ws._sockets[ws._uiRouteIdx].clients.empty()) return false;
+
+            const size_t keyLen = strlen(key);
+            if (keyLen >= UINT32_MAX) return false;
+            const size_t keyCost = keyLen + 1;
+            if (prefixLen + len > UINT32_MAX - keyCost) return false;
+            const size_t payload = keyCost + prefixLen + len;
+            if (payload > ws._txQueue.maxRecord()) return false;
+
+            const size_t capacity = ws._txQueue.capacity();
+            const size_t reserve = capacity / 8 < 512 ? capacity / 8 : 512;
+            const size_t needed = ws._txQueue.cost((uint32_t)payload);
+            if (needed + reserve > ws._txQueue.freeBytes()) return false;
+
+            return ws._txQueue.appendBinary(WsTxQueue::FD_BROADCAST, (uint8_t)ws._uiRouteIdx,
+                                            key, prefix, (uint32_t)prefixLen,
+                                            data, (uint32_t)len);
         }
 
         bool Webserver::Ui::hasClients() const

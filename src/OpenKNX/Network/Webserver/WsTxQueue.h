@@ -23,6 +23,7 @@ namespace OpenKNX
             // einen stillen Off-by-one durch den ganzen Ring.
             static constexpr uint32_t HDR_SIZE = 5;
             static constexpr int16_t FD_BROADCAST = -1;
+            static constexpr int16_t FD_BINARY_BROADCAST = -2;
             static constexpr uint8_t ROUTE_PAD = 0xFF; // Füllrecord vor dem Ringende
 
             // frameLimit = largest payload the platform fits into one WS frame. Without
@@ -40,6 +41,9 @@ namespace OpenKNX
 
             // key optional: ist er gesetzt, entsteht "key:data" ohne Zwischenpuffer.
             bool append(int16_t fd, uint8_t route, const char* key, const char* data, uint32_t len);
+            bool appendBinary(int16_t fd, uint8_t route, const char* key,
+                              const uint8_t* prefix, uint32_t prefixLen,
+                              const uint8_t* data, uint32_t len);
 
             // false = no ring or cursor table full. A client without a cursor would
             // receive nothing and loop reconnecting, so the caller must react.
@@ -58,7 +62,7 @@ namespace OpenKNX
             // Liefert den nächsten für diesen Client bestimmten Record. Fremde Records
             // werden dabei übersprungen und der Cursor rückt mit vor -- ein Client auf
             // einem anderen Endpoint bleibt so immer dicht an _wr und wird nie überholt.
-            bool peek(int i, const uint8_t*& data, uint32_t& len);
+            bool peek(int i, const uint8_t*& data, uint32_t& len, bool& binary);
             void advance(int i);
 
             // Anything left for this client? After a drain pass that means WouldBlock.
@@ -86,6 +90,9 @@ namespace OpenKNX
             int16_t readFd(uint32_t pos) const;
             uint8_t readRoute(uint32_t pos) const;
             void writeHeader(uint32_t pos, uint16_t len, int16_t fd, uint8_t route);
+            bool appendRecord(int16_t fd, uint8_t route, const char* key,
+                              const uint8_t* prefix, uint32_t prefixLen,
+                              const uint8_t* data, uint32_t len, bool binary);
             void makeRoom(uint32_t need);
             int findClient(int fd) const;
 

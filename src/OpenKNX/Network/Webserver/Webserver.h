@@ -152,6 +152,8 @@ namespace OpenKNX
             struct Ui
             {
                 void sendMessage(const char* key, const char* data, size_t len = 0);
+                bool trySendBinaryMessage(const char* key, const uint8_t* prefix, size_t prefixLen,
+                                          const uint8_t* data, size_t len);
                 void receiveMessage(WebUiHandler cb);
                 // Like hasClients(UI_WS_URI) without the std::string -- asked once per
                 // tick by the console and once per telegram by the group monitor.
@@ -224,7 +226,7 @@ namespace OpenKNX
             bool sendToClient(const std::string& uri, int fd, const char* data, size_t len);
             // Sendet sofort, an der Queue vorbei. Nur für den Drain -- ginge er über
             // sendToClient(), reihte er endlos wieder ein statt zu senden.
-            WsSendResult wsSendNow(const char* uri, int fd, const char* data, size_t len);
+            WsSendResult wsSendNow(const char* uri, int fd, const char* data, size_t len, bool binary);
             // Time since the peer's last sign of life (ACK or received data). Tells "client
             // stopped reading" apart from "we cannot send right now".
             uint32_t wsPeerIdleMs(int fd) const;
@@ -301,6 +303,7 @@ namespace OpenKNX
           public:
             void* serverHandle() const { return _server; }
             void wsStateLock() const; // rekursiv, No-op bis setupEsp32() den Mutex anlegt
+            bool wsStateTryLock() const;
             void wsStateUnlock() const;
 #elif defined(ARDUINO_ARCH_RP2040)
             void* _listenPcb = nullptr;
