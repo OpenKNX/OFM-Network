@@ -116,7 +116,26 @@
             // A late registrant gets the current state, not the next change.
             if (state) try { cb(state, why); } catch (e) {}
         },
-        get connected() { return !!ws && ws.readyState === 1; }
+        get connected() { return !!ws && ws.readyState === 1; },
+        // Covers <main> until the returned function is called. Repeats ask() every 1.5 s while the
+        // socket is open and nothing for key arrived meanwhile; the page asks on 'open' itself.
+        need: function (key, ask) {
+            const el = document.createElement('div');
+            let t = 0, rx = -1e4;
+            function paint() { el.textContent = state === 'open' ? 'Lade Daten …' : 'Verbinde …'; }
+            function tick() {
+                t = setTimeout(tick, 1500);
+                if (state === 'open' && nowMs() - rx > 1500) ask();
+                paint();
+            }
+            el.className = 'ld';
+            paint();
+            (document.querySelector('main') || document.body).appendChild(el);
+            (handlers[key] = handlers[key] || []).push(function () { rx = nowMs(); });
+            stateCbs.push(paint);
+            t = setTimeout(tick, 1500);
+            return function () { clearTimeout(t); el.remove(); };
+        }
     };
     connect();
 

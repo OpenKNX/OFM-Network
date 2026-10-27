@@ -182,6 +182,17 @@ main {
     min-width: 0;
     display: flex;
     flex-direction: column;
+    position: relative;
+}
+
+/* Loading overlay from OpenKNX.need() */
+.ld {
+    position: absolute;
+    inset: 0;
+    padding-top: 6em;
+    text-align: center;
+    background: rgba(255, 255, 255, .85);
+    color: #666;
 }
 
 .meta {
