@@ -1,10 +1,16 @@
 # Changes
 
-## ec/v0.9.0-beta.2: 2026-10-25
+## ec/v0.9.0-beta.2: 2026-10-29
 
-One WiFi fix on top of `ec/v0.9.0-beta.1`.
+A WiFi fix and web interface changes on top of `ec/v0.9.0-beta.1`. OAM-IP-Interface and OAM-IP-Router call `setDefaultPage()` and need this version.
 
 * fix: the WiFi routes are registered once; before the web server's first start the setup access point added the WiFi menu item and its 13 routes on every loop pass and drained the heap (ESP32-S3: mDNS failed, boot loop). Affects every build with `OPENKNX_WIFI_AP`
+* feature: `webserver.setDefaultPage(uri)` answers `/` with a redirect (302) to that page when a GET route for it is registered; without it `/` shows the overview as before. The overview is also served at `/overview`, and the menu item "Übersicht" points there
+* feature: `webserver.ui.trySendBinaryMessage(key, prefix, prefixLen, data, len)` sends `key:` + prefix + data as a binary WebSocket frame to every client of the UI socket, on RP2040/RP2350 and ESP32. It never waits: with no client, the ESP32 queue lock taken, a record above the queue maximum or a record that would leave less than the reserve free (1/8 of the queue, at most 512 bytes), it returns `false` and the caller drops that sample. `base.js` hands binary payloads to the page handlers as `Uint8Array`
+* feature: `OpenKNX.need(key, ask)` in `base.js` covers the page content with "Verbinde …" until the socket is open and with "Lade Daten …" until the page calls the returned function; while the socket is open and nothing for `key` arrived for 1.5 s, it calls `ask` again
+* feature (phone): the menu stays on one line; entries that do not fit, and the wiki and forum links, move behind a burger button
+* change: the navigation is 180 px wide instead of 220 px; the menu priority of the device console is 60 (before 100), of WiFi 30 (before 0)
+* change: overridden phone rules removed from `base.css`, 20 bytes less in the gzipped asset
 
 ## ec/v0.9.0-beta.1: 2026-10-25
 
