@@ -1,19 +1,8 @@
 # Changes
 
-## Unreleased
+## ec/v0.9.0-beta.2: 2026-10-30
 
-* fix: ETS "Standardparameter" (reset to defaults) aborted on every app with this module since 0.7.0: the MQTT prefix default is empty, but its pattern required at least one character (ETS log: `ValueOutOfRangeException` in `ResetToDefault`). The pattern now accepts the empty value, which the firmware already maps to the serial number, and rejects line breaks. An app takes the fix over with its next version; devices in a project need "update application" to that version
-* fix: the MQTT device prefix reads at most 20 characters; a full-length prefix has no terminator inside the parameter, only the unused byte after the field ended the `strlen` copy into the 30-byte buffer
-* fix: the web interface declares German as page language (`<html lang='de'>`); without it browsers guessed from the page text and offered a Dutch translation on pages with little text
-* docs: the ETS help of the MQTT page describes every parameter and the topics; `README.MQTT.md` corrected: the LWT exists in Client mode only, TP raw data also runs on mask 0x091A and includes own transmissions and repetitions
-* fix: MQTT `status` `1` is published retained; before, the retained LWT `0` of an earlier connection loss stayed at the broker and a new subscriber (e.g. Home Assistant after its restart) saw the device offline for up to 10 s
-* fix: the MQTT broker accepts a client that logs in with the configured user when the configured password is empty; before, every client was refused. A CONNECT whose user or password field runs past the end of the packet is now closed without CONNACK
-* fix: the MQTT broker sends retained messages on a matching SUBSCRIBE only; before, every client got all retained messages on CONNECT without a subscription and the matching ones a second time on SUBSCRIBE
-* fix: the MQTT client sends a password only together with a user (MQTT 3.1.1 [MQTT-3.1.2-22]); before, a password without a user set the password flag alone and a broker following the spec dropped the connection
-
-## ec/v0.9.0-beta.2: 2026-10-29
-
-A WiFi fix and web interface changes on top of `ec/v0.9.0-beta.1`. OAM-IP-Interface and OAM-IP-Router call `setDefaultPage()` and need this version.
+A WiFi fix, web interface changes and MQTT fixes on top of `ec/v0.9.0-beta.1`. OAM-IP-Interface and OAM-IP-Router call `setDefaultPage()` and need this version.
 
 * fix: the WiFi routes are registered once; before the web server's first start the setup access point added the WiFi menu item and its 13 routes on every loop pass and drained the heap (ESP32-S3: mDNS failed, boot loop). Affects every build with `OPENKNX_WIFI_AP`
 * feature: `webserver.setDefaultPage(uri)` answers `/` with a redirect (302) to that page when a GET route for it is registered; without it `/` shows the overview as before. The overview is also served at `/overview`, and the menu item "Übersicht" points there
@@ -22,6 +11,14 @@ A WiFi fix and web interface changes on top of `ec/v0.9.0-beta.1`. OAM-IP-Interf
 * feature (phone): the menu stays on one line; entries that do not fit, and the wiki and forum links, move behind a burger button
 * change: the navigation is 180 px wide instead of 220 px; the menu priority of the device console is 60 (before 100), of WiFi 30 (before 0)
 * change: overridden phone rules removed from `base.css`, 20 bytes less in the gzipped asset
+* fix: ETS "Standardparameter" (reset to defaults) aborted on every app with this module since 0.7.0: the MQTT prefix default is empty, but its pattern required at least one character (ETS log: `ValueOutOfRangeException` in `ResetToDefault`). The pattern now accepts the empty value, which the firmware already maps to the serial number, and rejects line breaks. An app takes the fix over with its next version; devices in a project need "update application" to that version
+* fix: the MQTT device prefix reads at most 20 characters; a full-length prefix has no terminator inside the parameter, only the unused byte after the field ended the `strlen` copy into the 30-byte buffer
+* fix: the web interface declares German as page language (`<html lang='de'>`); without it browsers guessed from the page text and offered a Dutch translation on pages with little text
+* docs: the ETS help of the MQTT page describes every parameter and the topics; `README.MQTT.md` corrected: the LWT exists in Client mode only, TP raw data also runs on mask 0x091A and includes own transmissions and repetitions
+* fix: MQTT `status` `1` is published retained; before, the retained LWT `0` of an earlier connection loss stayed at the broker and a new subscriber (e.g. Home Assistant after its restart) saw the device offline for up to 10 s
+* fix: the MQTT broker accepts a client that logs in with the configured user when the configured password is empty; before, every client was refused. A CONNECT whose user or password field runs past the end of the packet is now closed without CONNACK
+* fix: the MQTT broker sends retained messages on a matching SUBSCRIBE only; before, every client got all retained messages on CONNECT without a subscription and the matching ones a second time on SUBSCRIBE
+* fix: the MQTT client sends a password only together with a user (MQTT 3.1.1 [MQTT-3.1.2-22]); before, a password without a user set the password flag alone and a broker following the spec dropped the connection
 
 ## ec/v0.9.0-beta.1: 2026-10-25
 
