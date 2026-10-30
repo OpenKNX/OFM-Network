@@ -4,6 +4,8 @@
 
 * fix: ETS "Standardparameter" (reset to defaults) aborted on every app with this module since 0.7.0: the MQTT prefix default is empty, but its pattern required at least one character (ETS log: `ValueOutOfRangeException` in `ResetToDefault`). The pattern now accepts the empty value, which the firmware already maps to the serial number, and rejects line breaks. An app takes the fix over with its next version; devices in a project need "update application" to that version
 * fix: the MQTT device prefix reads at most 20 characters; a full-length prefix has no terminator inside the parameter, only the unused byte after the field ended the `strlen` copy into the 30-byte buffer
+* fix: the web interface declares German as page language (`<html lang='de'>`); without it browsers guessed from the page text and offered a Dutch translation on pages with little text
+* docs: the ETS help of the MQTT page describes every parameter and the topics; `README.MQTT.md` corrected: `status` `1` is not retained, the LWT exists in Client mode only, TP raw data also runs on mask 0x091A and includes own transmissions and repetitions
 
 ## ec/v0.9.0-beta.2: 2026-10-29
 
