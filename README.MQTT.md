@@ -52,11 +52,11 @@ OPENKNX_MQTT_TXBUF_MAX           – ceiling for that growth; larger messages ar
 | `ParamNET_MQTTMode` | Mode: 0 = Client, 1 = Broker |
 | `ParamNET_MQTTServer` | Broker host FQDN or IP (Client mode, max 20 chars) |
 | `ParamNET_MQTTPort` | TCP port (default: 1883) |
-| `ParamNET_MQTTUsername` | Username (max 20 chars, empty = no auth) |
+| `ParamNET_MQTTUsername` | Username (max 20 chars, empty = no auth; Broker mode: user set + empty password = no client can log in) |
 | `ParamNET_MQTTPassword` | Password (max 20 chars) |
 | `MQTTCustomPrefix` | ETS only (no device memory): shows the prefix field |
 | `ParamNET_MQTTPrefix` | Custom prefix string (max 20 chars, `A-Z a-z 0-9 -`, empty = serial number) |
-| `ParamNET_MQTTTPRawData` | Publish every KNX TP telegram as JSON (mask 0x07B0 only), Broker and Client mode alike |
+| `ParamNET_MQTTTPRawData` | Publish every KNX TP telegram as JSON (mask 0x07B0 or 0x091A only), Broker and Client mode alike |
 
 ---
 
@@ -76,14 +76,14 @@ The prefix is determined as follows (in order):
 
 | Topic | Payload | Retained | Description |
 |-------|---------|----------|-------------|
-| `openknx/<prefix>/status` | `1` | yes | Published every `OPENKNX_MQTT_STATUS_TIME` ms while connected |
-| `openknx/<prefix>/status` | `0` | yes | LWT (Last Will & Testament) — published by broker when device disconnects |
+| `openknx/<prefix>/status` | `1` | no | Published every `OPENKNX_MQTT_STATUS_TIME` ms while connected (Broker mode: while the broker runs); in Client mode a new subscriber may first get the retained LWT `0` |
+| `openknx/<prefix>/status` | `0` | yes | LWT (Last Will & Testament), Client mode only — published by the external broker when the connection drops |
 | `openknx/<prefix>/uptime` | seconds | no | Seconds since boot, published alongside status |
 | `openknx/<prefix>/knx/tp/telegramm` | JSON | no | Every KNX TP telegram, requires `ParamNET_MQTTTPRawData` — see below |
 
 ### `knx/tp/telegramm` Payload
 
-One JSON object per received TP telegram, built by the same decoder as `/groupmonitor` (`OpenKNX::Network::buildTelegramJson()`, see [`docs/agents/TelegramJson.md`](docs/agents/TelegramJson.md)):
+One JSON object per TP telegram, including own transmissions and repetitions (see `flags`), built by the same decoder as `/groupmonitor` (`OpenKNX::Network::buildTelegramJson()`, see [`docs/agents/TelegramJson.md`](docs/agents/TelegramJson.md)):
 
 ```json
 {"src":{"addr":4353,"text":"1.1.1"},"dst":{"addr":2307,"text":"1/1/3"},"ga":true,
