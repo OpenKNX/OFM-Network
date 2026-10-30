@@ -86,7 +86,7 @@ namespace OpenKNX
             const std::string title = htmlEscape(host[0] != '\0' ? host : "OpenKNX");
 
             std::string html =
-                "<!DOCTYPE html><html><head>"
+                "<!DOCTYPE html><html lang='de'><head>"
                 "<meta charset='utf-8'>"
                 // Without this a phone browser lays the page out on a ~980 px virtual viewport and scales
                 // the result down, so no max-width media query ever matches and every responsive rule is
