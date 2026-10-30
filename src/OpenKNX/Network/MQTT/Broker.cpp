@@ -266,8 +266,8 @@ namespace OpenKNX
             bool Broker::checkAuth(const char *user, const char *pass) const
             {
                 if (!_authRequired) return true;
-                if (!user || !pass) return false;
-                return strcmp(user, _username) == 0 && strcmp(pass, _password) == 0;
+                if (!user) return false;
+                return strcmp(user, _username) == 0 && strcmp(pass ? pass : "", _password) == 0;
             }
 
             // ----------------------------------------------------------------
@@ -373,11 +373,15 @@ namespace OpenKNX
                     }
                 }
 
-                if (flags & 0x80) readStr(user, sizeof(user));
-                if (flags & 0x40) readStr(pass, sizeof(pass));
+                if (((flags & 0x80) && !readStr(user, sizeof(user))) || ((flags & 0x40) && !readStr(pass, sizeof(pass))))
+                {
+                    closeConn(c);
+                    return;
+                }
 
                 uint8_t connAck[4] = {PT_CONNACK, 0x02, 0x00, CRC_ACCEPTED};
-                if (!checkAuth(user[0] ? user : nullptr, pass[0] ? pass : nullptr))
+                // An absent password flag is an empty password, so a broker with an empty password accepts the user alone
+                if (!checkAuth((flags & 0x80) ? user : nullptr, pass))
                 {
                     logInfo("MQTT", "broker: CONNECT clientId='%s' user='%s' — auth REFUSED", clientId, user);
                     connAck[3] = CRC_REFUSED_CREDENTIALS;
