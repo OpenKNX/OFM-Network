@@ -397,14 +397,7 @@ namespace OpenKNX
                 c.connected = true;
                 sendToConn(c, connAck, sizeof(connAck));
 
-                // Send retained messages
-                for (auto &[topic, msg] : _retained)
-                {
-                    size_t n = buildPublish(mqttTxBuf, mqttTxBufSize, topic.c_str(),
-                                            msg.payload.c_str(), msg.payload.size(),
-                                            0, true, 0); // QoS 0, siehe routePublish()
-                    if (n) sendToConn(c, mqttTxBuf, n);
-                }
+                // Retained messages go out on a matching SUBSCRIBE only (MQTT 3.1.1 3.3.1.3), see handleSubscribe()
                 logInfo("MQTT", "broker: client '%s' connected", c.clientId);
             }
 
