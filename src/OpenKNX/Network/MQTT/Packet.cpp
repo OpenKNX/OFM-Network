@@ -91,7 +91,8 @@ namespace OpenKNX
 
                 uint8_t flags = 0x02; // clean session
                 if (opts.username && opts.username[0]) flags |= 0x80;
-                if (opts.password && opts.password[0]) flags |= 0x40;
+                // MQTT 3.1.1 [MQTT-3.1.2-22]: no password flag without the user name flag
+                if ((flags & 0x80) && opts.password && opts.password[0]) flags |= 0x40;
                 if (opts.will.topic && opts.will.topic[0])
                 {
                     flags |= 0x04;
