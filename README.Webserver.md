@@ -12,7 +12,7 @@ Interna und Begründungen: [`docs/agents/Webserver.md`](docs/agents/Webserver.md
 ## Compile Flags
 
 ```
-OPENKNX_WEBSERVER           – HTTP server, routing, overview page (/), logo
+OPENKNX_WEBSERVER           – HTTP server, routing, overview page (/overview, and / unless a default page is set), logo
 OPENKNX_WEBCONSOLE          – /console page (streams over the shared UI socket), logger ring buffer
 OPENKNX_WEBCONSOLE_BUFFER   – Total size of the log ring buffer in bytes (default: 4096)
 OPENKNX_WEBSERVER_MAX_CONN  – total webserver connection slots, shared between HTTP and WebSocket (ESP32 7; RP2040 3, or 6 when the project sets -D__LWIP_MEMMULT=2). A visitor takes two slots, so 3 carries one visitor and 6 carries three
@@ -613,8 +613,9 @@ regardless of whether layout is active.
 
 | URI | Flag | Content |
 |-----|------|---------|
-| `/` | `OPENKNX_WEBSERVER` | Overview: device, firmware, network, uptime, versions |
-| `/prog` (**POST**) | `OPENKNX_WEBSERVER` | Toggles the KNX programming mode, then `303` back to `/` |
+| `/` | `OPENKNX_WEBSERVER` | `302` to the page set with `setDefaultPage()` when a GET route for it exists, otherwise the overview |
+| `/overview` | `OPENKNX_WEBSERVER` | Overview: device, firmware, network, uptime, versions |
+| `/prog` (**POST**) | `OPENKNX_WEBSERVER` | Toggles the KNX programming mode, then `303` to `/`, which may lead on to the default page |
 | `/console` | `OPENKNX_WEBCONSOLE` | WebSocket terminal — mirrors the serial logger |
 | `/groupmonitor` | `OPENKNX_WEBMONITOR` | Live KNX group/telegram monitor (TP only) |
 | `/filemanager` | `OPENKNX_WEBFS` | Directory listing and upload form |
