@@ -54,8 +54,8 @@ OPENKNX_MQTT_TXBUF_MAX           – ceiling for that growth; larger messages ar
 | `ParamNET_MQTTPort` | TCP port (default: 1883) |
 | `ParamNET_MQTTUsername` | Username (max 20 chars, empty = no auth) |
 | `ParamNET_MQTTPassword` | Password (max 20 chars) |
-| `ParamNET_MQTTCustomPrefix` | Enable custom device prefix |
-| `ParamNET_MQTTPrefix` | Custom prefix string (max 20 chars) |
+| `MQTTCustomPrefix` | ETS only (no device memory): shows the prefix field |
+| `ParamNET_MQTTPrefix` | Custom prefix string (max 20 chars, `A-Z a-z 0-9 -`, empty = serial number) |
 | `ParamNET_MQTTTPRawData` | Publish every KNX TP telegram as JSON (mask 0x07B0 only), Broker and Client mode alike |
 
 ---
@@ -69,7 +69,7 @@ openknx/<prefix>/
 ```
 
 The prefix is determined as follows (in order):
-1. If KNX is configured **and** `ParamNET_MQTTCustomPrefix` is set: `openknx/<MQTTPrefix>/`
+1. If KNX is configured **and** `ParamNET_MQTTPrefix` is not empty: `openknx/<MQTTPrefix>/`
 2. Otherwise: `openknx/<last8charsOfSerialNumber>/`
 
 ### Built-in Topics
@@ -153,7 +153,7 @@ In **Client mode**, subscribed callbacks are also triggered when the device itse
 
 ```cpp
 bool ok = openknxNetwork.mqtt.connected();
-std::string prefix = openknxNetwork.mqtt.devicePrefix(); // e.g. "openknx/abc12345/"
+std::string prefix = openknxNetwork.mqtt.devicePrefix(); // e.g. "openknx/0012ABCD/"
 ```
 
 ---

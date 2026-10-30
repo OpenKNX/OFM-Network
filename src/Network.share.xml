@@ -73,7 +73,7 @@
                 <TypeText SizeInBit="160" /> <!-- 20 bytes -->
               </ParameterType>
               <ParameterType Id="%AID%_PT-MQTTPrefix" Name="MQTTPrefix">
-                <TypeText SizeInBit="160" Pattern="^[A-Za-z0-9-]+$" /> <!-- 20 bytes -->
+                <TypeText SizeInBit="160" Pattern="\A[A-Za-z0-9-]*\z" /> <!-- 20 bytes, empty = serial number -->
               </ParameterType>
               <ParameterType Id="%AID%_PT-NETPort" Name="NETPort">
                 <TypeNumber SizeInBit="16" Type="unsignedInt" minInclusive="1" maxInclusive="65535" />

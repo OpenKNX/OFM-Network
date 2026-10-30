@@ -1,5 +1,9 @@
 # Changes
 
+## Unreleased
+
+* fix: ETS "Standardparameter" (reset to defaults) aborted on every app with this module since 0.7.0: the MQTT prefix default is empty, but its pattern required at least one character (ETS log: `ValueOutOfRangeException` in `ResetToDefault`). The pattern now accepts the empty value, which the firmware already maps to the serial number, and rejects line breaks. An app takes the fix over with its next version; devices in a project need "update application" to that version
+
 ## ec/v0.9.0-beta.2: 2026-10-29
 
 A WiFi fix and web interface changes on top of `ec/v0.9.0-beta.1`. OAM-IP-Interface and OAM-IP-Router call `setDefaultPage()` and need this version.
