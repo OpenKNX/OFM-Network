@@ -76,7 +76,8 @@ namespace OpenKNX
                 if (connected() && delayCheck(_lastStatus, OPENKNX_MQTT_STATUS_TIME))
                 {
                     _lastStatus = millis();
-                    publishP("status", "1");
+                    // Retained so it replaces the retained LWT "0" and a new subscriber gets "1" at once
+                    publishP("status", std::string("1"), 0, true);
                     publishP("uptime", std::to_string(uptime()));
 
                     // Gebündelt statt pro Vorfall -- sonst wäre das Log die eigentliche Last.
