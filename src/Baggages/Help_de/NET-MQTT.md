@@ -7,7 +7,7 @@ Das Gerät meldet per MQTT, dass es läuft (*status*, *uptime*), und sendet auf 
 - *Modus*: *Client* verbindet sich mit dem Broker unter *Server*. *Broker* startet einen eigenen Broker im Gerät; andere MQTT-Clients verbinden sich dann mit der IP-Adresse des Geräts und dem eingestellten *Port*. Der eigene Broker nimmt höchstens 3 Clients an (ESP32: 5), liefert mit QoS 0 aus und hält retained Nachrichten nur bis zum Neustart.
 - *Server*: Hostname oder IP-Adresse des Brokers, höchstens 20 Zeichen. Nur im Modus *Client*; bleibt *Server* leer, ist MQTT aus.
 - *Port*: im Modus *Client* der Port des Brokers, im Modus *Broker* der Port, auf dem das Gerät Verbindungen annimmt. Standard 1883.
-- *Benutzer* und *Passwort*: je höchstens 20 Zeichen. Im Modus *Client* meldet sich das Gerät damit am Broker an. Im Modus *Broker* müssen sich Clients mit genau diesen Daten anmelden; bleibt *Benutzer* leer, nimmt der Broker jeden Client an. Ein Passwort ohne Benutzer ist nicht zulässig: im Modus *Client* kann der Broker die Verbindung dann ablehnen, im Modus *Broker* wird es ignoriert. Im Modus *Broker* kann sich bei gesetztem *Benutzer* und leerem *Passwort* kein Client anmelden.
+- *Benutzer* und *Passwort*: je höchstens 20 Zeichen. Im Modus *Client* meldet sich das Gerät damit am Broker an. Im Modus *Broker* müssen sich Clients mit genau diesen Daten anmelden; bleibt *Benutzer* leer, nimmt der Broker jeden Client an. Ein Passwort ohne Benutzer wird ignoriert.
 
 **Erweiterte Funktionen**
 
@@ -16,5 +16,5 @@ Das Gerät meldet per MQTT, dass es läuft (*status*, *uptime*), und sendet auf 
 
 **Topics**
 
-- *openknx/Präfix/status*: *1* etwa alle 10 Sekunden, solange die Verbindung zum Broker steht bzw. der eigene Broker läuft (nicht retained). Im Modus *Client* setzt der Broker es auf *0* (retained), wenn die Verbindung abbricht, bei Stromausfall nach bis zu 90 Sekunden. Diese *0* bleibt am Broker gespeichert: ein Client, der *status* danach neu abonniert, erhält zuerst *0* und, sobald das Gerät wieder verbunden ist, nach etwa 10 Sekunden *1*. Im Modus *Broker* gibt es keine *0*; ein neuer Client erhält *1* nach etwa 10 Sekunden.
+- *openknx/Präfix/status*: *1* etwa alle 10 Sekunden, solange die Verbindung zum Broker steht bzw. der eigene Broker läuft (retained, ein Client erhält beim Abonnieren sofort den letzten Wert; im Modus *Broker* nur, solange nicht schon 32 andere retained Nachrichten gespeichert sind). Im Modus *Client* setzt der Broker es auf *0* (retained), wenn die Verbindung abbricht, bei Stromausfall nach bis zu 90 Sekunden; die nächste *1* ersetzt die *0*.
 - *openknx/Präfix/uptime*: Sekunden seit dem Start, zusammen mit *status*.

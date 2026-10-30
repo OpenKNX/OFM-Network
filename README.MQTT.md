@@ -35,7 +35,7 @@ OPENKNX_MQTT                     – enable MQTT (required)
 OPENKNX_MQTT_STATUS_TIME         – status publish interval in ms (default: 10000)
 OPENKNX_MQTT_TASK_STACK          – ESP32 FreeRTOS task stack size in bytes (default: 4096)
 OPENKNX_MQTT_BROKER_MAX_CLIENTS  – max simultaneous broker clients (default: 5 ESP32, 3 RP2040)
-OPENKNX_MQTT_BROKER_MAX_RETAINED – max retained messages stored by broker (default: 32)
+OPENKNX_MQTT_BROKER_MAX_RETAINED – max retained messages stored by broker (default: 32; the device's own status takes one)
 OPENKNX_MQTT_BROKER_MAX_SUBS     – max subscriptions per broker client (default: 16)
 OPENKNX_MQTT_MAX_QUEUE           – max messages waiting to be sent; entries are allocated on demand, so this is a count cap, not reserved memory (default: 32)
 OPENKNX_MQTT_TXBUF_MIN           – start size of the shared TX scratch buffer, Broker and Client; grows on demand (default: 512)
@@ -52,7 +52,7 @@ OPENKNX_MQTT_TXBUF_MAX           – ceiling for that growth; larger messages ar
 | `ParamNET_MQTTMode` | Mode: 0 = Client, 1 = Broker |
 | `ParamNET_MQTTServer` | Broker host FQDN or IP (Client mode, max 20 chars) |
 | `ParamNET_MQTTPort` | TCP port (default: 1883) |
-| `ParamNET_MQTTUsername` | Username (max 20 chars, empty = no auth; Broker mode: user set + empty password = no client can log in) |
+| `ParamNET_MQTTUsername` | Username (max 20 chars, empty = no auth; a password without a user is ignored) |
 | `ParamNET_MQTTPassword` | Password (max 20 chars) |
 | `MQTTCustomPrefix` | ETS only (no device memory): shows the prefix field |
 | `ParamNET_MQTTPrefix` | Custom prefix string (max 20 chars, `A-Z a-z 0-9 -`, empty = serial number) |
@@ -76,7 +76,7 @@ The prefix is determined as follows (in order):
 
 | Topic | Payload | Retained | Description |
 |-------|---------|----------|-------------|
-| `openknx/<prefix>/status` | `1` | no | Published every `OPENKNX_MQTT_STATUS_TIME` ms while connected (Broker mode: while the broker runs); in Client mode a new subscriber may first get the retained LWT `0` |
+| `openknx/<prefix>/status` | `1` | yes | Published every `OPENKNX_MQTT_STATUS_TIME` ms while connected (Broker mode: while the broker runs); replaces the retained LWT `0` (Client mode) |
 | `openknx/<prefix>/status` | `0` | yes | LWT (Last Will & Testament), Client mode only — published by the external broker when the connection drops |
 | `openknx/<prefix>/uptime` | seconds | no | Seconds since boot, published alongside status |
 | `openknx/<prefix>/knx/tp/telegramm` | JSON | no | Every KNX TP telegram, requires `ParamNET_MQTTTPRawData` — see below |
