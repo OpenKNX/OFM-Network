@@ -3,6 +3,7 @@
 ## Unreleased
 
 * fix: ETS "Standardparameter" (reset to defaults) aborted on every app with this module since 0.7.0: the MQTT prefix default is empty, but its pattern required at least one character (ETS log: `ValueOutOfRangeException` in `ResetToDefault`). The pattern now accepts the empty value, which the firmware already maps to the serial number, and rejects line breaks. An app takes the fix over with its next version; devices in a project need "update application" to that version
+* fix: the MQTT device prefix reads at most 20 characters; a full-length prefix has no terminator inside the parameter, only the unused byte after the field ended the `strlen` copy into the 30-byte buffer
 
 ## ec/v0.9.0-beta.2: 2026-10-29
 

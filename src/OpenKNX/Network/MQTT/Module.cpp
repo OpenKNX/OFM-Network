@@ -143,9 +143,15 @@ namespace OpenKNX
                 if (_devicePrefix[0] != '\0') return _devicePrefix;
 
                 memcpy(_devicePrefix, "openknx/", 8);
+                // A full 20-char prefix has no terminator inside the parameter; bound it by the buffer
+                // ("openknx/" + prefix + '/' + NUL = 30), which equals the 20-byte parameter
+#ifdef NET_MQTTPrefixLength
+                static_assert(NET_MQTTPrefixLength == sizeof(_devicePrefix) - 10, "MQTT prefix parameter and _devicePrefix size differ");
+#endif
                 const char *prefix = cfgPrefix();
-                if (knx.configured() && prefix[0] != '\0')
-                    memcpy(_devicePrefix + 8, prefix, strlen(prefix));
+                const size_t prefixLen = knx.configured() ? strnlen(prefix, sizeof(_devicePrefix) - 10) : 0;
+                if (prefixLen > 0)
+                    memcpy(_devicePrefix + 8, prefix, prefixLen);
                 else
                     memcpy(_devicePrefix + 8, openknx.info.humanSerialNumber().c_str() + 5, 8);
 
