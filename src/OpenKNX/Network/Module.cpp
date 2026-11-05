@@ -1920,7 +1920,7 @@ namespace OpenKNX
                 std::string url = (sp == std::string::npos) ? arg : arg.substr(0, sp);
                 std::string raw = (sp == std::string::npos) ? "download.bin" : arg.substr(sp + 1);
                 if (url.empty()) { logErrorP("http get <url> [path]  (path: /flash, sd/, efc/)"); return true; }
-                if (!httpFetchStart(url, raw)) logErrorP("%s", _fetch.error.c_str());
+                if (!httpFetchStart(url, raw)) logErrorP("%s", httpFetchRefusal());
                 return true;
             }
 #endif
@@ -3209,22 +3209,21 @@ namespace OpenKNX
 #ifdef OPENKNX_WEBCLIENT_TEST
         /**
          * @brief Arm a URL download onto one of the drives. Returns immediately.
-         * @details The bytes are handed to FileManager::writeChunk offset by offset -- the same sink the
-         *          web upload feeds -- so nothing is buffered and the size is bounded by the drive, not
-         *          by RAM. Up to three redirects are followed, which a GitHub release link needs.
+         * @details The bytes go to FileManager::streamChunk offset by offset, so the size is bounded by the
+         *          drive, not by RAM. Up to three redirects are followed, which a GitHub release link needs.
          */
         bool Module::httpFetchStart(const std::string &url, const std::string &rawPath)
         {
             if (_fetch.state == HttpFetch::State::RUNNING)
             {
-                _fetch.error = "a download is already running";
+                _fetchRefusal = "a download is already running"; // _fetch belongs to the running one
                 return false;
             }
             if (url.empty())
             {
                 _fetch = HttpFetch();
                 _fetch.state = HttpFetch::State::FAILED;
-                _fetch.error = "no url";
+                _fetch.error = _fetchRefusal = "no url";
                 return false;
             }
 
@@ -3240,12 +3239,15 @@ namespace OpenKNX
                 webclient.get(u)
                     .maxBodySize(0) // stream: the body never sits in RAM
                     .onData([this](const uint8_t *d, size_t n) {
-                        if (FileManager::writeChunk(_fetch.drive, _fetch.path.c_str(), _fetch.bytes, d, n))
+                        if (!_fetch.error.empty())
+                            return;
+                        if (FileManager::streamChunk(_fetch.drive, _fetch.path.c_str(), _fetch.bytes, d, n))
                             _fetch.bytes += n;
                         else
                             _fetch.error = "write failed";
                     })
                     .onDone([this](const OpenKNX::Network::Webclient::Response &r) {
+                        FileManager::streamEnd();
                         _fetch.status = r.status();
                         if (r.status() >= 301 && r.status() <= 308 && _fetch.hops < 3)
                         {
@@ -3253,11 +3255,14 @@ namespace OpenKNX
                             if (!loc.empty())
                             {
                                 _fetch.hops++;
+                                _fetch.bytes = 0; // the body of the redirect is not the file
                                 logInfoP("redirect %u -> %s", (unsigned)_fetch.hops, loc.c_str());
                                 _fetchArm(loc);
                                 return;
                             }
                         }
+                        if (_fetch.error.empty() && (r.bodyIncomplete() || r.bodySize() > _fetch.bytes))
+                            _fetch.error = "incomplete";
                         bool ok = r.success() && r.status() >= 200 && r.status() < 300 && _fetch.error.empty();
                         _fetch.state = ok ? HttpFetch::State::DONE : HttpFetch::State::FAILED;
                         if (!ok && _fetch.error.empty()) _fetch.error = "HTTP " + std::to_string(r.status());

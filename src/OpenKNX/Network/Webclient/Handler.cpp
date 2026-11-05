@@ -345,7 +345,7 @@ namespace OpenKNX
                 if ((uint32_t)(millis() - s.startMs) > OPENKNX_WEBCLIENT_TIMEOUT)
                 {
                     logError("Webclient", "Timeout slot %d", idx);
-                    if (s.state == Slot::State::BODY && s.bodyMaxSize > 0) s.bodyIncomplete = true;
+                    if (s.state == Slot::State::BODY) s.bodyIncomplete = true;
                     finishSlot(idx, s.state == Slot::State::BODY);
                     return;
                 }
@@ -458,6 +458,7 @@ namespace OpenKNX
                         if (n < 0) { finishSlot(idx, false); return; }
                         if (n > 0)
                         {
+                            if (s.onData) s.startMs = millis(); // a stream may run longer, it must not stall
                             if (!processBodyBytes(s, s.rxBuf, (size_t)n))
                                 return;
                         }
@@ -475,7 +476,7 @@ namespace OpenKNX
                             bool ok = (s.contentLength < 0 && !s.isChunked) ||
                                       (s.contentLength >= 0 && (int32_t)s.bodyReceived >= s.contentLength) ||
                                       (s.isChunked && s.chunkDone);
-                            if (!ok && s.bodyMaxSize > 0) s.bodyIncomplete = true;
+                            if (!ok) s.bodyIncomplete = true;
                             finishSlot(idx, true);
                         }
                         break;

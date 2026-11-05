@@ -308,11 +308,13 @@ namespace OpenKNX
             };
             bool httpFetchStart(const std::string &url, const std::string &rawPath);
             const HttpFetch &httpFetch() const { return _fetch; }
+            const char *httpFetchRefusal() const { return _fetchRefusal; } // why httpFetchStart() returned false
 #endif
 
             OpenKNX::Network::Webclient::Handler webclient;
 #ifdef OPENKNX_WEBCLIENT_TEST
             HttpFetch _fetch;
+            const char *_fetchRefusal = "";
             std::function<void(std::string)> _fetchArm;
 #endif
 #endif

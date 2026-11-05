@@ -23,6 +23,10 @@ namespace OpenKNX
             static int driveFromPath(const std::string& path, std::string& rel);
             static bool writeChunk(int drive, const char* path, uint32_t offset,
                                    const uint8_t* data, size_t len);
+            // For a stream in one direction: LittleFS keeps the file open up to streamEnd(), it erases per block instead of per chunk.
+            static bool streamChunk(int drive, const char* path, uint32_t offset,
+                                    const uint8_t* data, size_t len);
+            static void streamEnd();
 
 
           private:

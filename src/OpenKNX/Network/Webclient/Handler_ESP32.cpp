@@ -256,6 +256,7 @@ namespace OpenKNX
 
                         int n = client->read(bodyBuf, sizeof(bodyBuf));
                         if (n <= 0) continue;
+                        if (req->hasDataCallback) deadline = millis() + req->timeoutMs; // a stream may run longer, it must not stall
 
                         if (!isChunked)
                         {
@@ -367,13 +368,14 @@ namespace OpenKNX
                         bodyOk = false;
                     }
 
-                    if (millis() >= deadline) bodyOk = false;
+                    const bool complete = isChunked ? chunkDone : contentLength >= 0 && (int32_t)bodyReceived >= contentLength;
+                    if (!complete && millis() >= deadline) bodyOk = false;
 
                     client->stop();
                     wcDelete(client);
 
                     Response res;
-                    res._bodyIncomplete = req->bodyMaxSize > 0 && !bodyOk;
+                    res._bodyIncomplete = !bodyOk;
                     res._success = httpStatus >= 200 && httpStatus < 300;
                     res._status = httpStatus;
                     res._bodySize = contentLength >= 0 ? (uint32_t)contentLength : bodyReceived;

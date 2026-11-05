@@ -285,6 +285,26 @@ namespace OpenKNX
             return drvWriteChunk(drive, path, offset, data, len);
         }
 
+        static File streamFile;
+
+        bool FileManager::streamChunk(int drive, const char* path, uint32_t offset,
+                                      const uint8_t* data, size_t len)
+        {
+            if (drive != DINT)
+                return drvWriteChunk(drive, path, offset, data, len);
+            if (offset == 0)
+            {
+                streamFile.close();
+                streamFile = LittleFS.open(path, "w");
+            }
+            return streamFile && streamFile.write(data, len) == len;
+        }
+
+        void FileManager::streamEnd()
+        {
+            streamFile.close();
+        }
+
 
         static void drvSpace(int d, uint64_t& freeB, uint64_t& totalB)
         {
@@ -894,7 +914,7 @@ namespace OpenKNX
             else
             {
                 res.setStatus(409);
-                res.send(openknxNetwork.httpFetch().error.c_str());
+                res.send(openknxNetwork.httpFetchRefusal());
             }
         }
 
