@@ -429,7 +429,7 @@ namespace OpenKNX
 
             setupUiSocket();
 
-            addRoute(WEB_POST, "/prog", [](WebRequest& req, WebResponse& res) {
+            addRoute(WEB_POST, "/prog", [this](WebRequest& req, WebResponse& res) {
                 // kein std::stoi — wirft, und unter -fno-exceptions ist das ein abort()
                 std::string mode = req.getQueryParam("mode");
                 if (!mode.empty())
@@ -437,7 +437,7 @@ namespace OpenKNX
                     char* end = nullptr;
                     long value = strtol(mode.c_str(), &end, 10);
                     if (end != mode.c_str() && *end == '\0')
-                        knx.progMode(value != 0);
+                        _pendingProg = value != 0; // applied in loop(), like the socket's prog toggle
                 }
                 // Redirect to home
                 res.setStatus(303);
