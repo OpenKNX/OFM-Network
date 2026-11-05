@@ -646,6 +646,14 @@ namespace OpenKNX
             bool _wifiJoinPending = false; // left, finishWifiJoinCycle() joins once the leave settled and no scan runs
             uint32_t _wifiLeftAt = 0;      // start of the pending join cycle (its leave)
             uint32_t _wifiFailedSince = 0; // first tick with a failure driver state, 0 = none
+            uint32_t _wifiGwProbeAt = 0;   // last gateway check, start of its wait
+            uint32_t _wifiGwReplyAt = 0;   // reply time seen at the last check
+            uint8_t _wifiGwMisses = 0;     // rounds in a row without a reply
+            uint8_t _wifiGwSent = 0;       // requests of the running round
+            bool _wifiGwForceJoin = false; // our rejoin joins without waiting for a reported link loss
+            bool _wifiGwSeen = false;      // this gateway answered once: only then its silence counts
+            bool _wifiGwRejoined = false;  // rejoined for this silence: no further rejoin until a reply
+            void checkWifiGateway(uint32_t now);
             void startWifiJoinCycle();
             void finishWifiJoinCycle();
 #endif

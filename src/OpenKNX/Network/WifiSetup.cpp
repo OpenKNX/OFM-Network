@@ -61,6 +61,13 @@ static constexpr uint32_t WIFI_INFO_MS = 2000;          // RSSI/channel cache re
 static constexpr uint32_t WIFI_RSSI_SAMPLE_MS = 10000;  // RSSI history: 60 samples = 10 minutes
 static constexpr uint32_t WIFI_PING_MS = 1000;          // gateway ping interval while /wifi is open
 static constexpr uint32_t WIFI_PING_IDLE_MS = 10000;    // ping stops this long after the last /wifi/status request
+#ifdef ARDUINO_ARCH_RP2040
+static constexpr uint32_t WIFI_GW_PROBE_MS = 30000;   // RP2040: ARP request to the gateway while the link is up
+static constexpr uint32_t WIFI_GW_RETRY_MS = 2000;    // wait for the reply, and between tries of a round
+static constexpr uint32_t WIFI_GW_UP_MS = 5000;       // first request after a link-up
+static constexpr uint8_t WIFI_GW_TRIES = 3;           // requests of a round
+static constexpr uint8_t WIFI_GW_MISSES = 5;          // silent rounds before the one rejoin, about 3 min
+#endif
 static constexpr uint32_t WIFI_WIDGET_SHOW_MS = 30000;  // setup AP: keep trying to bring the widget up this long
 #ifndef OPENKNX_WIFI_AP_IP
 #define OPENKNX_WIFI_AP_IP 10, 42, 0, 1 // AP address, /24; clients get theirs from the AP's DHCP server
@@ -706,6 +713,7 @@ namespace OpenKNX
         void Module::finishWifiJoinCycle()
         {
             _wifiJoinPending = false;
+            _wifiGwForceJoin = false;
             if (_wifiApActive || wifiOwnApConfigured()) return; // an AP started meanwhile
             const struct netif *sta = __getCYW43Netif();
             if (sta != nullptr && netif_is_up(sta))
@@ -770,6 +778,87 @@ namespace OpenKNX
             _wifiApByProg = _wifiApActive;
         }
 
+#ifdef ARDUINO_ARCH_RP2040
+        // Reply of the gateway to our ARP request. The driver can report a link after its own rejoin while no frame passes.
+        static netif_input_fn s_wifiStaInput = nullptr;
+        static volatile uint32_t s_wifiGwAddr = 0;
+        static volatile uint32_t s_wifiGwReplyAt = 0;
+        static volatile uint32_t s_wifiRxFrames = 0; // frames received since the hook was installed
+
+        static err_t wifiStaInput(struct pbuf *p, struct netif *inp)
+        {
+            s_wifiRxFrames++;
+            if (p->len >= 42)
+            {
+                const uint8_t *f = (const uint8_t *)p->payload;
+                if (f[12] == 0x08 && f[13] == 0x06 && f[20] == 0 && f[21] == 2 && memcmp(f, inp->hwaddr, 6) == 0) // ARP reply to us
+                {
+                    uint32_t sender;
+                    memcpy(&sender, f + 28, sizeof(sender));
+                    if (sender == s_wifiGwAddr) s_wifiGwReplyAt = millis() | 1;
+                }
+            }
+            return s_wifiStaInput(p, inp);
+        }
+
+        /**
+         * @brief From the link tick while up: asks the gateway WIFI_GW_UP_MS after a link-up and WIFI_GW_PROBE_MS after the
+         *        last round, on silence up to WIFI_GW_TRIES times WIFI_GW_RETRY_MS apart. A gateway that answered once and stays
+         *        silent for WIFI_GW_MISSES rounds starts one rejoin; the next needs a reply first. A gateway that never answered
+         *        counts for nothing.
+         */
+        void Module::checkWifiGateway(uint32_t now)
+        {
+            if (_wifiJoinPending || _wifiScanRunning || now - _wifiGwProbeAt < (_wifiGwSent ? WIFI_GW_RETRY_MS : WIFI_GW_PROBE_MS)) return;
+            struct netif *sta = __getCYW43Netif();
+            if (sta == nullptr || !netif_is_up(sta)) return;
+            // AutoIP clears the gateway after a failed DHCP: keep asking the last one, its reply ends the silence
+            const uint32_t current = ip4_addr_get_u32(netif_ip4_gw(sta));
+            const uint32_t gw = current ? current : s_wifiGwAddr;
+            if (gw == 0) return;
+            _wifiGwProbeAt = now;
+            if (gw != s_wifiGwAddr)
+            {
+                s_wifiGwAddr = gw; // another gateway: nothing known about it
+                _wifiGwSeen = _wifiGwRejoined = false;
+                _wifiGwMisses = _wifiGwSent = 0;
+            }
+            if (_wifiGwSent && s_wifiGwReplyAt != _wifiGwReplyAt)
+            {
+                _wifiGwReplyAt = s_wifiGwReplyAt;
+                _wifiGwSeen = true;
+                _wifiGwRejoined = false;
+                _wifiGwMisses = _wifiGwSent = 0;
+                return;
+            }
+            if (_wifiGwSent >= WIFI_GW_TRIES)
+            {
+                _wifiGwSent = 0;
+                if (_wifiGwSeen) _wifiGwMisses += _wifiGwMisses < 255; // keeps counting after the rejoin, for 'net wifi'
+                if (_wifiGwSeen && !_wifiGwRejoined && _wifiGwMisses >= WIFI_GW_MISSES)
+                {
+                    logInfoP("WiFi: gateway silent, rejoin");
+                    _wifiGwMisses = 0;
+                    _wifiGwRejoined = true;
+                    startWifiJoinCycle();
+                    _wifiGwForceJoin = true;
+                }
+                return;
+            }
+            _wifiGwReplyAt = s_wifiGwReplyAt;
+            _wifiGwSent++;
+            LWIPMutex m;
+            if (sta->input != wifiStaInput)
+            {
+                s_wifiStaInput = sta->input;
+                sta->input = wifiStaInput;
+            }
+            ip4_addr_t addr;
+            ip4_addr_set_u32(&addr, gw);
+            etharp_request(sta, &addr);
+        }
+#endif
+
         /**
          * @brief Client mode, from the 500 ms link tick: caches RSSI/channel/security/AP, keeps the RSSI history and,
          *        rejoins while there is no link. RP2040: startWifiJoinCycle() while the interface exists, 30 s after the
@@ -818,16 +907,23 @@ namespace OpenKNX
                 _wifiRejoinLogged = false;
 #ifdef ARDUINO_ARCH_RP2040
                 _wifiFailedSince = 0;
+                // a stuck link may not report the leave as a loss: this join must not wait for one
+                if (_wifiJoinPending && _wifiGwForceJoin && !_wifiScanRunning && now - _wifiLeftAt >= WIFI_LEAVE_SETTLE_MS) finishWifiJoinCycle();
                 if (_wifiJoinPending && now - _wifiLeftAt > WIFI_JOIN_DROP_MS)
                 {
                     // the leave did not take the link down: drop the join instead of running it on a later loss
                     _wifiJoinPending = false;
                     logInfoP("WiFi: connected, rejoin dropped");
+                    _wifiGwRejoined = _wifiGwForceJoin = false;
+                    _wifiGwMisses = 0;
                 }
+                checkWifiGateway(now);
 #endif
                 return;
             }
 #ifdef ARDUINO_ARCH_RP2040
+            _wifiGwMisses = _wifiGwSent = 0; // no link: the next association starts counting anew
+            _wifiGwProbeAt = now - WIFI_GW_PROBE_MS + WIFI_GW_UP_MS;
             if (_wifiJoinPending)
             {
                 if (!_wifiScanRunning && now - _wifiLeftAt >= WIFI_LEAVE_SETTLE_MS) finishWifiJoinCycle();
@@ -1017,6 +1113,9 @@ namespace OpenKNX
                     formatBssid(_wifiBssid, bssid);
                     logInfoP("AP:        %s", bssid);
                     logInfoP("Address:   %s, gateway %s", localIP().toString().c_str(), gatewayIP().toString().c_str());
+#ifdef ARDUINO_ARCH_RP2040
+                    if (_wifiGwSeen) logInfoP("Gateway:   ARP reply %lu s ago, %u silent rounds, %lu frames in", (unsigned long)((millis() - _wifiGwReplyAt) / 1000), (unsigned)_wifiGwMisses, (unsigned long)s_wifiRxFrames);
+#endif
                     if (netReconnects())
                         logInfoP("Connected: %s, reconnects %u, last outage %s", humanDuration(netUptimeSec()).c_str(), (unsigned)netReconnects(),
                                  humanDuration(netLastDowntimeSec()).c_str());
