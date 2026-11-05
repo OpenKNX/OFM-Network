@@ -2,7 +2,7 @@
 
 ## ec/v0.9.0-beta.3: 2026-11-05
 
-Web server, download, DNS and Ethernet fixes on top of `ec/v0.9.0-beta.2`.
+Web server, download, DNS, Ethernet and WiFi fixes on top of `ec/v0.9.0-beta.2`.
 
 * Feature: `addLoopRoute()` runs a route in the loop task. On ESP32 httpd has its own task, and a handler touching loop state raced with it; 503 after 3 s untaken, or at once when the loop does not run
 * Fix: the URL download of the file manager is armed in the loop task, the `/prog` route applies in the loop task
@@ -17,6 +17,8 @@ Web server, download, DNS and Ethernet fixes on top of `ec/v0.9.0-beta.2`.
 * Fix (ESP32): a failed send closes the session, before the client waited for the timeout
 * Fix (ESP32): httpd runs on the core without `loop()`, every wake by lwIP preempted it before
 * Fix (ESP32, RMII): a LAN mode limits what the PHY offers instead of forcing it; a LAN8720 in a fixed mode got no link after a restart or a cable re-plug. Console `net eth 10|100 [half|full]`
+* Fix (RP2040, WiFi): after the driver's own rejoin the link could read as up while no frame passed, until `net wifi reconnect`. The device asks the gateway by ARP 5 s after a link-up and about every 30 s; a gateway that answered once and stays silent for about 3 min starts one rejoin, the next only after a reply. `net wifi` shows the age of the last reply, the silent rounds and the received frames
+* Change (RP2040, WiFi): shorter console messages
 
 ## ec/v0.9.0-beta.2: 2026-10-30
 
