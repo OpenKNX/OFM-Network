@@ -34,10 +34,18 @@ namespace OpenKNX
 
             // ─── Task init ────────────────────────────────────────────────────────────
 
+            // The worker ends after this long without a request: its stack goes back to the heap,
+            // where a TLS session of another module may need it. The next request starts it again.
+            static constexpr uint32_t kWorkerIdleMs = 5000;
+            static portMUX_TYPE workerMux = portMUX_INITIALIZER_UNLOCKED;
+
             void Handler::initTask()
             {
-                _requestQueue = xQueueCreate(OPENKNX_WEBCLIENT_SLOTS * 4, sizeof(TaskRequest *));
-                _resultQueue  = xQueueCreate(OPENKNX_WEBCLIENT_SLOTS * 16, sizeof(ResultEntry *));
+                if (_requestQueue == nullptr)
+                {
+                    _requestQueue = xQueueCreate(OPENKNX_WEBCLIENT_SLOTS * 4, sizeof(TaskRequest *));
+                    _resultQueue  = xQueueCreate(OPENKNX_WEBCLIENT_SLOTS * 16, sizeof(ResultEntry *));
+                }
 
                 xTaskCreatePinnedToCore(
                     Handler::taskRun,
@@ -59,7 +67,15 @@ namespace OpenKNX
                 for (;;)
                 {
                     TaskRequest *req = nullptr;
-                    xQueueReceive(self->_requestQueue, &req, portMAX_DELAY);
+                    if (xQueueReceive(self->_requestQueue, &req, pdMS_TO_TICKS(kWorkerIdleMs)) != pdTRUE)
+                    {
+                        taskENTER_CRITICAL(&workerMux);
+                        const bool idle = uxQueueMessagesWaiting(self->_requestQueue) == 0;
+                        if (idle) self->_task = nullptr;
+                        taskEXIT_CRITICAL(&workerMux);
+                        if (idle) vTaskDelete(nullptr);
+                        continue;
+                    }
                     if (!req) continue;
 
                     Client *client = nullptr;
@@ -391,11 +407,34 @@ namespace OpenKNX
             void Handler::loop()
             {
                 if (_requestQueue == nullptr) return;
+                if (_task == nullptr && uxQueueMessagesWaiting(_requestQueue) > 0)
+                {
+                    initTask(); // ended meanwhile, or no memory for it before
+                    TaskRequest *req = nullptr;
+                    if (_task) _noTaskSince = 0;
+                    else if (!_noTaskSince) _noTaskSince = millis() | 1;
+                    else if (millis() - _noTaskSince > OPENKNX_WEBCLIENT_TIMEOUT && xQueueReceive(_requestQueue, &req, 0) == pdTRUE && req)
+                    {
+                        // no memory for the worker: the caller must not wait for good
+                        _noTaskSince = 0;
+                        const uint32_t id = req->requestId;
+                        delete req;
+                        for (auto it = _activeCallbacks.begin(); it != _activeCallbacks.end(); ++it)
+                        {
+                            if (it->first != id) continue;
+                            DoneCallback cb = std::move(it->second.onDone);
+                            _activeCallbacks.erase(it);
+                            if (cb) cb(Response());
+                            break;
+                        }
+                    }
+                }
 
                 ResultEntry *entry = nullptr;
                 while (xQueueReceive(_resultQueue, &entry, 0) == pdTRUE)
                 {
                     if (!entry) continue;
+                    const bool data = entry->type == ResultEntry::Type::DATA;
 
                     // Callbacks may start a request, whose push_back reallocates the vector:
                     // take the function out before calling it, never touch `it` afterwards.
@@ -427,6 +466,7 @@ namespace OpenKNX
                     }
 
                     wcDelete(entry);
+                    if (data) return; // a callback may write flash; the worker waits at the full queue
                 }
             }
 

@@ -283,6 +283,7 @@ namespace OpenKNX
                 QueueHandle_t _requestQueue = nullptr;
                 QueueHandle_t _resultQueue  = nullptr;
                 TaskHandle_t  _task         = nullptr;
+                uint32_t      _noTaskSince  = 0; // requests wait and no worker could be started
                 std::vector<std::pair<uint32_t, ActiveCallback>> _activeCallbacks;
 
                 void initTask();
