@@ -48,7 +48,7 @@ namespace OpenKNX
         {
             if (_bodyOwned) free(_body); // PSRAM_MALLOC
             _bodyOwned = true;
-            if (text == nullptr)
+            if (text == nullptr || !*text)
             {
                 _body = nullptr;
                 _bodyLength = 0;
@@ -56,7 +56,7 @@ namespace OpenKNX
             }
             _bodyLength = strlen(text);
             _body = (uint8_t*)PSRAM_MALLOC(_bodyLength + 1);
-            if (_body == nullptr) { _bodyLength = 0; return; }
+            if (_body == nullptr) { _bodyLength = 0; setStatus(503); return; } // not a 200 with an empty body
             memcpy(_body, text, _bodyLength + 1);
         }
 
@@ -72,8 +72,16 @@ namespace OpenKNX
             }
             _bodyLength = length;
             _body = (uint8_t*)PSRAM_MALLOC(length);
-            if (_body == nullptr) { _bodyLength = 0; return; }
+            if (_body == nullptr) { _bodyLength = 0; setStatus(503); return; } // not a 200 with an empty body
             memcpy(_body, data, length);
+        }
+
+        void WebResponse::sendOwned(uint8_t* data, int length)
+        {
+            if (_bodyOwned) free(_body); // PSRAM_MALLOC
+            _bodyOwned = true;
+            _body = data;
+            _bodyLength = data ? length : 0;
         }
 
         void WebResponse::sendStatic(const char* text)

@@ -37,6 +37,7 @@ namespace OpenKNX
 
             void send(const char* text);
             void send(const uint8_t* data, int length);
+            void sendOwned(uint8_t* data, int length); // takes a block from malloc, frees it after sending
             void sendStatic(const char* text);
             void sendStatic(const uint8_t* data, int length);
 
