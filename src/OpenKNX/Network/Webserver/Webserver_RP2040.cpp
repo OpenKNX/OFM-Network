@@ -1172,7 +1172,14 @@ namespace OpenKNX
             LWIPMutex lock;
 
             // Only if the slot still holds a WS connection -- onAccept may have reused it.
-            if (s->pcb && s->state == CS_WS) closeSlot(s, false);
+            // RST, not FIN: behind a zero window the FIN never goes out and the pcb keeps its data.
+            if (s->pcb && s->state == CS_WS)
+            {
+                tcp_pcb* pcb = s->pcb;
+                releaseSlot(s);
+                detach(pcb);
+                tcp_abort(pcb);
+            }
         }
 
     } // namespace Network
