@@ -337,6 +337,13 @@ touches that the loop also touches — I2C peripherals, widget lists, the settin
 **queued in the handler and applied from your module's `loop()`**, never written directly. On RP2040 the
 handler already runs on the loop task, but code written this way is correct on both.
 
+A handler that has to read or build from that state (a status JSON, a file list) registers with
+`addLoopRoute()` instead of `addRoute()`. On ESP32 the httpd task then hands the request to the loop task
+(`Webserver::loop()`) and waits; if the loop has not taken it after 3 s, the answer is 503, and at once while
+`Webserver::loop()` has not run for 3 s (power save, OTA, a server that runs without its loop). The handler only
+fills the `WebResponse`; httpd sends it afterwards. A `sendStream()` body is still read in the httpd task.
+On RP2040 `addLoopRoute()` is `addRoute()`.
+
 ---
 
 ## UI Socket

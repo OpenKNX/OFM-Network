@@ -480,6 +480,14 @@ namespace OpenKNX
             _routes.push_back({method, uri, handler});
         }
 
+        void Webserver::addLoopRoute(uint8_t method, const std::string& uri, WebRouteHandler handler)
+        {
+            addRoute(method, uri, std::move(handler));
+#ifdef ARDUINO_ARCH_ESP32
+            _routes.back().inLoop = true;
+#endif
+        }
+
         void Webserver::addSocket(const std::string& uri, WebSocketHandler onMessage,
                                   WebSocketConnectHandler onConnect)
         {
@@ -566,7 +574,12 @@ namespace OpenKNX
 
                 if (matched)
                 {
-                    route.handler(req, res);
+#ifdef ARDUINO_ARCH_ESP32
+                    if (route.inLoop)
+                        runInLoop(route.handler, req, res);
+                    else
+#endif
+                        route.handler(req, res);
                     handled = true;
                     break;
                 }
@@ -1062,6 +1075,12 @@ namespace OpenKNX
         void Webserver::loop()
         {
             loopPlatform();
+#ifdef ARDUINO_ARCH_ESP32
+            _loopAt.store(millis(), std::memory_order_relaxed);
+            if (_loopCall.load(std::memory_order_relaxed))
+                if (LoopCall* c = _loopCall.exchange(nullptr)) // an addLoopRoute() request, httpd waits for the give
+                    (*c->handler)(*c->req, *c->res), xSemaphoreGive((SemaphoreHandle_t)_loopDone);
+#endif
 
             if (_pendingProg >= 0)
             {

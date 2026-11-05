@@ -469,6 +469,31 @@ namespace OpenKNX
             return ESP_OK;
         }
 
+        // ── runInLoop — addLoopRoute() handler in the loop task ─────────────
+
+        void Webserver::runInLoop(const WebRouteHandler& handler, WebRequest& req, WebResponse& res)
+        {
+            // httpd is one task: at most one call is ever posted. Untaken after 3 s it is taken back, else waited for.
+            // No loop() for 3 s (power save, OTA, server without loop): 503 at once instead of holding httpd 3 s per request.
+            LoopCall call{&handler, &req, &res};
+            LoopCall* expect = nullptr;
+            const uint32_t at = _loopAt.load(std::memory_order_acquire); // before millis(): a later store cannot underflow the age
+            if (_loopDone && millis() - at < 3000 && _loopCall.compare_exchange_strong(expect, &call))
+            {
+                if (xSemaphoreTake((SemaphoreHandle_t)_loopDone, pdMS_TO_TICKS(3000)) == pdTRUE)
+                    return;
+                expect = &call;
+                if (!_loopCall.compare_exchange_strong(expect, nullptr))
+                {
+                    xSemaphoreTake((SemaphoreHandle_t)_loopDone, portMAX_DELAY); // the loop runs it: wait for its end
+                    return;
+                }
+            }
+            res.setStatus(503);
+            res.setContentType("text/plain");
+            res.sendStatic("Gerät beschäftigt");
+        }
+
         // ── setupEsp32 — httpd start ────────────────────────────────────────
 
         void Webserver::setupEsp32()
@@ -476,6 +501,7 @@ namespace OpenKNX
             // Shared-state mutexes (created once, before any WS can be upgraded)
             if (_wsLock == nullptr) _wsLock = xSemaphoreCreateRecursiveMutex();
             if (g_wsTxMutex == nullptr) g_wsTxMutex = xSemaphoreCreateMutex();
+            if (_loopDone == nullptr) _loopDone = xSemaphoreCreateBinary(); // created empty; without it addLoopRoute() answers 503
 
             // WS-Sockets werden per Async-Handler aus httpd gelöst und aus
             // Webserver::loop() bedient — kein Task pro Verbindung

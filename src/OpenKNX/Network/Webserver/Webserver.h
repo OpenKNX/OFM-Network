@@ -5,6 +5,7 @@
 #include "OpenKNX/Format/JSON/Writer.h"
 #include "OpenKNX/Network/Webserver/WebRequest.h"
 #include "OpenKNX/Network/Webserver/WebResponse.h"
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -118,6 +119,9 @@ namespace OpenKNX
             uint8_t method;
             std::string uri;
             WebRouteHandler handler;
+#ifdef ARDUINO_ARCH_ESP32
+            bool inLoop = false; // addLoopRoute(): the handler runs in the loop task
+#endif
         };
 
         struct WebSocketRoute
@@ -166,6 +170,9 @@ namespace OpenKNX
             Ui ui;
 
             void addRoute(uint8_t method, const std::string& uri, WebRouteHandler handler);
+            /** @brief addRoute() for a handler that touches state the loop also touches: on ESP32 httpd hands the
+             *  request to the loop task and waits; 503 after 3 s untaken, at once after 3 s without loop(). A sendStream() body is still read in httpd. */
+            void addLoopRoute(uint8_t method, const std::string& uri, WebRouteHandler handler);
             void addSocket(const std::string& uri, WebSocketHandler onMessage,
                            WebSocketConnectHandler onConnect = nullptr);
             void addMenuItem(const std::string& label, const std::string& uri, int8_t priority = 0);
@@ -301,6 +308,16 @@ namespace OpenKNX
 #ifdef ARDUINO_ARCH_ESP32
             void* _server = nullptr;          // httpd_handle_t — opaque, kein esp_http_server.h im Header
             mutable void* _wsLock = nullptr;  // recursive mutex guarding WebSocketRoute::clients + the WS session registry
+            struct LoopCall
+            {
+                const WebRouteHandler* handler;
+                WebRequest* req;
+                WebResponse* res;
+            };
+            std::atomic<LoopCall*> _loopCall{nullptr}; // an addLoopRoute() request waiting for the loop task
+            void* _loopDone = nullptr;                  // binary semaphore, given by the loop after the handler
+            std::atomic<uint32_t> _loopAt{0};           // millis() of the last loop(); skipped in power save and OTA
+            void runInLoop(const WebRouteHandler& handler, WebRequest& req, WebResponse& res);
 
           public:
             void* serverHandle() const { return _server; }
