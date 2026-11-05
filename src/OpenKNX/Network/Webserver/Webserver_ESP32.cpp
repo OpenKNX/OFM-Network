@@ -346,8 +346,7 @@ namespace OpenKNX
                         ws->logWebsocket(wsReq, 404);
                         httpd_resp_set_status(req, "404 Not Found");
                         httpd_resp_set_type(req, "text/plain");
-                        httpd_resp_sendstr(req, "No WebSocket handler registered for this URI");
-                        return ESP_OK;
+                        return httpd_resp_sendstr(req, "No WebSocket handler registered for this URI") == ESP_OK ? ESP_OK : ESP_FAIL;
                     }
 
                     WebRequest wsReq;
@@ -376,8 +375,7 @@ namespace OpenKNX
                 ws->logRequest(request, response413);
                 httpd_resp_set_status(req, "413 Content Too Large");
                 httpd_resp_set_type(req, "text/plain");
-                httpd_resp_sendstr(req, "Content Too Large");
-                return ESP_OK;
+                return httpd_resp_sendstr(req, "Content Too Large") == ESP_OK ? ESP_OK : ESP_FAIL;
             }
 
             std::vector<uint8_t, PsramAllocator<uint8_t>> bodyData;
@@ -397,8 +395,7 @@ namespace OpenKNX
                     // Abbruch während des Empfangs — sonst gilt der verkürzte Body als vollständig
                     httpd_resp_set_status(req, "400 Bad Request");
                     httpd_resp_set_type(req, "text/plain");
-                    httpd_resp_sendstr(req, "Incomplete body");
-                    return ESP_OK;
+                    return httpd_resp_sendstr(req, "Incomplete body") == ESP_OK ? ESP_OK : ESP_FAIL;
                 }
                 request.setBody(bodyData.data(), (size_t)received);
             }
@@ -439,34 +436,38 @@ namespace OpenKNX
             for (auto& h : response.responseHeaders())
                 httpd_resp_set_hdr(req, h.first.c_str(), h.second.c_str());
 
+            // A failed send must close the socket: left open, the client waits for the announced body until its own timeout.
+            bool sent = true;
             if (response.isStreaming())
             {
                 // Streaming-Download: Transfer-Encoding: chunked (kein Content-Length nötig)
                 uint8_t buf[512];
                 size_t got;
-                while ((got = response.readStreamChunk(buf, sizeof(buf))) > 0)
-                    httpd_resp_send_chunk(req, (char*)buf, (ssize_t)got);
-                httpd_resp_send_chunk(req, nullptr, 0);
+                while (sent && (got = response.readStreamChunk(buf, sizeof(buf))) > 0)
+                    sent = httpd_resp_send_chunk(req, (char*)buf, (ssize_t)got) == ESP_OK;
+                if (sent)
+                    sent = httpd_resp_send_chunk(req, nullptr, 0) == ESP_OK;
                 response.cleanupStream();
             }
             else if (response.segmentCount() <= 1)
             {
                 // Ein Block (oder leer) → in einem Rutsch, httpd setzt Content-Length
                 const bool has = response.segmentCount() > 0;
-                httpd_resp_send(req,
-                                has ? (const char*)response.segments()[0].data : "",
-                                has ? response.segments()[0].len : 0);
+                sent = httpd_resp_send(req,
+                                       has ? (const char*)response.segments()[0].data : "",
+                                       has ? response.segments()[0].len : 0) == ESP_OK;
             }
             else
             {
                 // Mehrere Blöcke als Chunks: keine Kopie, dafür chunked statt Content-Length
-                for (int i = 0; i < response.segmentCount(); i++)
-                    httpd_resp_send_chunk(req,
-                                          (const char*)response.segments()[i].data,
-                                          response.segments()[i].len);
-                httpd_resp_send_chunk(req, nullptr, 0);
+                for (int i = 0; sent && i < response.segmentCount(); i++)
+                    sent = httpd_resp_send_chunk(req,
+                                                 (const char*)response.segments()[i].data,
+                                                 response.segments()[i].len) == ESP_OK;
+                if (sent)
+                    sent = httpd_resp_send_chunk(req, nullptr, 0) == ESP_OK;
             }
-            return ESP_OK;
+            return sent ? ESP_OK : ESP_FAIL;
         }
 
         // ── runInLoop — addLoopRoute() handler in the loop task ─────────────
