@@ -1,5 +1,23 @@
 # Changes
 
+## ec/v0.9.0-beta.3: 2026-11-05
+
+Web server, download, DNS and Ethernet fixes on top of `ec/v0.9.0-beta.2`.
+
+* Feature: `addLoopRoute()` runs a route in the loop task. On ESP32 httpd has its own task, and a handler touching loop state raced with it; 503 after 3 s untaken, or at once when the loop does not run
+* Fix: the URL download of the file manager is armed in the loop task, the `/prog` route applies in the loop task
+* Fix (DNS): an IPv6 or missing answer counts as not resolved and gives 0.0.0.0; a v6 answer was read as a v4 address
+* Change (application): the WiFi buttons have icons and a width that follows the input fields, the info texts moved to the help
+* Change (WiFi page): chart thresholds are colored, the ping chart shows its mean as a blue line
+* New: `OPENKNX_WEBCLIENT_LEAN_TLS` limits the RP2040 web client to TLS 1.2 with ECDHE and AES-GCM; the certificate check accepts SHA-256, SHA-384 and SHA-512 signatures
+* Fix: a download over the stream path no longer ends silently at the request timeout, the timeout restarts with every part, and a cut body is reported
+* Fix (RP2040): a POST of about 850 B or more hung when header and body shared a segment
+* Fix: `WebResponse::send` answers 503 when the body cannot be copied, before it was 200 with an empty body; `sendOwned` hands a block over without a copy
+* Fix (ESP32): the web client worker ends after 5 s without a request and frees about 7 KB; a request that finds no memory for it gets an empty response after the timeout
+* Fix (ESP32): a failed send closes the session, before the client waited for the timeout
+* Fix (ESP32): httpd runs on the core without `loop()`, every wake by lwIP preempted it before
+* Fix (ESP32, RMII): a LAN mode limits what the PHY offers instead of forcing it; a LAN8720 in a fixed mode got no link after a restart or a cable re-plug. Console `net eth 10|100 [half|full]`
+
 ## ec/v0.9.0-beta.2: 2026-10-30
 
 A WiFi fix, web interface changes and MQTT fixes on top of `ec/v0.9.0-beta.1`. OAM-IP-Interface and OAM-IP-Router call `setDefaultPage()` and need this version.
