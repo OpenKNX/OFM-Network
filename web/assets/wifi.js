@@ -48,8 +48,8 @@
         var g = '', l = '';
         lines.forEach(function (t) {
             var v = y(t[0]);
-            g += '<line x1="0" x2="600" y1="' + v.toFixed(1) + '" y2="' + v.toFixed(1) + '" stroke="#e8e8e8" stroke-dasharray="3 4"/>';
-            l += '<span style="top:' + (v * 100 / h).toFixed(1) + '%">' + t[1] + '</span>';
+            g += '<line x1="0" x2="600" y1="' + v.toFixed(1) + '" y2="' + v.toFixed(1) + '" stroke="' + t[2] + '" stroke-dasharray="3 4"/>';
+            l += '<span style="top:' + (v * 100 / h).toFixed(1) + '%;color:' + t[2] + '">' + t[1] + '</span>';
         });
         return [g, l];
     }
@@ -57,7 +57,7 @@
     function rssiChart(h) {
         if (!h || !h.length) return '';
         var y = function (d) { return 6 + 68 * (-40 - Math.max(-90, Math.min(-40, d))) / 50 };
-        var gl = grid(y, 80, [[-55, 'sehr gut'], [-65, 'gut'], [-75, 'mittel']]), g = '', seg = '', off = 60 - h.length;
+        var gl = grid(y, 80, [[-55, 'sehr gut', '#449841'], [-65, 'gut', '#6f8f2a'], [-75, 'mittel', '#c98a00']]), g = '', seg = '', off = 60 - h.length;
         var line = function () { if (seg) g += '<polyline points="' + seg + '" fill="none" stroke="#449841" stroke-width="2" vector-effect="non-scaling-stroke"/>'; seg = '' };
         h.forEach(function (d, i) { if (d == 0) line(); else seg += ((i + off) * 600 / 59).toFixed(1) + ',' + y(d).toFixed(1) + ' ' });
         line();
@@ -69,17 +69,22 @@
         if (!p.length) return h + '<p class="meta"><span class="wf-spin"></span>Messung startet \u2026</p>';
         var lost = 0, sum = 0, n = 0, mn = 1e9, mx = 0, off = 60 - p.length;
         var y = function (ms) { return 4 + 66 * (1 - Math.log(1 + Math.min(ms, 100)) / Math.log(101)) };
-        var gl = grid(y, 70, [[10, '10 ms'], [50, '50 ms']]), g = '';
+        var gl = grid(y, 70, [[10, '10 ms', '#c98a00'], [50, '50 ms', '#c0392b']]), g = '';
         p.forEach(function (ms, i) {
             var t = ms < 0 ? 0 : y(ms);
             if (ms < 0) lost++; else { sum += ms; n++; mn = Math.min(mn, ms); mx = Math.max(mx, ms) }
             g += '<rect x="' + ((i + off) * 10 + 1) + '" y="' + t.toFixed(1) + '" width="8" height="' + (70 - t).toFixed(1) + '" fill="' + (ms < 0 ? '#c0392b' : '#449841') + '"' + (ms < 0 || i == p.length - 1 ? '' : ' fill-opacity=".55"') + '/>';
         });
+        if (n) {
+            var ym = y(sum / n).toFixed(1);
+            g += '<line x1="0" x2="600" y1="' + ym + '" y2="' + ym + '" stroke="#0b6cbf" stroke-width="2" vector-effect="non-scaling-stroke"/>';
+            gl[1] += '<span style="top:' + (ym * 100 / 70).toFixed(1) + '%;color:#0b6cbf">' + Math.round(sum / n) + ' ms</span>';
+        }
         var cur = p[p.length - 1];
         return h + '<table class="attribute-table">' + row('WiFi-Router', esc(st.gw)) +
             row('Antwortzeit', (cur < 0 ? '<span class="red">keine Antwort</span>' : cur + ' ms') + (n ? ' <span class="gray">Mittel ' + Math.round(sum / n) + ' ms, ' + mn + ' bis ' + mx + ' ms</span>' : '')) +
             row('Verloren', lost + ' von ' + p.length + ' (' + (lost * 100 / p.length).toFixed(1).replace('.', ',') + ' %)') + '</table>' +
-            chart('Ein Ping pro Sekunde, letzte 60 s \u00b7 rot = keine Antwort', 70, gl, g) + '<p class="meta">L\u00e4uft nur, solange diese Seite offen ist.</p>';
+            chart('Ein Ping pro Sekunde, letzte 60 s \u00b7 rot = keine Antwort \u00b7 blau = Mittel', 70, gl, g) + '<p class="meta">L\u00e4uft nur, solange diese Seite offen ist.</p>';
     }
 
     // ---- stations of the own WiFi ----
