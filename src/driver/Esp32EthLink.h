@@ -13,9 +13,19 @@
 // Own translation unit so it compiles to nothing off-target (ESP32 + KNX_IP_LAN only) and is easy to review.
 // Returns false if the driver rejects a step (so the caller can surface it) instead of silently "succeeding".
 #if defined(ARDUINO_ARCH_ESP32) && defined(KNX_IP_LAN)
+#include <stdint.h>
+
 namespace Esp32EthLink
 {
     bool forceMode(bool speed100, bool full); // auto-negotiation off + fixed speed/duplex (stop/reconfigure/start)
     bool setAutoNeg();                        // auto-negotiation on (stop/reconfigure/start)
+
+    // RMII PHYs only (a W5500 has no MDIO registers). Sets the abilities the PHY announces and restarts the
+    // negotiation (stop/reconfigure/start).
+    constexpr uint16_t ANAR_100_FULL = 0x0100;
+    constexpr uint16_t ANAR_100_HALF = 0x0080;
+    constexpr uint16_t ANAR_10_FULL = 0x0040;
+    constexpr uint16_t ANAR_10_HALF = 0x0020;
+    bool advertise(uint16_t abilities); // ANAR_* bits; anything the PHY cannot do is dropped
 } // namespace Esp32EthLink
 #endif

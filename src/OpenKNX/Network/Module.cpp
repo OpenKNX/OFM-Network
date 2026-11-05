@@ -572,6 +572,9 @@ namespace OpenKNX
 #endif
             KNX_NETIF.begin();
             KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP); // Stupid: Nedd to be after begin an also DHCP!
+#ifdef OPENKNX_ETH_RMII
+            _ethLink.applyAfterBegin(); // after config(): the driver restart must not race the switch to a static IP
+#endif
 #endif
 
 #elif ARDUINO_ARCH_RP2040
@@ -1825,6 +1828,13 @@ namespace OpenKNX
                     }
                 }
 
+#ifdef OPENKNX_ETH_RMII
+                if (mode != 0 && dup.empty())
+                {
+                    _ethLink.setModeAnyDuplex(mode);
+                    return true;
+                }
+#endif
                 _ethLink.setMode(mode, full); // set + persist + apply live (per-platform, inside the manager)
                 return true;
             }
@@ -2097,8 +2107,13 @@ namespace OpenKNX
 #else
             openknx.console.printHelpLine("net eth auto", "Auto-negotiation");
 #endif
+#ifdef OPENKNX_ETH_RMII
+            openknx.console.printHelpLine("net eth 10 [half|full]", "Negotiate 10 Mbit only (duplex: negotiated or as given)");
+            openknx.console.printHelpLine("net eth 100 [half|full]", "Negotiate 100 Mbit only (duplex: negotiated or as given)");
+#else
             openknx.console.printHelpLine("net eth 10 [half|full]", "Force a fixed 10 Mbit link (default half)");
             openknx.console.printHelpLine("net eth 100 [half|full]", "Force a fixed 100 Mbit link (default half)");
+#endif
 #endif
 #if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN) && defined(OPENKNX_CONSOLE_DEV)
             openknx.console.printHelpLine("net phy", "W5500 status: VERSIONR, PHYCFGR, RSTn pin, SPI clock");

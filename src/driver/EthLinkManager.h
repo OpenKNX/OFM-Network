@@ -14,6 +14,12 @@
 #include "W5500Phy.h"
 #endif
 
+// RMII PHY on MDIO (LAN8720 and others): a speed setting limits the negotiation instead of forcing the PHY.
+// LAN87xx in a manual mode does not reliably link to a negotiating switch after a reset or a cable re-plug.
+#if defined(ARDUINO_ARCH_ESP32) && defined(ETH_PHY_MDC)
+#define OPENKNX_ETH_RMII
+#endif
+
 namespace OpenKNX { namespace Network { class Module; } } // real type; NetworkModule is a using-alias of this
 
 class EthLinkManager
@@ -33,6 +39,11 @@ class EthLinkManager
 
 #if defined(ARDUINO_ARCH_ESP32)
     void applyBeforeBegin(); // apply the ETS / build-flag fixed mode BEFORE ETH.begin()
+#endif
+
+#ifdef OPENKNX_ETH_RMII
+    void applyAfterBegin();              // ETS / build-flag speed limit; the PHY registers need a running driver
+    bool setModeAnyDuplex(uint8_t mode); // console `net eth 10|100`: limit the speed, the duplex stays negotiated
 #endif
 
 #if defined(ARDUINO_ARCH_RP2040)
@@ -60,10 +71,16 @@ class EthLinkManager
 #if defined(ARDUINO_ARCH_RP2040)
     void applyFixedLive(); // apply the loaded fixed mode live via W5500Phy (boot / reset)
 #endif
+#ifdef OPENKNX_ETH_RMII
+    bool applyAdvertise(); // announce the abilities of _mode / _full / _anyDuplex and renegotiate
+#endif
 
     OpenKNX::Network::Module &_module;
     uint8_t _mode = 0xFF; // 0xFF=unset(auto), 0=auto, 1=10, 2=100
     bool _full = false;   // half-duplex default when forced
+#ifdef OPENKNX_ETH_RMII
+    bool _anyDuplex = false; // speed limit only: announce both duplex modes, _full is ignored
+#endif
 
 #if defined(ARDUINO_ARCH_RP2040)
     W5500Phy _phy{ETH_SPI_INTERFACE, PIN_ETH_SS};

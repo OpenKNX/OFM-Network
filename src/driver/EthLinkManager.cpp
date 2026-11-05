@@ -21,6 +21,9 @@ void EthLinkManager::logStatus()
 {
 #if defined(ARDUINO_ARCH_ESP32)
     const char *s = (_mode == 0xFF || _mode == 0) ? "auto-negotiation"
+#ifdef OPENKNX_ETH_RMII
+                    : _anyDuplex                  ? (_mode == 1 ? "limited to 10 Mbit" : "limited to 100 Mbit")
+#endif
                     : (_mode == 1)                ? (_full ? "10 Mbit full-duplex" : "10 Mbit half-duplex")
                                                   : (_full ? "100 Mbit full-duplex" : "100 Mbit half-duplex");
     logInfoP("ETH link: %s", s);
@@ -33,7 +36,7 @@ void EthLinkManager::logStatus()
                                                     : (_full ? "100 Mbit full-duplex" : "100 Mbit half-duplex");
     logInfoP("Configured: %s", cfg);
 #endif
-    logInfoP("Usage: net eth <auto|10|100> [half|full]  (live only, until reboot - permanent: ETS LAN-Modus)");
+    logInfoP("Usage: net eth <auto|10|100> [half|full]  (live only, until reboot - permanent: LAN mode parameter)");
 }
 
 // Live one-line link status for 'net' / showNetworkInformations: "ETH link: X Mbit Y-duplex (fixed/auto)".
@@ -56,16 +59,28 @@ void EthLinkManager::logLinkInfo()
 // ETS owns the link mode; the console is the bench tool for trying one out before setting it in ETS.
 bool EthLinkManager::setMode(uint8_t mode, bool full)
 {
+#ifdef OPENKNX_ETH_RMII
+    const uint8_t oldMode = _mode;
+    const bool oldFull = _full, oldAny = _anyDuplex;
+#endif
     _mode = mode;
     _full = full;
+#ifndef OPENKNX_ETH_RMII
     const bool speed100 = (mode == 2);
+#endif
     bool ok = true;
 
 #if defined(ARDUINO_ARCH_ESP32)
 #ifdef OPENKNX_ETH_AUTO_FALLBACK
     if (mode == 0) resetLadder(); // 'auto' -> fresh search; fixed -> ladder gated off via _mode
 #endif
+#ifdef OPENKNX_ETH_RMII
+    _anyDuplex = false;
+    ok = applyAdvertise();
+    if (!ok) _mode = oldMode, _full = oldFull, _anyDuplex = oldAny; // the PHY keeps what it offered
+#else
     ok = (mode == 0) ? Esp32EthLink::setAutoNeg() : Esp32EthLink::forceMode(speed100, full);
+#endif
 #elif defined(ARDUINO_ARCH_RP2040)
 #ifdef OPENKNX_ETH_AUTO_FALLBACK
     if (mode == 0) resetLadder();
@@ -80,6 +95,41 @@ bool EthLinkManager::setMode(uint8_t mode, bool full)
         logInfoP("ETH link -> %s Mbit %s-duplex (live, until reboot%s)", mode == 1 ? "10" : "100", full ? "full" : "half", ok ? "" : " - FAILED");
     return ok;
 }
+
+#ifdef OPENKNX_ETH_RMII
+bool EthLinkManager::setModeAnyDuplex(uint8_t mode)
+{
+    const uint8_t oldMode = _mode;
+    const bool oldFull = _full, oldAny = _anyDuplex;
+    _mode = mode;
+    _full = false;
+    _anyDuplex = true;
+    const bool ok = applyAdvertise();
+    if (!ok) _mode = oldMode, _full = oldFull, _anyDuplex = oldAny; // the PHY keeps what it offered
+    logInfoP("ETH link -> limited to %s Mbit (live, until reboot%s)", mode == 1 ? "10" : "100", ok ? "" : " - FAILED");
+    return ok;
+}
+
+bool EthLinkManager::applyAdvertise()
+{
+    using namespace Esp32EthLink;
+    uint16_t abilities = ANAR_100_FULL | ANAR_100_HALF | ANAR_10_FULL | ANAR_10_HALF;
+    if (_mode == 1)
+        abilities = _anyDuplex ? (ANAR_10_FULL | ANAR_10_HALF) : (_full ? ANAR_10_FULL : ANAR_10_HALF);
+    else if (_mode == 2)
+        abilities = _anyDuplex ? (ANAR_100_FULL | ANAR_100_HALF) : (_full ? ANAR_100_FULL : ANAR_100_HALF);
+    return advertise(abilities);
+}
+
+void EthLinkManager::applyAfterBegin()
+{
+    if (_mode != 1 && _mode != 2) return;
+    if (applyAdvertise()) return;
+    logErrorP("ETH: could not limit the link speed");
+    _mode = 0;
+    _anyDuplex = false;
+}
+#endif // OPENKNX_ETH_RMII
 
 // ---- fixed-mode apply ------------------------------------------------------------------------------
 
@@ -149,10 +199,16 @@ void EthLinkManager::applyBeforeBegin()
     if (forced)
     {
         const int mbit = (mode == 2) ? 100 : 10;
+#ifdef OPENKNX_ETH_RMII
+        logInfoP("ETH: link limited to %d Mbit", mbit);
+        _anyDuplex = !full;
+        ETH.setAutoNegotiation(true); // the limit itself follows in applyAfterBegin()
+#else
         logInfoP("ETH: fixed link %d Mbit %s-duplex (autoneg off)", mbit, full ? "full" : "half");
         ETH.setAutoNegotiation(false);
         ETH.setLinkSpeed(mbit);
         ETH.setFullDuplex(full);
+#endif
     }
     else
     {
