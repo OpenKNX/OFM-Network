@@ -485,9 +485,9 @@ namespace OpenKNX
             openknxNetwork.webserver.addRoute(WEB_POST, "/filemanager/mkdir",
                                               [this](WebRequest& req, WebResponse& res) { handleMkdir(req, res); });
 #ifdef OPENKNX_WEBCLIENT_TEST
-            openknxNetwork.webserver.addRoute(WEB_POST, "/filemanager/fetch",
+            openknxNetwork.webserver.addLoopRoute(WEB_POST, "/filemanager/fetch",
                                               [this](WebRequest& q, WebResponse& r) { handleFetch(q, r); });
-            openknxNetwork.webserver.addRoute(WEB_GET, "/filemanager/fetch/status",
+            openknxNetwork.webserver.addLoopRoute(WEB_GET, "/filemanager/fetch/status",
                                               [this](WebRequest& q, WebResponse& r) { handleFetchStatus(q, r); });
 #endif
         }
@@ -859,8 +859,8 @@ namespace OpenKNX
         // ── Mkdir ────────────────────────────────────────────────────
 
 #ifdef OPENKNX_WEBCLIENT_TEST
-        // "Load from URL" in the file manager. Arms the download and answers at once -- the transfer
-        // runs in the network loop, so the web server is never held up. The browser polls /fetch/status.
+        // "Load from URL" in the file manager. Arms the download in the loop task (addLoopRoute) and answers at once;
+        // the transfer is not waited for. The browser polls /fetch/status.
         void FileManager::handleFetch(WebRequest& req, WebResponse& res)
         {
             int d = drvParse(req);
