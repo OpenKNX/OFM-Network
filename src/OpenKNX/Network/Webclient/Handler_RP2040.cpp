@@ -279,13 +279,41 @@ namespace OpenKNX
 
             // ─── BearSSL handshake over lwIP (incremental, non-blocking) ─────────────
 
+#ifdef OPENKNX_WEBCLIENT_LEAN_TLS
+            /** @brief TLS 1.2 with ECDHE and AES-GCM only; br_ssl_client_init_full() links DES, MD5, CCM, CBC and ChaCha as well. */
+            static void sslInitLean(br_ssl_client_context &cl)
+            {
+                static const uint16_t suites[] = {
+                    BR_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+                    BR_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+                    BR_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+                    BR_TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+                };
+                br_ssl_client_zero(&cl);
+                br_ssl_engine_set_versions(&cl.eng, BR_TLS12, BR_TLS12);
+                br_ssl_engine_set_suites(&cl.eng, suites, sizeof(suites) / sizeof(suites[0]));
+                br_ssl_engine_set_hash(&cl.eng, br_sha256_ID, &br_sha256_vtable);
+                br_ssl_engine_set_hash(&cl.eng, br_sha384_ID, &br_sha384_vtable);
+                br_ssl_engine_set_hash(&cl.eng, br_sha512_ID, &br_sha512_vtable);
+                br_ssl_engine_set_prf_sha256(&cl.eng, &br_tls12_sha256_prf);
+                br_ssl_engine_set_prf_sha384(&cl.eng, &br_tls12_sha384_prf);
+                br_ssl_engine_set_default_rsavrfy(&cl.eng);
+                br_ssl_engine_set_default_ecdsa(&cl.eng);
+                br_ssl_engine_set_default_aes_gcm(&cl.eng);
+            }
+#endif
+
             bool Handler::platformSslInit(Slot &s)
             {
                 s.brState = psram_new(BrState)();
                 if (!s.brState) return false;
 
                 br_ssl_client_context &cl = s.brState->client;
+#ifdef OPENKNX_WEBCLIENT_LEAN_TLS
+                sslInitLean(cl);
+#else
                 br_ssl_client_init_full(&cl, &s.brState->x509min, nullptr, 0);
+#endif
 
                 if (s.verifyMode == VerifyMode::CERTIFICATE && s.verify != nullptr)
                 {
@@ -307,7 +335,16 @@ namespace OpenKNX
                         s.brState = nullptr;
                         return false;
                     }
+#ifdef OPENKNX_WEBCLIENT_LEAN_TLS
+                    br_x509_minimal_init(&s.brState->x509min, &br_sha256_vtable, s.brState->ta.anchor(), 1);
+                    br_x509_minimal_set_hash(&s.brState->x509min, br_sha256_ID, &br_sha256_vtable);
+                    br_x509_minimal_set_hash(&s.brState->x509min, br_sha384_ID, &br_sha384_vtable);
+                    br_x509_minimal_set_hash(&s.brState->x509min, br_sha512_ID, &br_sha512_vtable);
+                    br_x509_minimal_set_rsa(&s.brState->x509min, br_ssl_engine_get_rsavrfy(&cl.eng));
+                    br_x509_minimal_set_ecdsa(&s.brState->x509min, br_ssl_engine_get_ec(&cl.eng), br_ssl_engine_get_ecdsa(&cl.eng));
+#else
                     br_x509_minimal_init_full(&s.brState->x509min, s.brState->ta.anchor(), 1);
+#endif
                     br_x509_minimal_set_time(&s.brState->x509min, days, seconds);
                     br_ssl_engine_set_x509(&cl.eng, &s.brState->x509min.vtable);
                 }
