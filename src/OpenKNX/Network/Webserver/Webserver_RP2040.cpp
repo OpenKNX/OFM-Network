@@ -902,6 +902,7 @@ namespace OpenKNX
                 else
                 {
                     // Accumulate into rxBuf until the header is complete
+                    const uint16_t rxBefore = s->rxLen;
                     for (pbuf* q = p; q != nullptr; q = q->next)
                     {
                         size_t space = sizeof(s->rxBuf) - s->rxLen - 1;
@@ -952,7 +953,16 @@ namespace OpenKNX
                                 {
                                     memcpy(s->bodyBuf, s->rxBuf + s->headerEnd, bodyInBuf);
                                     s->bodyReceived = bodyInBuf;
-                                    s->waitingForBody = true;
+                                    // the rest of a segment that did not fit into rxBuf
+                                    const uint16_t taken = (uint16_t)(s->rxLen - rxBefore);
+                                    uint32_t rest = p->tot_len > taken ? (uint32_t)(p->tot_len - taken) : 0;
+                                    if (rest > s->contentLength - s->bodyReceived)
+                                        rest = s->contentLength - s->bodyReceived;
+                                    s->bodyReceived += pbuf_copy_partial(p, s->bodyBuf + s->bodyReceived, (u16_t)rest, taken);
+                                    if (s->bodyReceived >= s->contentLength)
+                                        s->hasPendingRequest = true;
+                                    else
+                                        s->waitingForBody = true;
                                 }
                             }
                         }
