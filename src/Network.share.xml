@@ -380,11 +380,12 @@ Geräte, die ausschließlich per TP angebunden sind, benötigen hier keine Konfi
                             <Row Id="%AID%_PB-nnn_R-1" Name="Row1" />
                           </Rows>
                           <Columns>
-                            <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="46%" />
-                            <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="53%" />
+                            <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="45%" />
+                            <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="57%" />
                           </Columns>
-                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00000" Text="Übertragen" EventHandlerOnline="ConnectionOriented" EventHandler="sendWifiSettings" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
+                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00000" Text="Übertragen" Icon="lock-outline" EventHandlerOnline="ConnectionOriented" EventHandler="sendWifiSettings" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
                         </ParameterBlock>
+                        <ParameterSeparator Id="%AID%_PS-nnn" Text="Die Buttons sind nutzbar, sobald das Gerät programmiert ist." />
 
                       </ParameterBlock>
                     </when>

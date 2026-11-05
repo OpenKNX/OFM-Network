@@ -15,4 +15,4 @@ Die Tabelle zeigt bis zu 8 Netze, das stärkste zuerst:
 - Netz fehlt: außer Reichweite, versteckt oder nicht im 2,4-GHz-Band. Ein verstecktes Netz lässt sich trotzdem nutzen: Namen direkt in *Netzname (SSID)* eintragen.
 - Signal nur *mittel* oder *schwach*: Ein Access Point näher am Verteiler oder ein Verteiler, der nicht aus Metall ist, verbessert den Empfang.
 
-Der Knopf geht erst, wenn das Gerät programmiert ist; danach die Seite neu betreten.
+Der Button geht erst, wenn das Gerät programmiert ist; danach die Seite neu betreten.

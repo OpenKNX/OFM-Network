@@ -257,8 +257,9 @@
                             <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="45%" />
                             <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="57%" />
                           </Columns>
-                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00001" Text="WiFi-Netze suchen" EventHandlerOnline="ConnectionOriented" EventHandler="NETW_scan" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
+                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00001" Text="WiFi-Netze suchen" Icon="wifi-refresh" EventHandlerOnline="ConnectionOriented" EventHandler="NETW_scan" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
                         </ParameterBlock>
+                        <ParameterSeparator Id="%AID%_PS-nnn" Text="Die Buttons sind nutzbar, sobald das Gerät programmiert ist." />
                         <choose ParamRefId="%AID%_P-%TT%01006_R-%TT%0100600">
                           <when test="1">
                             <ParameterSeparator Id="%AID%_PS-nnn" Text="Kein Netz gefunden. Access Point näher an das Gerät bringen oder den Netznamen von Hand eintragen." UIHint="Information" />
@@ -298,7 +299,7 @@
                                 <ParameterRefRef RefId="%AID%_P-%TT%01021_R-%TT%0102100" Cell="2,3" HelpContext="NETW-Netze-suchen" />
                                 <ParameterRefRef RefId="%AID%_P-%TT%01031_R-%TT%0103100" Cell="2,4" HelpContext="NETW-Netze-suchen" />
                                 <ParameterRefRef RefId="%AID%_P-%TT%01041_R-%TT%0104100" Cell="2,5" HelpContext="NETW-Netze-suchen" />
-                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00011" Text="Übernehmen" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 1 }" Cell="2,6" />
+                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00011" Text="Übernehmen" Icon="wifi-check" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 1 }" Cell="2,6" />
                               </when>
                             </choose>
                             <choose ParamRefId="%AID%_P-%TT%01005_R-%TT%0100500">
@@ -308,7 +309,7 @@
                                 <ParameterRefRef RefId="%AID%_P-%TT%01022_R-%TT%0102200" Cell="3,3" HelpContext="NETW-Netze-suchen" />
                                 <ParameterRefRef RefId="%AID%_P-%TT%01032_R-%TT%0103200" Cell="3,4" HelpContext="NETW-Netze-suchen" />
                                 <ParameterRefRef RefId="%AID%_P-%TT%01042_R-%TT%0104200" Cell="3,5" HelpContext="NETW-Netze-suchen" />
-                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00012" Text="Übernehmen" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 2 }" Cell="3,6" />
+                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00012" Text="Übernehmen" Icon="wifi-check" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 2 }" Cell="3,6" />
                               </when>
                             </choose>
                             <choose ParamRefId="%AID%_P-%TT%01005_R-%TT%0100500">
@@ -318,7 +319,7 @@
                                 <ParameterRefRef RefId="%AID%_P-%TT%01023_R-%TT%0102300" Cell="4,3" HelpContext="NETW-Netze-suchen" />
                                 <ParameterRefRef RefId="%AID%_P-%TT%01033_R-%TT%0103300" Cell="4,4" HelpContext="NETW-Netze-suchen" />
                                 <ParameterRefRef RefId="%AID%_P-%TT%01043_R-%TT%0104300" Cell="4,5" HelpContext="NETW-Netze-suchen" />
-                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00013" Text="Übernehmen" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 3 }" Cell="4,6" />
+                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00013" Text="Übernehmen" Icon="wifi-check" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 3 }" Cell="4,6" />
                               </when>
                             </choose>
                             <choose ParamRefId="%AID%_P-%TT%01005_R-%TT%0100500">
@@ -328,7 +329,7 @@
                                 <ParameterRefRef RefId="%AID%_P-%TT%01024_R-%TT%0102400" Cell="5,3" HelpContext="NETW-Netze-suchen" />
                                 <ParameterRefRef RefId="%AID%_P-%TT%01034_R-%TT%0103400" Cell="5,4" HelpContext="NETW-Netze-suchen" />
                                 <ParameterRefRef RefId="%AID%_P-%TT%01044_R-%TT%0104400" Cell="5,5" HelpContext="NETW-Netze-suchen" />
-                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00014" Text="Übernehmen" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 4 }" Cell="5,6" />
+                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00014" Text="Übernehmen" Icon="wifi-check" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 4 }" Cell="5,6" />
                               </when>
                             </choose>
                             <choose ParamRefId="%AID%_P-%TT%01005_R-%TT%0100500">
@@ -338,7 +339,7 @@
                                 <ParameterRefRef RefId="%AID%_P-%TT%01025_R-%TT%0102500" Cell="6,3" HelpContext="NETW-Netze-suchen" />
                                 <ParameterRefRef RefId="%AID%_P-%TT%01035_R-%TT%0103500" Cell="6,4" HelpContext="NETW-Netze-suchen" />
                                 <ParameterRefRef RefId="%AID%_P-%TT%01045_R-%TT%0104500" Cell="6,5" HelpContext="NETW-Netze-suchen" />
-                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00015" Text="Übernehmen" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 5 }" Cell="6,6" />
+                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00015" Text="Übernehmen" Icon="wifi-check" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 5 }" Cell="6,6" />
                               </when>
                             </choose>
                             <choose ParamRefId="%AID%_P-%TT%01005_R-%TT%0100500">
@@ -348,7 +349,7 @@
                                 <ParameterRefRef RefId="%AID%_P-%TT%01026_R-%TT%0102600" Cell="7,3" HelpContext="NETW-Netze-suchen" />
                                 <ParameterRefRef RefId="%AID%_P-%TT%01036_R-%TT%0103600" Cell="7,4" HelpContext="NETW-Netze-suchen" />
                                 <ParameterRefRef RefId="%AID%_P-%TT%01046_R-%TT%0104600" Cell="7,5" HelpContext="NETW-Netze-suchen" />
-                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00016" Text="Übernehmen" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 6 }" Cell="7,6" />
+                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00016" Text="Übernehmen" Icon="wifi-check" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 6 }" Cell="7,6" />
                               </when>
                             </choose>
                             <choose ParamRefId="%AID%_P-%TT%01005_R-%TT%0100500">
@@ -358,7 +359,7 @@
                                 <ParameterRefRef RefId="%AID%_P-%TT%01027_R-%TT%0102700" Cell="8,3" HelpContext="NETW-Netze-suchen" />
                                 <ParameterRefRef RefId="%AID%_P-%TT%01037_R-%TT%0103700" Cell="8,4" HelpContext="NETW-Netze-suchen" />
                                 <ParameterRefRef RefId="%AID%_P-%TT%01047_R-%TT%0104700" Cell="8,5" HelpContext="NETW-Netze-suchen" />
-                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00017" Text="Übernehmen" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 7 }" Cell="8,6" />
+                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00017" Text="Übernehmen" Icon="wifi-check" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 7 }" Cell="8,6" />
                               </when>
                             </choose>
                             <choose ParamRefId="%AID%_P-%TT%01005_R-%TT%0100500">
@@ -368,7 +369,7 @@
                                 <ParameterRefRef RefId="%AID%_P-%TT%01028_R-%TT%0102800" Cell="9,3" HelpContext="NETW-Netze-suchen" />
                                 <ParameterRefRef RefId="%AID%_P-%TT%01038_R-%TT%0103800" Cell="9,4" HelpContext="NETW-Netze-suchen" />
                                 <ParameterRefRef RefId="%AID%_P-%TT%01048_R-%TT%0104800" Cell="9,5" HelpContext="NETW-Netze-suchen" />
-                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00018" Text="Übernehmen" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 8 }" Cell="9,6" />
+                                <Button Id="%AID%_MD-%TT%000100_B-%TT%00018" Text="Übernehmen" Icon="wifi-check" EventHandler="NETW_apply" EventHandlerParameters="{ &quot;Row&quot;: 8 }" Cell="9,6" />
                               </when>
                             </choose>
                             </ParameterBlock>
@@ -384,15 +385,11 @@
                             <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="45%" />
                             <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="57%" />
                           </Columns>
-                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00002" Text="Zugangsdaten übertragen" EventHandlerOnline="ConnectionOriented" EventHandler="NETW_sendClient" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
+                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00002" Text="Zugangsdaten übertragen" Icon="lock-outline" EventHandlerOnline="ConnectionOriented" EventHandler="NETW_sendClient" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
                         </ParameterBlock>
-                        <ParameterSeparator Id="%AID%_PS-nnn" Text="Die Schaltflächen gehen erst, wenn das Gerät programmiert ist; danach die Seite neu öffnen." UIHint="Information" />
                         <ParameterSeparator Id="%AID%_PS-nnn" Text="Einrichtung" UIHint="Headline" />
                         <ParameterRefRef RefId="%AID%_UP-%TT%00002_R-%TT%0000201" IndentLevel="1" HelpContext="NETW-Einrichtungs-WiFi" />
                         <choose ParamRefId="%AID%_UP-%TT%00002_R-%TT%0000201">
-                          <when test="1">
-                            <ParameterSeparator Id="%AID%_PS-nnn" Text="Kennt das Gerät noch kein WiFi, oder ist das Netz weg und die Prog-Taste wird gedrückt, öffnet es ein offenes WiFi mit dem Hostnamen. Darüber lassen sich Netz und Passwort im Browser eintragen." UIHint="Information" />
-                          </when>
                           <when test="0">
                             <ParameterSeparator Id="%AID%_PS-nnn" Text="Kein Einrichtungs-WiFi, auch nicht über die Prog-Taste. Fehlen die Zugangsdaten, hilft nur noch die Programmierung über TP (bei Geräten mit TP-Anschluss) oder die Konsole." UIHint="Error" />
                           </when>
@@ -433,9 +430,9 @@
                             <Column Id="%AID%_PB-nnn_C-1" Name="Col1" Width="45%" />
                             <Column Id="%AID%_PB-nnn_C-2" Name="Col2" Width="57%" />
                           </Columns>
-                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00003" Text="Passwort übertragen" EventHandlerOnline="ConnectionOriented" EventHandler="NETW_sendApPassword" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
+                          <Button Id="%AID%_MD-%TT%000100_B-%TT%00003" Text="Passwort übertragen" Icon="lock-outline" EventHandlerOnline="ConnectionOriented" EventHandler="NETW_sendApPassword" EventHandlerParameters="{ &quot;Module&quot;: %TT% }" Cell="1,2" />
                         </ParameterBlock>
-                        <ParameterSeparator Id="%AID%_PS-nnn" Text="Die Schaltfläche geht erst, wenn das Gerät programmiert ist; danach die Seite neu öffnen." UIHint="Information" />
+                        <ParameterSeparator Id="%AID%_PS-nnn" Text="Die Buttons sind nutzbar, sobald das Gerät programmiert ist." />
                       </when>
                     </choose>
                   </ParameterBlock>

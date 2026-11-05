@@ -39,3 +39,5 @@ Die Funktion *Netzwerkstatus* zeigt weiter den Netzwerkzustand insgesamt: grün 
 **Online-Funktionen**
 
 *WiFi-Netze suchen*, *Zugangsdaten übertragen* und *Passwort übertragen* arbeiten online mit dem Gerät, bei Geräten mit TP-Anschluss auch über TP. Voraussetzung: Das Gerät ist programmiert (physikalische Adresse und Applikation geladen). Danach die Seite neu betreten.
+
+**Zugangsdaten übertragen** und **Passwort übertragen** gehen erst, wenn das Gerät programmiert ist; danach die Seite neu öffnen.
