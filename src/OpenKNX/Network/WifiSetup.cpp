@@ -334,7 +334,7 @@ namespace OpenKNX
                 else
                     for (const uint8_t c : {6, 11}) // non-overlapping 20 MHz channels 1/6/11
                         if (score[c] < score[best]) best = c;
-                logInfoP("WiFi AP channel %u chosen from %d networks", (unsigned)best, (int)n);
+                logInfoP("WiFi AP: channel %u (%d nets)", (unsigned)best, (int)n);
                 startOwnAp(best);
             }
 #endif
@@ -342,7 +342,7 @@ namespace OpenKNX
             if (!_wifiScanToConsole) return;
             _wifiScanToConsole = false;
             std::sort(aps.begin(), aps.end(), [](const ScanAp &a, const ScanAp &b) { return a.rssi > b.rssi; });
-            logInfoP("WiFi scan: %u networks, %u access points", (unsigned)_wifiScanNets.size(), (unsigned)aps.size());
+            logInfoP("WiFi scan: %u nets, %u APs", (unsigned)_wifiScanNets.size(), (unsigned)aps.size());
             logIndentUp();
             for (const auto &a : aps)
             {
@@ -431,7 +431,7 @@ namespace OpenKNX
                     }
                     return;
                 }
-                logInfoP("WiFi: setup AP unused, joining \"%s\" again", _wifiSSID);
+                logInfoP("WiFi: setup AP unused, join \"%s\"", _wifiSSID);
                 leaveWifiAp();
                 return;
             }
@@ -452,7 +452,7 @@ namespace OpenKNX
 #ifndef OPENKNX_WIFI_5GHZ
                 if (band5)
                 {
-                    logErrorP("WiFi: no 5 GHz on this hardware, own AP on 2.4 GHz");
+                    logErrorP("WiFi: no 5 GHz, own AP on 2.4 GHz");
                     band5 = false;
                     channel = 0; // the byte holds a 5 GHz channel: pick a 2.4 GHz one
                 }
@@ -488,7 +488,7 @@ namespace OpenKNX
             }
             if (millis() - _wifiApSince < WIFI_AP_FALLBACK_MS) return;
             _wifiApChecked = true;
-            logInfoP("WiFi: no connection to \"%s\", falling back to the setup AP", _wifiSSID);
+            logInfoP("WiFi: no link to \"%s\", setup AP", _wifiSSID);
             startWifiAp();
         }
 
@@ -505,7 +505,7 @@ namespace OpenKNX
 #endif
             if (!ok)
             {
-                logErrorP("WiFi setup AP could not be started");
+                logErrorP("WiFi: setup AP failed");
                 return;
             }
             _wifiApActive = true;
@@ -525,7 +525,7 @@ namespace OpenKNX
 #else
             controlKnxIp(false);
 #endif
-            logInfoP("WiFi setup AP \"%s\" at http://%s/wifi", _hostName, WiFi.softAPIP().toString().c_str());
+            logInfoP("WiFi: setup AP \"%s\" http://%s/wifi", _hostName, WiFi.softAPIP().toString().c_str());
         }
 
 #ifdef ARDUINO_ARCH_RP2040
@@ -587,7 +587,7 @@ namespace OpenKNX
             psk[strcspn(psk, "\r")] = 0;
             if (strlen(psk) < 8)
             {
-                logErrorP("WiFi own AP not started: no password transferred");
+                logErrorP("WiFi: own AP needs a password");
                 return;
             }
 
@@ -605,7 +605,7 @@ namespace OpenKNX
             _wifiApSecurity = 3; // WifiScanNet::security: WPA2
             if (ok && !setApWpa2Only())
             {
-                logErrorP("WiFi own AP: WPA2 only not applied, restarting with WPA/WPA2");
+                logErrorP("WiFi: own AP falls back to WPA/WPA2");
                 WiFi.disconnectAP();
                 ok = WiFi.beginAP(ssid, psk, channel) == WL_CONNECTED;
                 _wifiApSecurity = 4; // WPA/WPA2
@@ -614,7 +614,7 @@ namespace OpenKNX
             memset(psk, 0, sizeof(psk));
             if (!ok)
             {
-                logErrorP("WiFi own AP \"%s\" could not be started", ssid);
+                logErrorP("WiFi: own AP \"%s\" failed", ssid);
                 return;
             }
             _wifiApActive = true;
@@ -625,7 +625,7 @@ namespace OpenKNX
             _wifiChannel = channel;
             strncpy(_wifiApSsid, ssid, sizeof(_wifiApSsid) - 1);
             joinApMulticast();
-            logInfoP("WiFi own AP \"%s\" on channel %u at %s", ssid, (unsigned)channel, WiFi.softAPIP().toString().c_str());
+            logInfoP("WiFi: own AP \"%s\" ch %u %s", ssid, (unsigned)channel, WiFi.softAPIP().toString().c_str());
         }
 
         /**
@@ -733,7 +733,7 @@ namespace OpenKNX
                 char from[18], to[18];
                 formatBssid(_wifiBssid, from);
                 formatBssid(bssid, to);
-                logInfoP("WiFi: AP changed %s -> %s (%d dBm, channel %u)", from, to, (int)_wifiRssi, (unsigned)_wifiChannel);
+                logInfoP("WiFi: AP %s -> %s (%d dBm, ch %u)", from, to, (int)_wifiRssi, (unsigned)_wifiChannel);
             }
             memcpy(_wifiBssid, bssid, sizeof(_wifiBssid));
         }
@@ -761,7 +761,7 @@ namespace OpenKNX
             {
                 if (!switchedOn) return;
                 _wifiProgPendingSince = millis() | 1; // 0 means none
-                logInfoP("WiFi: prog mode without a connection, setup AP in %us", (unsigned)(WIFI_PROG_AP_DELAY_MS / 1000));
+                logInfoP("WiFi: prog without link, setup AP in %us", (unsigned)(WIFI_PROG_AP_DELAY_MS / 1000));
                 return;
             }
             if (millis() - _wifiProgPendingSince < WIFI_PROG_AP_DELAY_MS) return;
@@ -822,7 +822,7 @@ namespace OpenKNX
                 {
                     // the leave did not take the link down: drop the join instead of running it on a later loss
                     _wifiJoinPending = false;
-                    logInfoP("WiFi: still connected, rejoin dropped");
+                    logInfoP("WiFi: connected, rejoin dropped");
                 }
 #endif
                 return;
@@ -850,20 +850,20 @@ namespace OpenKNX
                 if (joining && netif_is_link_up(sta)) return;
                 const bool failed = _wifiFailedSince != 0 && now - _wifiFailedSince >= WIFI_FAILED_HOLD_MS;
                 if (now - _wifiRetryAt < (failed ? WIFI_REJOIN_FAILED_MS : WIFI_REJOIN_MS)) return;
-                if (!_wifiRejoinLogged) logInfoP("WiFi: no connection, rejoining \"%s\"", _wifiSSID);
+                if (!_wifiRejoinLogged) logInfoP("WiFi: no link, rejoin \"%s\"", _wifiSSID);
                 _wifiRejoinLogged = true;
                 startWifiJoinCycle();
                 return;
             }
             // Interface gone (failed join request, or an AP ran): only begin() rebuilds it, and it can block
             if (now - _wifiRetryAt < WIFI_RETRY_MS) return;
-            logInfoP("WiFi: no connection, joining \"%s\" again", _wifiSSID);
+            logInfoP("WiFi: no link, join \"%s\"", _wifiSSID);
             beginWifiClient();
 #else
             // The driver retries only some disconnect reasons (not e.g. a password changed on the router)
             if (_wifiScanRunning || _wifiProgPendingSince != 0 || now - _wifiRetryAt < WIFI_RETRY_MS) return;
             _wifiRetryAt = now;
-            if (!_wifiRejoinLogged) logInfoP("WiFi: no connection, joining \"%s\" every %us", _wifiSSID, (unsigned)(WIFI_RETRY_MS / 1000));
+            if (!_wifiRejoinLogged) logInfoP("WiFi: no link, join \"%s\" every %us", _wifiSSID, (unsigned)(WIFI_RETRY_MS / 1000));
             _wifiRejoinLogged = true;
             WiFi.begin(_wifiSSID, _wifiPassphrase[0] ? _wifiPassphrase : nullptr); // returns at once on the ESP32
 #endif
@@ -1001,9 +1001,9 @@ namespace OpenKNX
                     break;
                 case WifiState::Offline:
                     if (info.ssid[0] && netDowntimeSec())
-                        logInfoP("State:     not connected to \"%s\", retrying (down %s)", info.ssid, humanDuration(netDowntimeSec()).c_str());
+                        logInfoP("State:     no link to \"%s\" (down %s)", info.ssid, humanDuration(netDowntimeSec()).c_str());
                     else if (info.ssid[0])
-                        logInfoP("State:     not connected to \"%s\", retrying", info.ssid);
+                        logInfoP("State:     no link to \"%s\"", info.ssid);
                     else
                         logInfoP("State:     no credentials");
                     break;
@@ -1042,7 +1042,7 @@ namespace OpenKNX
             }
             if (_wifiOwnAp || wifiOwnApConfigured())
             {
-                logErrorP("WiFi: an AP runs instead of the client");
+                logErrorP("WiFi: AP active, no client");
                 return;
             }
             if (_wifiScanRunning)
@@ -1055,11 +1055,11 @@ namespace OpenKNX
                 if (knx.configured() && !ParamNET_HTTP)
                 {
                     // as in loopWifiAp(): the AP started the web server, which cannot be stopped
-                    logInfoP("WiFi: closing the setup AP, restart");
+                    logInfoP("WiFi: closing setup AP, restart");
                     if (_restartTimer == 0) _restartTimer = delayTimerInit();
                     return;
                 }
-                logInfoP("WiFi: closing the setup AP, joining \"%s\"", _wifiSSID);
+                logInfoP("WiFi: closing setup AP, join \"%s\"", _wifiSSID);
                 leaveWifiAp();
                 return;
             }
@@ -1069,9 +1069,9 @@ namespace OpenKNX
 #else
             _wifiRetryAt = millis();
             if (WiFi.reconnect())
-                logInfoP("WiFi: reconnecting \"%s\"", _wifiSSID);
+                logInfoP("WiFi: reconnect \"%s\"", _wifiSSID);
             else
-                logErrorP("WiFi: reconnect refused by the driver (its own reconnect may be running)");
+                logErrorP("WiFi: reconnect refused");
 #endif
         }
 
@@ -1089,7 +1089,7 @@ namespace OpenKNX
 #ifdef ParamNETW_SetupAp
             if (knx.configured() && !ParamNETW_SetupAp)
             {
-                logErrorP("WiFi: setup AP switched off in the configuration");
+                logErrorP("WiFi: setup AP disabled");
                 return;
             }
 #endif
@@ -1098,7 +1098,7 @@ namespace OpenKNX
                 logErrorP("WiFi: scan running, try again");
                 return;
             }
-            if (_currentLinkState) logInfoP("WiFi: leaving \"%s\" for the setup AP", _wifiSSID);
+            if (_currentLinkState) logInfoP("WiFi: leaving \"%s\" for setup AP", _wifiSSID);
             _wifiProgPendingSince = 0;
             startWifiAp();
             if (!_wifiApActive) return;
@@ -1188,22 +1188,22 @@ namespace OpenKNX
             for (struct netif *n = netif_list; n != nullptr; n = n->next)
             {
                 if (ip4_addr_get_u32(netif_ip4_addr(n)) != apIp) continue;
-                if (!RP2040ArduinoPlatform::joinMulticastGroups(n)) logErrorP("WiFi AP: multicast join failed");
+                if (!RP2040ArduinoPlatform::joinMulticastGroups(n)) logErrorP("WiFi AP: multicast failed");
                 return;
             }
-            logErrorP("WiFi AP: interface not found for the multicast join");
+            logErrorP("WiFi AP: no multicast interface");
 #elif defined(ARDUINO_ARCH_ESP32)
             const int idx = esp_netif_get_netif_impl_index(WiFi.AP.netif());
             if (idx <= 0)
             {
-                logErrorP("WiFi AP: interface not found for the multicast join");
+                logErrorP("WiFi AP: no multicast interface");
                 return;
             }
             LOCK_TCPIP_CORE();
             struct netif *n = netif_get_by_index((u8_t)idx);
             const bool ok = n != nullptr && Esp32Platform::joinMulticastGroups(n);
             UNLOCK_TCPIP_CORE();
-            if (!ok) logErrorP("WiFi AP: multicast join failed");
+            if (!ok) logErrorP("WiFi AP: multicast failed");
 #endif
 #endif // USE_IP
         }
