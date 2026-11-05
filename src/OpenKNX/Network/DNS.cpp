@@ -59,15 +59,19 @@ namespace OpenKNX
                 s_pending.push_back({ip, std::move(cb)});
             }
 
+            /** @brief IPv4 answer as IPAddress; no answer or an IPv6 answer gives 0.0.0.0 ("not resolved"). */
+            static IPAddress toIp(const ip_addr_t* ipaddr)
+            {
+                if (!ipaddr || !IP_IS_V4(ipaddr))
+                    return IPAddress(0, 0, 0, 0);
+                const ip4_addr_t* ip4 = ip_2_ip4(ipaddr);
+                return IPAddress(ip4_addr1(ip4), ip4_addr2(ip4), ip4_addr3(ip4), ip4_addr4(ip4));
+            }
+
             static void dnsFoundCallback(const char*, const ip_addr_t* ipaddr, void* arg)
             {
                 auto* cb = static_cast<Callback*>(arg);
-                IPAddress ip;
-                if (ipaddr)
-                {
-                    const ip4_addr_t* ip4 = ip_2_ip4(ipaddr);
-                    ip = IPAddress(ip4_addr1(ip4), ip4_addr2(ip4), ip4_addr3(ip4), ip4_addr4(ip4));
-                }
+                const IPAddress ip = toIp(ipaddr);
                 enqueue(ip, std::move(*cb));
                 delete cb;
             }
@@ -88,13 +92,7 @@ namespace OpenKNX
 #endif
                 if (err == ERR_INPROGRESS) return;
 
-                IPAddress ip;
-                if (err == ERR_OK)
-                {
-                    const ip4_addr_t* ip4 = ip_2_ip4(&resolved);
-                    ip = IPAddress(ip4_addr1(ip4), ip4_addr2(ip4), ip4_addr3(ip4), ip4_addr4(ip4));
-                }
-                enqueue(ip, std::move(*cb));
+                enqueue(toIp(err == ERR_OK ? &resolved : nullptr), std::move(*cb));
                 delete cb;
             }
 
