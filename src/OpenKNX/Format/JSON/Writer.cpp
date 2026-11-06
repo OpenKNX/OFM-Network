@@ -15,52 +15,52 @@ namespace OpenKNX
             void Writer::appendCommaIfNeeded()
             {
                 if (_needsComma)
-                    _buf += ',';
+                    buffer() += ',';
             }
 
             void Writer::appendEscaped(const char* s, size_t len)
             {
-                _buf += '"';
+                buffer() += '"';
                 for (size_t i = 0; i < len; ++i)
                 {
                     unsigned char c = (unsigned char)s[i];
                     switch (c)
                     {
-                        case '"':  _buf += "\\\""; break;
-                        case '\\': _buf += "\\\\"; break;
-                        case '\n': _buf += "\\n";  break;
-                        case '\r': _buf += "\\r";  break;
-                        case '\t': _buf += "\\t";  break;
-                        case '\b': _buf += "\\b";  break;
-                        case '\f': _buf += "\\f";  break;
+                        case '"':  buffer() += "\\\""; break;
+                        case '\\': buffer() += "\\\\"; break;
+                        case '\n': buffer() += "\\n";  break;
+                        case '\r': buffer() += "\\r";  break;
+                        case '\t': buffer() += "\\t";  break;
+                        case '\b': buffer() += "\\b";  break;
+                        case '\f': buffer() += "\\f";  break;
                         default:
                             if (c < 0x20)
                             {
                                 char esc[7];
                                 snprintf(esc, sizeof(esc), "\\u%04X", c);
-                                _buf += esc;
+                                buffer() += esc;
                             }
                             else
                             {
-                                _buf += (char)c;
+                                buffer() += (char)c;
                             }
                             break;
                     }
                 }
-                _buf += '"';
+                buffer() += '"';
             }
 
             Writer& Writer::beginObject()
             {
                 appendCommaIfNeeded();
-                _buf += '{';
+                buffer() += '{';
                 _needsComma = false;
                 return *this;
             }
 
             Writer& Writer::endObject()
             {
-                _buf += '}';
+                buffer() += '}';
                 _needsComma = true;
                 return *this;
             }
@@ -68,14 +68,14 @@ namespace OpenKNX
             Writer& Writer::beginArray()
             {
                 appendCommaIfNeeded();
-                _buf += '[';
+                buffer() += '[';
                 _needsComma = false;
                 return *this;
             }
 
             Writer& Writer::endArray()
             {
-                _buf += ']';
+                buffer() += ']';
                 _needsComma = true;
                 return *this;
             }
@@ -84,7 +84,7 @@ namespace OpenKNX
             {
                 appendCommaIfNeeded();
                 appendEscaped(k, strlen(k));
-                _buf += ':';
+                buffer() += ':';
                 _needsComma = false;
                 return *this;
             }
@@ -112,7 +112,7 @@ namespace OpenKNX
                 appendCommaIfNeeded();
                 char buf[12];
                 snprintf(buf, sizeof(buf), "%" PRId32, v);
-                _buf += buf;
+                buffer() += buf;
                 _needsComma = true;
                 return *this;
             }
@@ -122,7 +122,7 @@ namespace OpenKNX
                 appendCommaIfNeeded();
                 char buf[12];
                 snprintf(buf, sizeof(buf), "%" PRIu32, v);
-                _buf += buf;
+                buffer() += buf;
                 _needsComma = true;
                 return *this;
             }
@@ -132,13 +132,13 @@ namespace OpenKNX
                 appendCommaIfNeeded();
                 if (std::isnan(v) || std::isinf(v))
                 {
-                    _buf += "null";
+                    buffer() += "null";
                 }
                 else
                 {
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%.*f", (int)decimals, v);
-                    _buf += buf;
+                    buffer() += buf;
                 }
                 _needsComma = true;
                 return *this;
@@ -147,7 +147,7 @@ namespace OpenKNX
             Writer& Writer::value(bool v)
             {
                 appendCommaIfNeeded();
-                _buf += v ? "true" : "false";
+                buffer() += v ? "true" : "false";
                 _needsComma = true;
                 return *this;
             }
@@ -155,7 +155,7 @@ namespace OpenKNX
             Writer& Writer::null()
             {
                 appendCommaIfNeeded();
-                _buf += "null";
+                buffer() += "null";
                 _needsComma = true;
                 return *this;
             }
@@ -168,9 +168,29 @@ namespace OpenKNX
             Writer& Writer::field(const char* k, bool v)            { return key(k).value(v); }
             Writer& Writer::fieldNull(const char* k)                 { return key(k).null(); }
 
-            const std::string& Writer::str() const  { return _buf; }
-            const char*        Writer::c_str() const { return _buf.c_str(); }
-            void               Writer::reset()       { _buf.clear(); _needsComma = false; }
+            Writer& Writer::operator=(const Writer& other)
+            {
+                if (this != &other)
+                {
+                    buffer() = other.buffer();
+                    _needsComma = other._needsComma;
+                }
+                return *this;
+            }
+
+            Writer& Writer::operator=(Writer&& other) noexcept
+            {
+                if (this != &other)
+                {
+                    buffer() = std::move(other.buffer());
+                    _needsComma = other._needsComma;
+                }
+                return *this;
+            }
+
+            const std::string& Writer::str() const  { return buffer(); }
+            const char*        Writer::c_str() const { return buffer().c_str(); }
+            void               Writer::reset()       { buffer().clear(); _needsComma = false; }
 
         } // namespace JSON
     } // namespace Format

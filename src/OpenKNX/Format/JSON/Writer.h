@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <string>
+#include <utility>
 
 namespace OpenKNX
 {
@@ -13,13 +14,24 @@ namespace OpenKNX
 
             class Writer
             {
-                std::string _buf;
+                std::string _ownedBuf;
+                std::string* _buf = &_ownedBuf;
                 bool _needsComma = false;
+
+                std::string& buffer() { return *_buf; }
+                const std::string& buffer() const { return *_buf; }
 
                 void appendCommaIfNeeded();
                 void appendEscaped(const char* s, size_t len);
 
               public:
+                                Writer() = default;
+                                explicit Writer(std::string& buffer) : _buf(&buffer) { buffer.clear(); }
+                                Writer(const Writer& other) : _ownedBuf(other.buffer()), _buf(&_ownedBuf), _needsComma(other._needsComma) {}
+                                Writer(Writer&& other) noexcept : _ownedBuf(std::move(other.buffer())), _buf(&_ownedBuf), _needsComma(other._needsComma) {}
+                                Writer& operator=(const Writer& other);
+                                Writer& operator=(Writer&& other) noexcept;
+
                 Writer& beginObject();
                 Writer& endObject();
                 Writer& beginArray();
