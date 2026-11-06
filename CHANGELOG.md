@@ -18,6 +18,7 @@ Web server, download, DNS, Ethernet and WiFi fixes on top of `ec/v0.9.0-beta.2`.
 * Fix (ESP32): httpd runs on the core without `loop()`, every wake by lwIP preempted it before
 * Fix (ESP32, RMII): a LAN mode limits what the PHY offers instead of forcing it; a LAN8720 in a fixed mode got no link after a restart or a cable re-plug. Console `net eth 10|100 [half|full]`
 * Fix (RP2040, WiFi): after the driver's own rejoin the link could read as up while no frame passed, until `net wifi reconnect`. The device asks the gateway by ARP 5 s after a link-up and about every 30 s; a gateway that answered once and stays silent for about 3 min starts one rejoin, the next only after a reply. `net wifi` shows the age of the last reply, the silent rounds and the received frames
+* Fix (RP2040): a WebSocket client that stopped reading, such as a sleeping browser tab, is reset; closed normally, its unsent data stayed in the lwIP memory and later page bodies no longer went out
 * Change (RP2040, WiFi): shorter console messages
 
 ## ec/v0.9.0-beta.2: 2026-10-30
