@@ -20,6 +20,7 @@
     #include "DeviceDisplay.h"
     #include "Widgets/WidgetNetSpeed.h"
     #include "Widgets/WidgetNetInfo.h"
+    #include "Widgets/NetworkMenu.h"
     #ifdef OPENKNX_WIFI_AP
         #include "Widgets/WidgetWifi.h"
     #endif
@@ -1361,6 +1362,8 @@ namespace OpenKNX
                 netInfo->setName("Network");
                 if (!openknxDisplayModule.tryAddWidget(netInfo))
                     logDebugP("WidgetNetInfo not registered (no display/manager)");
+                if (!registerNetworkMenu())
+                    logDebugP("Menu Network not registered (no menu registry)");
             }
 #endif
 #ifdef ARDUINO_ARCH_ESP32
