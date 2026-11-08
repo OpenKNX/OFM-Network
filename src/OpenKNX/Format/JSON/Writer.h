@@ -25,12 +25,12 @@ namespace OpenKNX
                 void appendEscaped(const char* s, size_t len);
 
               public:
-                                Writer() = default;
-                                explicit Writer(std::string& buffer) : _buf(&buffer) { buffer.clear(); }
-                                Writer(const Writer& other) : _ownedBuf(other.buffer()), _buf(&_ownedBuf), _needsComma(other._needsComma) {}
-                                Writer(Writer&& other) noexcept : _ownedBuf(std::move(other.buffer())), _buf(&_ownedBuf), _needsComma(other._needsComma) {}
-                                Writer& operator=(const Writer& other);
-                                Writer& operator=(Writer&& other) noexcept;
+                Writer() = default;
+                explicit Writer(std::string& buffer) : _buf(&buffer) { buffer.clear(); }
+                Writer(const Writer& other) : _ownedBuf(other.buffer()), _buf(&_ownedBuf), _needsComma(other._needsComma) {}
+                Writer(Writer&& other) noexcept : _ownedBuf(std::move(other.buffer())), _buf(&_ownedBuf), _needsComma(other._needsComma) {}
+                Writer& operator=(const Writer& other);
+                Writer& operator=(Writer&& other) noexcept;
 
                 Writer& beginObject();
                 Writer& endObject();
