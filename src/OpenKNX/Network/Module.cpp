@@ -1394,7 +1394,7 @@ namespace OpenKNX
                 storeLocalNetworkConfig();
             }
 #endif
-            if (_restartTimer > 0 && delayCheck(_restartTimer, 2000))
+            if (_restartTimer > 0 && !_otaActive && delayCheck(_restartTimer, 2000)) // not from the OTA progress callback
             {
                 openknx.restart();
             }
