@@ -182,7 +182,8 @@ namespace OpenKNX
             {
                 if (this != &other)
                 {
-                    buffer() = std::move(other.buffer());
+                    if (_buf != other._buf) // same string: moving it onto itself would empty it
+                        buffer() = std::move(other.buffer());
                     _needsComma = other._needsComma;
                 }
                 return *this;
