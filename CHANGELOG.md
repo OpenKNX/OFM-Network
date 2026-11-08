@@ -25,6 +25,8 @@ Web server, download, DNS, Ethernet and WiFi fixes on top of `ec/v0.9.0-beta.2`.
 * Fix (RP2040, WiFi): after the driver's own rejoin the link could read as up while no frame passed, until `net wifi reconnect`. The device asks the gateway by ARP 5 s after a link-up and about every 30 s; a gateway that answered once and stays silent for about 3 min starts one rejoin, the next only after a reply. `net wifi` shows the age of the last reply, the silent rounds and the received frames
 * Fix (RP2040): a WebSocket client that stopped reading, such as a sleeping browser tab, is reset; closed normally, its unsent data stayed in the lwIP memory and later page bodies no longer went out
 * Change (RP2040, WiFi): shorter console messages
+* Fix (RP2040): a connection without a free slot waits in the listen backlog for up to about 6 s instead of being reset at once; a page loaded without cache could stay without its script. Up to 4 connections wait, one pcb stays outside the web budget
+* Fix (application): the WiFi scan table shows the apply button in full; a network name estimated wider than 14 em is shortened for the table and the apply button takes the full name from eight hidden parameters
 
 ## ec/v0.9.0-beta.2: 2026-10-30
 
