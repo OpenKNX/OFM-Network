@@ -181,6 +181,7 @@
               <ParameterRef Id="%AID%_UP-%TT%00012_R-%TT%0001201" RefId="%AID%_UP-%TT%00012" />
               <ParameterRef Id="%AID%_UP-%TT%00013_R-%TT%0001301" RefId="%AID%_UP-%TT%00013" />
               <ParameterRef Id="%AID%_UP-%TT%00021_R-%TT%0002101" RefId="%AID%_UP-%TT%00021" />
+              <ParameterRef Id="%AID%_UP-%TT%00021_R-%TT%0002102" RefId="%AID%_UP-%TT%00021" Value="0.0.0.0" />
               <ParameterRef Id="%AID%_UP-%TT%00031_R-%TT%0003101" RefId="%AID%_UP-%TT%00031" />
               <ParameterRef Id="%AID%_UP-%TT%00032_R-%TT%0003201" RefId="%AID%_UP-%TT%00032" />
               <ParameterRef Id="%AID%_UP-%TT%00033_R-%TT%0003301" RefId="%AID%_UP-%TT%00033" />
@@ -237,7 +238,8 @@ Geräte, die ausschließlich per TP angebunden sind, benötigen hier keine Konfi
                     </choose>
                   </when>
                   <when test="!=%NET_IPConfigTool%"> <!-- router -->
-                    <ParameterSeparator Id="%AID%_PS-nnn" Text="IP-Einstellungen können im Eigenschaften Feld der ETS, Tab IP gesetzt werden." UIHint="Information" />
+                    <ParameterSeparator Id="%AID%_PS-nnn" Text="IP-Einstellungen können im Eigenschaften Feld der ETS, Tab IP gesetzt werden. Der Nameserver wird nur bei fester IP-Adresse verwendet, leer = Standardgateway." UIHint="Information" />
+                    <ParameterRefRef RefId="%AID%_UP-%TT%00021_R-%TT%0002102" IndentLevel="1" HelpContext="NET-IP-Adresse" />
                   </when>
                 </choose>
 

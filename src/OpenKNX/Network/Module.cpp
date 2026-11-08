@@ -382,10 +382,27 @@ namespace OpenKNX
                 delete[] friendlyNameRead; // propertyValueRead() allocates the buffer, we have to free it
             }
 
+#if defined(OPENKNX_NETWORK_USEIPPROP) && defined(ParamNET_NameserverAddress)
+            // The IP parameter object has no DNS: with a static address it comes from the application parameter.
+            if (_useStaticIP && knx.configured())
+                _staticNameServerIP = htonl(ParamNET_NameserverAddress);
+#endif
+
             // Reported only: with only manual assignment enabled the fixed address is used as set (03_08_02 8.5.1.4 Figure 42).
             if (_useStaticIP && !staticIpUsable(_staticLocalIP, _staticSubnetMask, _staticGatewayIP))
                 logErrorP("Static IP %s mask %s gateway %s may not work", dotted(_staticLocalIP).c_str(),
                           dotted(_staticSubnetMask).c_str(), dotted(_staticGatewayIP).c_str());
+#ifdef OPENKNX_NETWORK_USEIPPROP
+            if (_useStaticIP && (uint32_t)_staticNameServerIP != 0 && !unicastAddress(_staticNameServerIP))
+            {
+                logErrorP("DNS %s not usable, ignored", dotted(_staticNameServerIP).c_str());
+                _staticNameServerIP = IPAddress();
+            }
+            // Empty DNS: the gateway, if it is another host of the net (else none).
+            if (_useStaticIP && (uint32_t)_staticNameServerIP == 0 && hostOfNet(_staticGatewayIP, _staticLocalIP, _staticSubnetMask) &&
+                _staticGatewayIP != _staticLocalIP)
+                _staticNameServerIP = _staticGatewayIP;
+#endif
 
             // PID_IP_CAPABILITIES = which AUTOMATIC assignment methods this IP stack can do (03_08_03 2.5.7: bit0 BootP,
             // bit1 DHCP, bit2 AutoIP; manual is always implicit and has no bit). Set UNCONDITIONALLY: capabilities are
