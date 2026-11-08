@@ -1022,6 +1022,92 @@ namespace OpenKNX
             return ERR_OK;
         }
 
+        static void attachSlot(ConnSlot* s, tcp_pcb* pcb, Webserver* ws)
+        {
+            int slotIdx = (int)(s - g_slots); // save before memset zeros it
+            memset(s, 0, sizeof(*s));
+            s->idx = slotIdx;
+            s->pcb = pcb;
+            s->ws = ws;
+            s->state = CS_HTTP_RECV;
+            s->pollCount = 0;
+            s->lastPeerMs = millis();
+
+            tcp_arg(pcb, s);
+            tcp_recv(pcb, onRecv);
+            tcp_sent(pcb, onSent);
+            tcp_err(pcb, onErr);
+            tcp_poll(pcb, onPoll, 4); // ~2 s interval
+        }
+
+        // ── Waiting connections ───────────────────────────────────────────────
+        // A connection beyond the slots waits instead of being reset: a browser loads a page's assets over up to six
+        // connections and does not retry a script whose connection was reset. lwIP keeps the request (refused data)
+        // until loopPlatform() hands over a slot. The listen backlog equals MAX_WAITING, so lwIP drops a SYN beyond it
+        // and the client repeats the SYN; one pcb of the pool always stays free for MQTT, Notify and the webclient.
+        static constexpr int WAIT_ROOM = MEMP_NUM_TCP_PCB - MAX_CONN - 1;
+        static constexpr int MAX_WAITING = WAIT_ROOM < 1 ? 1 : WAIT_ROOM > 4 ? 4 : WAIT_ROOM;
+        static constexpr uint8_t WAIT_POLLS = 2; // aborted at the 3rd poll: about 5.5..6 s after the accept
+        struct Waiting
+        {
+            tcp_pcb* pcb;
+            Webserver* ws;
+            uint32_t seq;
+            uint8_t polls;
+        };
+        static Waiting g_waiting[MAX_WAITING];
+        static uint32_t g_waitSeq = 0;
+
+        static err_t onWaitRecv(void* arg, tcp_pcb* pcb, pbuf* p, err_t)
+        {
+            if (p) return ERR_MEM; // lwIP keeps it and offers it again once the connection has a slot
+            ((Waiting*)arg)->pcb = nullptr; // closed by the client while waiting
+            detach(pcb);
+            if (tcp_close(pcb) == ERR_OK) return ERR_OK;
+            tcp_abort(pcb);
+            return ERR_ABRT;
+        }
+
+        static void onWaitErr(void* arg, err_t)
+        {
+            if (arg) ((Waiting*)arg)->pcb = nullptr; // lwIP has freed the pcb
+        }
+
+        static err_t onWaitPoll(void* arg, tcp_pcb* pcb)
+        {
+            Waiting* w = (Waiting*)arg;
+            if (++w->polls <= WAIT_POLLS) return ERR_OK;
+            w->pcb = nullptr;
+            detach(pcb);
+            tcp_abort(pcb); // also releases its place in the listen backlog
+            return ERR_ABRT;
+        }
+
+        // Gives free slots to the waiting connections, oldest first; runs under the lwIP lock.
+        static void admitWaiting()
+        {
+            for (;;)
+            {
+                Waiting* oldest = nullptr;
+                for (int i = 0; i < MAX_WAITING; i++)
+                    if (g_waiting[i].pcb && (!oldest || (int32_t)(g_waiting[i].seq - oldest->seq) < 0)) oldest = &g_waiting[i];
+                if (!oldest) return;
+                ConnSlot* s = freeSlot();
+                if (!s) return;
+                tcp_pcb* pcb = oldest->pcb;
+                oldest->pcb = nullptr;
+                if (pcb->refused_data && (pcb->refused_data->flags & PBUF_FLAG_TCP_FIN))
+                {
+                    // request and FIN while waiting: a close from the fast timer would free the pcb under lwIP's feet
+                    detach(pcb);
+                    tcp_abort(pcb);
+                    continue;
+                }
+                tcp_backlog_accepted(pcb);
+                attachSlot(s, pcb, oldest->ws); // the kept request arrives from lwIP's fast timer
+            }
+        }
+
         static err_t onAccept(void* arg, tcp_pcb* newpcb, err_t err)
         {
             if (err != ERR_OK || newpcb == nullptr) return ERR_VAL;
@@ -1029,25 +1115,28 @@ namespace OpenKNX
             ConnSlot* s = freeSlot();
             if (!s)
             {
-                tcp_abort(newpcb);
-                return ERR_ABRT;
+                // only an HTTP slot frees up soon; with every slot a WebSocket the reset comes at once, as before
+                bool http = false;
+                for (int i = 0; i < MAX_CONN && !http; i++)
+                    http = g_slots[i].pcb && g_slots[i].state != CS_WS;
+                Waiting* w = nullptr;
+                for (int i = 0; i < MAX_WAITING && !w && http; i++)
+                    if (!g_waiting[i].pcb) w = &g_waiting[i];
+                if (!w)
+                {
+                    tcp_abort(newpcb);
+                    return ERR_ABRT;
+                }
+                *w = {newpcb, (Webserver*)arg, ++g_waitSeq, 0};
+                tcp_backlog_delayed(newpcb);
+                tcp_arg(newpcb, w);
+                tcp_recv(newpcb, onWaitRecv);
+                tcp_err(newpcb, onWaitErr);
+                tcp_poll(newpcb, onWaitPoll, 4);
+                return ERR_OK;
             }
 
-            int slotIdx = (int)(s - g_slots); // save before memset zeros it
-            memset(s, 0, sizeof(*s));
-            s->idx = slotIdx;
-            s->pcb = newpcb;
-            s->ws = (Webserver*)arg;
-            s->state = CS_HTTP_RECV;
-            s->pollCount = 0;
-            s->lastPeerMs = millis();
-
-            tcp_arg(newpcb, s);
-            tcp_recv(newpcb, onRecv);
-            tcp_sent(newpcb, onSent);
-            tcp_err(newpcb, onErr);
-            tcp_poll(newpcb, onPoll, 4); // ~2 s interval
-
+            attachSlot(s, newpcb, (Webserver*)arg);
             return ERR_OK;
         }
 
@@ -1070,7 +1159,7 @@ namespace OpenKNX
                 tcp_close(pcb);
                 return;
             }
-            _listenPcb = tcp_listen(pcb); // frees pcb on success only
+            _listenPcb = tcp_listen_with_backlog(pcb, MAX_WAITING); // frees pcb on success only
             if (!_listenPcb)
             {
                 logError("Webserver", "tcp_listen failed");
@@ -1092,6 +1181,15 @@ namespace OpenKNX
 
         void Webserver::loopPlatform()
         {
+            bool waiting = false; // unlocked peek, as below: the lock only when a waiting connection can get a slot
+            for (int i = 0; i < MAX_WAITING && !waiting; i++)
+                waiting = g_waiting[i].pcb != nullptr;
+            if (waiting && freeSlot())
+            {
+                LWIPMutex lock;
+                admitWaiting();
+            }
+
             for (int ci = 0; ci < MAX_CONN; ci++)
             {
                 // Unlocked peek: every lock release runs the async context's workers.
