@@ -135,17 +135,13 @@ namespace OpenKNX
     namespace Network
     {
 
-#ifdef DEVICE_DISPLAY_MODULE // on-device IP override: a DeviceDisplay network-settings-menu-only feature
-        struct NetworkLocalOverride
+#ifdef DEVICE_DISPLAY_MODULE
+        struct LocalIpConfig // on-device IP setting (DeviceDisplay menu), as in the IP tab of the KNX project
         {
-            bool overrideActive = false; // false -> ignore this block, keep ETS/property config
-            bool useStaticIP = false;    // true -> use ip/subnet/gateway/dns below; false -> DHCP
-            uint8_t ip[4] = {0, 0, 0, 0};
-            uint8_t subnet[4] = {0, 0, 0, 0};
-            uint8_t gateway[4] = {0, 0, 0, 0};
-            uint8_t dns[4] = {0, 0, 0, 0};
-            uint8_t linkMode = 0; // 0=auto, 1=10 Mbit, 2=100 Mbit (matches EthLinkManager::setMode())
-            uint8_t version = 1;  // on-flash format version of this block
+            bool useStaticIP = false; // false -> DHCP
+            IPAddress ip;
+            IPAddress subnet;
+            IPAddress gateway;
         };
 #endif
 
@@ -245,16 +241,19 @@ namespace OpenKNX
 #endif
 
 #ifdef DEVICE_DISPLAY_MODULE
-            // On-device IP override (DeviceDisplay network-settings menu). Setters only mutate the in-RAM
-            // _localOverride; call applyLocalNetworkConfig() afterwards to persist + apply.
-            void setLocalStaticIpEnabled(bool enabled); // true -> static IP from the setters below; false -> DHCP
-            void setLocalIp(IPAddress ip);
-            void setLocalSubnet(IPAddress subnet);
-            void setLocalGateway(IPAddress gateway);
-            void setLocalDns(IPAddress dns);
-            void applyLocalNetworkConfig(bool rebootToTakeEffect); // persist + apply (live re-init or planned reboot)
-            bool localOverrideActive();                            // true while the local override supersedes ETS config
-            bool localUsesStaticIp();                              // intended mode: override's when active, else _useStaticIP
+            // On-device IP setting (DeviceDisplay menu): written to the IP parameter object, then restart.
+            enum class LocalApplyResult : uint8_t
+            {
+                Restarting,    // stored, restart in ~2 s
+                Unchanged,     // equals the stored setting: nothing stored
+                NotProgrammed, // device not programmed yet
+                Invalid,       // static address, mask or gateway not usable
+                SetupActive,   // WiFi access point running: the shown values are the AP's
+                NotSupported,  // the address comes from application parameters
+                UpdateRunning  // a firmware update is running
+            };
+            LocalApplyResult applyLocalNetworkConfig(const LocalIpConfig &cfg);
+            bool localUsesStaticIp(); // running mode
             // OTA status for the display's system-priority OTA overlay.
             bool otaActive() const { return _otaActive; }       // true between OTA onStart and onEnd/onError
             uint8_t otaProgress() const { return _otaPercent; } // fine OTA progress 0..100 (every chunk)
@@ -565,17 +564,20 @@ namespace OpenKNX
 #if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
             void processAfterStartupDelay() override; // EthLinkManager re-applies the persisted fixed link mode
 #endif
-            // Module-flash persistence. writeFlash()/readFlash() chain the EthLink fixed-mode bytes first
-            // (RP2040+W5500 only), then the local-override block (DEVICE_DISPLAY only). size==0 -> defaults.
+            // Module-flash persistence: the EthLink bytes (RP2040+W5500 only). size==0 -> defaults.
             uint16_t flashSize() override;
             void writeFlash() override;
             void readFlash(const uint8_t *data, const uint16_t size) override;
+            static bool unicastAddress(IPAddress a);
+            static std::string dotted(IPAddress a); // "a.b.c.d", also for 0.0.0.0 and 255.255.255.255
+            static bool hostOfNet(IPAddress address, IPAddress ipAddress, IPAddress subnetMask); // unicast, in the net, not net/broadcast
+            static bool staticIpUsable(IPAddress ipAddress, IPAddress subnetMask, IPAddress gatewayIp);
+            static bool staticIpValid(IPAddress ipAddress, IPAddress subnetMask, IPAddress gatewayIp);
 #ifdef DEVICE_DISPLAY_MODULE
-            NetworkLocalOverride _localOverride;                    // RAM copy; (de)serialized to module flash
-            static constexpr uint16_t NET_OVERRIDE_FLASH_SIZE = 20; // version + 2 flags + 4*4 addr bytes + linkMode
-            void writeLocalOverrideFlash();
-            void readLocalOverrideFlash(const uint8_t *data, const uint16_t size);
-            static void prefillZeroQuartet(uint8_t (&quartet)[4], IPAddress live);
+            LocalIpConfig _localPending;     // accepted by applyLocalNetworkConfig(), written by loop()
+            bool _localWritePending = false; // loop() still has to write _localPending
+            bool _localApplied = false;      // an Apply was accepted, the restart is pending
+            void storeLocalNetworkConfig();
 #endif
 
 #ifdef OPENKNX_PING

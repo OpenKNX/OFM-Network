@@ -381,29 +381,10 @@ namespace OpenKNX
                 delete[] friendlyNameRead; // propertyValueRead() allocates the buffer, we have to free it
             }
 
-#ifdef DEVICE_DISPLAY_MODULE
-            // Local on-device override (DeviceDisplay menu) wins over the ETS/property result computed above.
-            if (_localOverride.overrideActive)
-            {
-                _useStaticIP = _localOverride.useStaticIP;
-                logInfoP("Local network override active (%s)", _useStaticIP ? "static IP" : "DHCP");
-                if (_useStaticIP)
-                {
-                    _staticLocalIP = IPAddress(_localOverride.ip[0], _localOverride.ip[1], _localOverride.ip[2], _localOverride.ip[3]);
-                    _staticSubnetMask = IPAddress(_localOverride.subnet[0], _localOverride.subnet[1], _localOverride.subnet[2], _localOverride.subnet[3]);
-                    _staticGatewayIP = IPAddress(_localOverride.gateway[0], _localOverride.gateway[1], _localOverride.gateway[2], _localOverride.gateway[3]);
-                    _staticNameServerIP = IPAddress(_localOverride.dns[0], _localOverride.dns[1], _localOverride.dns[2], _localOverride.dns[3]);
-                }
-                else
-                {
-                    // DHCP: clear any previously computed static config so initIp() requests a lease.
-                    _staticLocalIP = IPAddress();
-                    _staticSubnetMask = IPAddress();
-                    _staticGatewayIP = IPAddress();
-                    _staticNameServerIP = IPAddress();
-                }
-            }
-#endif
+            // Reported only: with only manual assignment enabled the fixed address is used as set (03_08_02 8.5.1.4 Figure 42).
+            if (_useStaticIP && !staticIpUsable(_staticLocalIP, _staticSubnetMask, _staticGatewayIP))
+                logErrorP("Static IP %s mask %s gateway %s may not work", dotted(_staticLocalIP).c_str(),
+                          dotted(_staticSubnetMask).c_str(), dotted(_staticGatewayIP).c_str());
 
             // PID_IP_CAPABILITIES = which AUTOMATIC assignment methods this IP stack can do (03_08_03 2.5.7: bit0 BootP,
             // bit1 DHCP, bit2 AutoIP; manual is always implicit and has no bit). Set UNCONDITIONALLY: capabilities are
@@ -416,7 +397,7 @@ namespace OpenKNX
             SetByteProperty(PID_IP_CAPABILITIES, 2); // DHCP only
 #endif
 
-            // PID_CURRENT_IP_ASSIGNMENT_METHOD reflects the FINAL resolved assignment method actually IN USE (override included).
+            // PID_CURRENT_IP_ASSIGNMENT_METHOD reflects the assignment method actually in use.
             if (_useStaticIP)
                 SetByteProperty(PID_CURRENT_IP_ASSIGNMENT_METHOD, 1); // manual / static
             else
@@ -451,7 +432,7 @@ namespace OpenKNX
             RP2040ArduinoPlatform::setReceivePoll([]() { openknxNetwork.pollEthernetRx(); });
 #endif
 #ifdef ARDUINO_ARCH_ESP32
-            // Once only: applyLocalNetworkConfig() re-runs loadSettings(), and a second callback would be appended.
+            // Here, not in loadSettings(): a second registration would append a second callback.
 #if defined(ESP_IDF_VERSION) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
             ::Network.onEvent([](arduino_event_id_t event) -> void { openknxNetwork.esp32NetworkEvent(event); });
 #else
@@ -1385,6 +1366,13 @@ namespace OpenKNX
 #ifdef ARDUINO_ARCH_ESP32
             // Ahead of the _powerSave/_otaActive returns, so KNX-IP follows the network in every state.
             if (_knxIpRequest.load(std::memory_order_relaxed)) applyKnxIpRequest();
+#endif
+#ifdef DEVICE_DISPLAY_MODULE
+            if (_localWritePending && !_otaActive) // not from the OTA progress callback, which runs this loop nested
+            {
+                _localWritePending = false;
+                storeLocalNetworkConfig();
+            }
 #endif
             if (_restartTimer > 0 && delayCheck(_restartTimer, 2000))
             {
@@ -2557,132 +2545,131 @@ namespace OpenKNX
         static constexpr uint16_t NET_ETHLINK_FLASH_SIZE = 0; // no shared ETH-link block on this platform
 #endif
 
-        // Total module-flash footprint: shared ETH-link bytes (if any) + the local-override block (DEVICE_DISPLAY).
+        // A longer block of older firmware (with the former display IP override) is read with its stored size and ignored.
         uint16_t Module::flashSize()
         {
-#ifdef DEVICE_DISPLAY_MODULE
-            return NET_ETHLINK_FLASH_SIZE + NET_OVERRIDE_FLASH_SIZE;
-#else
             return NET_ETHLINK_FLASH_SIZE;
-#endif
         }
 
-        // Write order MUST match read order: EthLink bytes first (unchanged), then the override block.
         void Module::writeFlash()
         {
 #if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
             _ethLink.writeFlash();
-#endif
-#ifdef DEVICE_DISPLAY_MODULE
-            writeLocalOverrideFlash();
 #endif
         }
 
         void Module::readFlash(const uint8_t *data, const uint16_t size)
         {
 #if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
-            _ethLink.readFlash(data, size); // tolerates a shorter/older blob (keeps its own defaults)
-#endif
-#ifdef DEVICE_DISPLAY_MODULE
-            if (size <= NET_ETHLINK_FLASH_SIZE)
-                readLocalOverrideFlash(nullptr, 0); // no override bytes stored -> defined defaults
-            else
-                readLocalOverrideFlash(data + NET_ETHLINK_FLASH_SIZE, size - NET_ETHLINK_FLASH_SIZE);
+            _ethLink.readFlash(data, size);
+#else
+            (void)data;
+            (void)size;
 #endif
         }
 
+        bool Module::unicastAddress(IPAddress a)
+        {
+            return a[0] != 0 && a[0] != 127 && a[0] < 224;
+        }
+
+        std::string Module::dotted(IPAddress a)
+        {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%u.%u.%u.%u", (unsigned)a[0], (unsigned)a[1], (unsigned)a[2], (unsigned)a[3]);
+            return std::string(buf);
+        }
+
+        static uint32_t be32(IPAddress a)
+        {
+            return ((uint32_t)a[0] << 24) | ((uint32_t)a[1] << 16) | ((uint32_t)a[2] << 8) | a[3];
+        }
+
+        bool Module::hostOfNet(IPAddress address, IPAddress ipAddress, IPAddress subnetMask)
+        {
+            const uint32_t a = be32(address), ip = be32(ipAddress), mask = be32(subnetMask), host = ~mask;
+            return unicastAddress(address) && (a & mask) == (ip & mask) && (a & host) != 0 && (a & host) != host;
+        }
+
+        /**
+         * @brief False for a static setting that does not work as a host on the network: no unicast host address or a non-contiguous, /31 or /32 mask.
+         * @details On RP2040 also a mask whose first octet is not 255 or a set gateway (not 0 or 255.255.255.255) outside
+         *          the net: arduino-pico then reorders the arguments or leaves the address unset.
+         */
+        bool Module::staticIpUsable(IPAddress ipAddress, IPAddress subnetMask, IPAddress gatewayIp)
+        {
+            const uint32_t ip = be32(ipAddress), mask = be32(subnetMask), host = ~mask;
+            if (mask == 0 || (host & (host + 1)) != 0 || host < 3) return false; // non-contiguous, /31, /32
+            if (!unicastAddress(ipAddress) || (ip & host) == 0 || (ip & host) == host) return false;
+#ifdef ARDUINO_ARCH_RP2040
+            const uint32_t gw = be32(gatewayIp); // 255.255.255.255 counts as unset there, like 0
+            if ((mask >> 24) != 0xFF || (gw != 0 && gw != 0xFFFFFFFF && (gw & mask) != (ip & mask))) return false;
+#else
+            (void)gatewayIp;
+#endif
+            return true;
+        }
+
+        /**
+         * @brief Check for an entered static setting: usable, mask starting with 255 and a gateway (0 = none) that is a host of that net.
+         */
+        bool Module::staticIpValid(IPAddress ipAddress, IPAddress subnetMask, IPAddress gatewayIp)
+        {
+            if (!staticIpUsable(ipAddress, subnetMask, gatewayIp)) return false;
+            if ((be32(subnetMask) >> 24) != 0xFF) return false;
+            return (uint32_t)gatewayIp == 0 || (gatewayIp != ipAddress && hostOfNet(gatewayIp, ipAddress, subnetMask));
+        }
+
 #ifdef DEVICE_DISPLAY_MODULE
-        void Module::writeLocalOverrideFlash()
+        bool Module::localUsesStaticIp() { return _useStaticIP; }
+
+        /**
+         * @brief Accept a setting for the IP tab properties (assignment method, address, mask, gateway); loop() writes it and restarts.
+         * @details The next download of the IP settings overwrites it; the DNS stays the application parameter.
+         */
+        Module::LocalApplyResult Module::applyLocalNetworkConfig(const LocalIpConfig &cfg)
         {
-            openknx.flash.writeByte(_localOverride.version);
-            openknx.flash.writeByte(_localOverride.overrideActive ? 1 : 0);
-            openknx.flash.writeByte(_localOverride.useStaticIP ? 1 : 0);
-            for (uint8_t i = 0; i < 4; i++) openknx.flash.writeByte(_localOverride.ip[i]);
-            for (uint8_t i = 0; i < 4; i++) openknx.flash.writeByte(_localOverride.subnet[i]);
-            for (uint8_t i = 0; i < 4; i++) openknx.flash.writeByte(_localOverride.gateway[i]);
-            for (uint8_t i = 0; i < 4; i++) openknx.flash.writeByte(_localOverride.dns[i]);
-            openknx.flash.writeByte(_localOverride.linkMode);
+#ifndef OPENKNX_NETWORK_USEIPPROP
+            (void)cfg;
+            return LocalApplyResult::NotSupported; // the address comes from application parameters
+#else
+            if (_localApplied) return LocalApplyResult::Restarting; // stored, the restart is pending
+#ifdef OPENKNX_WIFI_AP
+            if (_wifiApActive) return LocalApplyResult::SetupActive; // the shown values are the AP's
+#endif
+            if (_otaActive) return LocalApplyResult::UpdateRunning;
+            if (!knx.configured()) return LocalApplyResult::NotProgrammed;
+            const bool storedStatic = GetByteProperty(PID_IP_ASSIGNMENT_METHOD) == 1;
+            if (cfg.useStaticIP == storedStatic &&
+                (!cfg.useStaticIP || (GetIpProperty(PID_IP_ADDRESS) == cfg.ip && GetIpProperty(PID_SUBNET_MASK) == cfg.subnet &&
+                                      GetIpProperty(PID_DEFAULT_GATEWAY) == cfg.gateway)))
+                return (!cfg.useStaticIP || staticIpUsable(cfg.ip, cfg.subnet, cfg.gateway)) ? LocalApplyResult::Unchanged
+                                                                                          : LocalApplyResult::Invalid;
+            if (cfg.useStaticIP && !staticIpValid(cfg.ip, cfg.subnet, cfg.gateway)) return LocalApplyResult::Invalid;
+
+            _localPending = cfg; // written by loop(): a flash write from the menu callback restarts the RP2040
+            _localApplied = true;
+            _localWritePending = true;
+            return LocalApplyResult::Restarting;
+#endif
         }
 
-        void Module::readLocalOverrideFlash(const uint8_t *data, const uint16_t size)
+        /**
+         * @brief Write the setting accepted by applyLocalNetworkConfig() and start the restart timer; called from loop().
+         */
+        void Module::storeLocalNetworkConfig()
         {
-            _localOverride = NetworkLocalOverride(); // reset to defined defaults first
-            if (data == nullptr || size < NET_OVERRIDE_FLASH_SIZE) return;
-            if (data[0] != _localOverride.version) return; // unknown format version -> keep defaults
-
-            uint16_t p = 0;
-            _localOverride.version = data[p++];
-            _localOverride.overrideActive = (data[p++] != 0);
-            _localOverride.useStaticIP = (data[p++] != 0);
-            for (uint8_t i = 0; i < 4; i++) _localOverride.ip[i] = data[p++];
-            for (uint8_t i = 0; i < 4; i++) _localOverride.subnet[i] = data[p++];
-            for (uint8_t i = 0; i < 4; i++) _localOverride.gateway[i] = data[p++];
-            for (uint8_t i = 0; i < 4; i++) _localOverride.dns[i] = data[p++];
-            _localOverride.linkMode = data[p++];
-        }
-
-        void Module::prefillZeroQuartet(uint8_t (&quartet)[4], IPAddress live)
-        {
-            if (quartet[0] || quartet[1] || quartet[2] || quartet[3]) return; // already set -> keep it
-            for (uint8_t i = 0; i < 4; i++) quartet[i] = live[i];
-        }
-
-        void Module::setLocalStaticIpEnabled(bool enabled)
-        {
-            _localOverride.overrideActive = true;
-            _localOverride.useStaticIP = enabled;
-            if (enabled) // pre-fill any still-zero quartet from the live lease so the menu shows sane values
+            const LocalIpConfig &cfg = _localPending;
+            SetByteProperty(PID_IP_ASSIGNMENT_METHOD, cfg.useStaticIP ? 1 : 4); // 03_08_03 2.5.6: 1 = manual, 4 = DHCP
+            if (cfg.useStaticIP)
             {
-                prefillZeroQuartet(_localOverride.ip, localIP());
-                prefillZeroQuartet(_localOverride.subnet, subnetMask());
-                prefillZeroQuartet(_localOverride.gateway, gatewayIP());
-                prefillZeroQuartet(_localOverride.dns, nameServerIP());
+                SetIpProperty(PID_IP_ADDRESS, cfg.ip);
+                SetIpProperty(PID_SUBNET_MASK, cfg.subnet);
+                SetIpProperty(PID_DEFAULT_GATEWAY, cfg.gateway);
             }
-        }
-
-        void Module::setLocalIp(IPAddress ip)
-        {
-            _localOverride.overrideActive = true;
-            for (uint8_t i = 0; i < 4; i++) _localOverride.ip[i] = ip[i];
-        }
-
-        void Module::setLocalSubnet(IPAddress subnet)
-        {
-            _localOverride.overrideActive = true;
-            for (uint8_t i = 0; i < 4; i++) _localOverride.subnet[i] = subnet[i];
-        }
-
-        void Module::setLocalGateway(IPAddress gateway)
-        {
-            _localOverride.overrideActive = true;
-            for (uint8_t i = 0; i < 4; i++) _localOverride.gateway[i] = gateway[i];
-        }
-
-        void Module::setLocalDns(IPAddress dns)
-        {
-            _localOverride.overrideActive = true;
-            for (uint8_t i = 0; i < 4; i++) _localOverride.dns[i] = dns[i];
-        }
-
-        bool Module::localOverrideActive() { return _localOverride.overrideActive; }
-
-        bool Module::localUsesStaticIp()
-        {
-            return _localOverride.overrideActive ? _localOverride.useStaticIP : _useStaticIP;
-        }
-
-        void Module::applyLocalNetworkConfig(bool rebootToTakeEffect)
-        {
-            logInfoP("Apply local network override (%s, %s)", _localOverride.useStaticIP ? "static IP" : "DHCP",
-                     rebootToTakeEffect ? "reboot" : "live");
-            openknx.flash.save(true); // persist now -> triggers Module::writeFlash() (EthLink bytes + override block)
-            if (rebootToTakeEffect)
-            {
-                _restartTimer = delayTimerInit(); // loop() reboots ~2 s later
-                return;
-            }
-            loadSettings();
-            resetNetwork();
+            logInfoP("Store IP setting (%s), restart", cfg.useStaticIP ? "static IP" : "DHCP");
+            knx.bau().writeMemory();
+            _restartTimer = delayTimerInit(); // restart ~2 s later
         }
 #endif // DEVICE_DISPLAY_MODULE
 
