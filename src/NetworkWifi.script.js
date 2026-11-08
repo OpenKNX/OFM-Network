@@ -118,13 +118,30 @@ function NETW_fillRows(device, progress, nets, done) {
     for (; row < nets.length && row < 8; row++) {
         var rssi = nets[row].rssi;
         var sec = nets[row].security;
-        device.getParameterByName("NETW_ScanSsid" + (row + 1)).value = nets[row].ssid;
+        device.getParameterByName("NETW_ScanFull" + (row + 1)).value = nets[row].ssid;
+        // Name for the table column: cut to an estimated width (1/100 em, 14 em) and end with "...", never after a high surrogate;
+        // at least 3 characters go, so the result is never longer than the name (the parameter holds 32).
+        var ssid = nets[row].ssid, shown = ssid, w = 0, cut = -1;
+        for (var i = 0; i < ssid.length; i++) {
+            var ch = ssid.charAt(i), c = ssid.charCodeAt(i);
+            var cw = (c >= 0xDC00 && c <= 0xDFFF) ? 0 : "iljI|!'.,:;".indexOf(ch) >= 0 ? 25 : "ftr -()[]".indexOf(ch) >= 0 ? 33
+                   : "MWmw@".indexOf(ch) >= 0 ? 90 : (ch >= "a" && ch <= "z") ? 52 : (ch >= "0" && ch <= "9") ? 55 : 62;
+            if (cut < 0 && cw > 0 && w + cw + 75 > 1400) cut = i;
+            w += cw;
+        }
+        if (w > 1400) {
+            if (cut > ssid.length - 3) cut = ssid.length - 3;
+            while (cut > 0 && ssid.charCodeAt(cut - 1) >= 0xD800 && ssid.charCodeAt(cut - 1) <= 0xDBFF) cut--;
+            shown = ssid.substring(0, cut) + "...";
+        }
+        device.getParameterByName("NETW_ScanSsid" + (row + 1)).value = shown;
         device.getParameterByName("NETW_ScanSig" + (row + 1)).value = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1;
         device.getParameterByName("NETW_ScanInfo" + (row + 1)).value = rssi + " dBm";
         device.getParameterByName("NETW_ScanChan" + (row + 1)).value = "" + nets[row].channel;
         device.getParameterByName("NETW_ScanSec" + (row + 1)).value = (sec <= 7) ? sec : 255;
     }
     for (var r = row; r < 8; r++) {
+        device.getParameterByName("NETW_ScanFull" + (r + 1)).value = "";
         device.getParameterByName("NETW_ScanSsid" + (r + 1)).value = "";
         device.getParameterByName("NETW_ScanInfo" + (r + 1)).value = "";
         device.getParameterByName("NETW_ScanChan" + (r + 1)).value = "";
@@ -138,9 +155,11 @@ function NETW_fillRows(device, progress, nets, done) {
     progress.setText(row == 0 ? "Kein Netz gefunden." : row + " Netze gefunden.");
 }
 
-// Takes the network name of the chosen row and clears the list; a new scan brings it back.
+// Takes the full network name of the chosen row and clears the list; a new scan brings it back.
+// A list scanned before ScanFull existed has the full name in ScanSsid only.
 function NETW_apply(device, online, progress, context) {
-    var ssid = device.getParameterByName("NETW_ScanSsid" + context.Row).value;
+    var ssid = device.getParameterByName("NETW_ScanFull" + context.Row).value;
+    if (!ssid) ssid = device.getParameterByName("NETW_ScanSsid" + context.Row).value;
     if (!ssid) return;
     device.getParameterByName("NETW_ClientSsid").value = ssid;
     NETW_fillRows(device, progress, [], false);

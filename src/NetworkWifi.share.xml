@@ -162,6 +162,15 @@
               <Parameter Id="%AID%_P-%TT%01056" Name="ScanSig6" ParameterType="%AID%_PT-NetwSignal" Text="" Value="0" />
               <Parameter Id="%AID%_P-%TT%01057" Name="ScanSig7" ParameterType="%AID%_PT-NetwSignal" Text="" Value="0" />
               <Parameter Id="%AID%_P-%TT%01058" Name="ScanSig8" ParameterType="%AID%_PT-NetwSignal" Text="" Value="0" />
+              <!-- full network name per row; ScanSsid holds the name shortened for the table -->
+              <Parameter Id="%AID%_P-%TT%01061" Name="ScanFull1" ParameterType="%AID%_PT-NetwSsid" Text="" Value="" Access="None" />
+              <Parameter Id="%AID%_P-%TT%01062" Name="ScanFull2" ParameterType="%AID%_PT-NetwSsid" Text="" Value="" Access="None" />
+              <Parameter Id="%AID%_P-%TT%01063" Name="ScanFull3" ParameterType="%AID%_PT-NetwSsid" Text="" Value="" Access="None" />
+              <Parameter Id="%AID%_P-%TT%01064" Name="ScanFull4" ParameterType="%AID%_PT-NetwSsid" Text="" Value="" Access="None" />
+              <Parameter Id="%AID%_P-%TT%01065" Name="ScanFull5" ParameterType="%AID%_PT-NetwSsid" Text="" Value="" Access="None" />
+              <Parameter Id="%AID%_P-%TT%01066" Name="ScanFull6" ParameterType="%AID%_PT-NetwSsid" Text="" Value="" Access="None" />
+              <Parameter Id="%AID%_P-%TT%01067" Name="ScanFull7" ParameterType="%AID%_PT-NetwSsid" Text="" Value="" Access="None" />
+              <Parameter Id="%AID%_P-%TT%01068" Name="ScanFull8" ParameterType="%AID%_PT-NetwSsid" Text="" Value="" Access="None" />
             </Parameters>
             <ParameterRefs>
               <ParameterRef Id="%AID%_UP-%TT%00001_R-%TT%0000101" RefId="%AID%_UP-%TT%00001" />
@@ -218,6 +227,14 @@
               <ParameterRef Id="%AID%_P-%TT%01056_R-%TT%0105600" RefId="%AID%_P-%TT%01056" Access="Read" />
               <ParameterRef Id="%AID%_P-%TT%01057_R-%TT%0105700" RefId="%AID%_P-%TT%01057" Access="Read" />
               <ParameterRef Id="%AID%_P-%TT%01058_R-%TT%0105800" RefId="%AID%_P-%TT%01058" Access="Read" />
+              <ParameterRef Id="%AID%_P-%TT%01061_R-%TT%0106100" RefId="%AID%_P-%TT%01061" />
+              <ParameterRef Id="%AID%_P-%TT%01062_R-%TT%0106200" RefId="%AID%_P-%TT%01062" />
+              <ParameterRef Id="%AID%_P-%TT%01063_R-%TT%0106300" RefId="%AID%_P-%TT%01063" />
+              <ParameterRef Id="%AID%_P-%TT%01064_R-%TT%0106400" RefId="%AID%_P-%TT%01064" />
+              <ParameterRef Id="%AID%_P-%TT%01065_R-%TT%0106500" RefId="%AID%_P-%TT%01065" />
+              <ParameterRef Id="%AID%_P-%TT%01066_R-%TT%0106600" RefId="%AID%_P-%TT%01066" />
+              <ParameterRef Id="%AID%_P-%TT%01067_R-%TT%0106700" RefId="%AID%_P-%TT%01067" />
+              <ParameterRef Id="%AID%_P-%TT%01068_R-%TT%0106800" RefId="%AID%_P-%TT%01068" />
             </ParameterRefs>
             <ComObjectTable>
             </ComObjectTable>
@@ -237,6 +254,14 @@
                 <ParameterRefRef RefId="%AID%_P-%TT%01000_R-%TT%0100000" />
                 <ParameterRefRef RefId="%AID%_P-%TT%01005_R-%TT%0100500" />
                 <ParameterRefRef RefId="%AID%_P-%TT%01006_R-%TT%0100600" />
+                <ParameterRefRef RefId="%AID%_P-%TT%01061_R-%TT%0106100" />
+                <ParameterRefRef RefId="%AID%_P-%TT%01062_R-%TT%0106200" />
+                <ParameterRefRef RefId="%AID%_P-%TT%01063_R-%TT%0106300" />
+                <ParameterRefRef RefId="%AID%_P-%TT%01064_R-%TT%0106400" />
+                <ParameterRefRef RefId="%AID%_P-%TT%01065_R-%TT%0106500" />
+                <ParameterRefRef RefId="%AID%_P-%TT%01066_R-%TT%0106600" />
+                <ParameterRefRef RefId="%AID%_P-%TT%01067_R-%TT%0106700" />
+                <ParameterRefRef RefId="%AID%_P-%TT%01068_R-%TT%0106800" />
                 <ParameterRefRef RefId="%AID%_P-%TT%01001_R-%TT%0100100" IndentLevel="1" HelpContext="NETW-WiFi" />
               </ParameterBlock>
               <!-- WiFi page, shown with "WiFi-Schnittstelle: Ja" -->
@@ -280,12 +305,12 @@
                                 <Row Id="%AID%_PB-nnn_R-9" Name="Net8" />
                               </Rows>
                               <Columns>
-                                <Column Id="%AID%_PB-nnn_C-1" Name="Ssid"   Width="35%" />
+                                <Column Id="%AID%_PB-nnn_C-1" Name="Ssid"   Width="34%" />
                                 <Column Id="%AID%_PB-nnn_C-2" Name="Signal" Width="10%" />
                                 <Column Id="%AID%_PB-nnn_C-3" Name="Pegel"  Width="10%" />
-                                <Column Id="%AID%_PB-nnn_C-4" Name="Kanal"  Width="8%" />
-                                <Column Id="%AID%_PB-nnn_C-5" Name="Sicher" Width="15%" />
-                                <Column Id="%AID%_PB-nnn_C-6" Name="Button" Width="20%" />
+                                <Column Id="%AID%_PB-nnn_C-4" Name="Kanal"  Width="7%" />
+                                <Column Id="%AID%_PB-nnn_C-5" Name="Sicher" Width="14%" />
+                                <Column Id="%AID%_PB-nnn_C-6" Name="Button" Width="25%" />
                               </Columns>
                               <ParameterSeparator Id="%AID%_PS-nnn" Text="Netzname (SSID)" UIHint="Headline" Cell="1,1" />
                               <ParameterSeparator Id="%AID%_PS-nnn" Text="Signal"     UIHint="Headline" Cell="1,2" />
