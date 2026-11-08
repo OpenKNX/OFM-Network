@@ -326,7 +326,7 @@ namespace OpenKNX
             // object tables. Gated on it, a master reset with erase code 06h (reset links) took a statically
             // addressed device to DHCP -- a link reset must not move the device.
             logInfoP("Read ip settings from properties");
-            _useStaticIP = GetByteProperty(PID_IP_ASSIGNMENT_METHOD) == 1; // see 2.5.6 of 03_08_03
+            _useStaticIP = manualAssignment(GetByteProperty(PID_IP_ASSIGNMENT_METHOD));
             if (_useStaticIP)
             {
                 _staticGatewayIP = GetIpProperty(PID_DEFAULT_GATEWAY);
@@ -2588,6 +2588,16 @@ namespace OpenKNX
 #endif
         }
 
+        /**
+         * @brief Fixed address from PID_IP_ASSIGNMENT_METHOD (03_08_03 2.5.6: 1 manual, 2 BootP, 4 DHCP, 8 AutoIP).
+         * @details 03_08_02 8.5.1.4 Figure 42: manual without BootP/DHCP uses the fixed address. Every other value runs
+         *          DHCP (AutoIP as built); the fallback to the fixed address when DHCP fails is not implemented.
+         */
+        bool Module::manualAssignment(uint8_t method)
+        {
+            return (method & 0x01) && !(method & 0x06);
+        }
+
         bool Module::unicastAddress(IPAddress a)
         {
             return a[0] != 0 && a[0] != 127 && a[0] < 224;
@@ -2659,7 +2669,7 @@ namespace OpenKNX
 #endif
             if (_otaActive) return LocalApplyResult::UpdateRunning;
             if (!knx.configured()) return LocalApplyResult::NotProgrammed;
-            const bool storedStatic = GetByteProperty(PID_IP_ASSIGNMENT_METHOD) == 1;
+            const bool storedStatic = manualAssignment(GetByteProperty(PID_IP_ASSIGNMENT_METHOD));
             if (cfg.useStaticIP == storedStatic &&
                 (!cfg.useStaticIP || (GetIpProperty(PID_IP_ADDRESS) == cfg.ip && GetIpProperty(PID_SUBNET_MASK) == cfg.subnet &&
                                       GetIpProperty(PID_DEFAULT_GATEWAY) == cfg.gateway)))

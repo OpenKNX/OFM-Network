@@ -568,6 +568,7 @@ namespace OpenKNX
             uint16_t flashSize() override;
             void writeFlash() override;
             void readFlash(const uint8_t *data, const uint16_t size) override;
+            static bool manualAssignment(uint8_t method); // fixed address per PID_IP_ASSIGNMENT_METHOD
             static bool unicastAddress(IPAddress a);
             static std::string dotted(IPAddress a); // "a.b.c.d", also for 0.0.0.0 and 255.255.255.255
             static bool hostOfNet(IPAddress address, IPAddress ipAddress, IPAddress subnetMask); // unicast, in the net, not net/broadcast
