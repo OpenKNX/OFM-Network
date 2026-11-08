@@ -4,6 +4,11 @@
 
 Web server, download, DNS, Ethernet and WiFi fixes on top of `ec/v0.9.0-beta.2`.
 
+* Change (DeviceDisplay): this module registers the menu "Network" itself (DHCP, address, mask, gateway; DNS shown only). Apply writes the setting to the IP parameter object like the IP tab of the project (assignment method, address, mask, gateway), then the device restarts; the separate override block in the module flash is gone and an override stored before is ignored. Without `OPENKNX_NETWORK_USEIPPROP` or while the WiFi access point runs the menu shows the values only
+* Feature (application): with the IP tab (`NET_IPConfigTool`), the parameter "Nameserver" is shown, empty by default. With a static address the device uses it, an empty field uses the gateway when that is another host of the net; before, such a device had no DNS. In an existing project check the field, it may still hold the former default 192.168.178.1
+* Fix: `PID_IP_ASSIGNMENT_METHOD` is read as enabled methods (03_08_02 8.5.1.4 Figure 42): manual without BootP/DHCP uses the fixed address, before only the value 1 did
+* Change: a static setting from the project that cannot work as a host is named in the log; the device uses it as set
+* Fix: a pending restart waits while a network OTA runs; before it could cut the transfer
 * Feature: `addLoopRoute()` runs a route in the loop task. On ESP32 httpd has its own task, and a handler touching loop state raced with it; 503 after 3 s untaken, or at once when the loop does not run
 * Fix: the URL download of the file manager is armed in the loop task, the `/prog` route applies in the loop task
 * Fix (DNS): an IPv6 or missing answer counts as not resolved and gives 0.0.0.0; a v6 answer was read as a v4 address
