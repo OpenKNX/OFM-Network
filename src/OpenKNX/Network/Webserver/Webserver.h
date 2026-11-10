@@ -44,6 +44,12 @@
 // pool -- a client without a cursor would loop reconnecting in silence.
 #define WS_MAX_CLIENTS OPENKNX_WEBSERVER_MAX_CONN
 
+// ESP32: most open pages (WebSockets) at once, each holds heap; one more gets close 1013 and
+// shows "busy". Unset = only the slot pool limits them.
+#if defined(OPENKNX_WEBSOCKET_MAX) && (OPENKNX_WEBSOCKET_MAX < 1 || OPENKNX_WEBSOCKET_MAX > WS_MAX_CLIENTS)
+#error "OPENKNX_WEBSOCKET_MAX must be 1..OPENKNX_WEBSERVER_MAX_CONN"
+#endif
+
 // Sendequeue: ein Ring für alle Clients (Senderichtung). Nicht zu verwechseln mit
 // OPENKNX_WEBSOCKET_RX_CAP, das den Empfangs-Sammelpuffer je Verbindung begrenzt.
 // Dimensionierend ist der Schwall pro Tick, nicht die Dauerlast.

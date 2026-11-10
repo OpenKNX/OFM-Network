@@ -8,6 +8,7 @@
     let ws = null;
     let state = null; // last state reported to the registrants, null = nothing yet
     let why = '';     // why the last 'closed' happened -- tells browser verdict from device close
+    let busy = false; // the device refused this page: too many pages open (close 1013)
     let openedAt = 0;
     let delay = 1000;
     let lastRx = 0;
@@ -23,8 +24,9 @@
 
     // Edge-triggered: with the network down every reconnect attempt fails again, and
     // reporting that as a fresh event filled the console with one gap marker per try.
-    function fire(next, reason) {
-        if (next === state) return;
+    function fire(next, reason, refused) {
+        if (next === state && !!refused === busy) return;
+        busy = !!refused;
         state = next;
         why = reason || '';
         stateCbs.forEach(function (cb) { try { cb(next, why); } catch (e) {} });
@@ -40,7 +42,7 @@
     // onclose waits for a handshake that never comes -- up to the TCP timeout. Reporting
     // and reconnecting must not wait for that, or the page shows "connected" for another
     // 20 seconds after the device is gone.
-    function fail(reason) {
+    function fail(reason, refused) {
         if (!ws) return;
         const dead = ws;
         ws = null; // beat() and send() must see "no socket" from here on
@@ -49,7 +51,7 @@
         pingAt = 0;
         if (openedAt) reason = 'nach ' + ((nowMs() - openedAt) / 1000).toFixed(1) + ' s: ' + reason;
         openedAt = 0;
-        fire('closed', reason);
+        fire('closed', reason, refused);
         reconnect();
     }
 
@@ -67,12 +69,13 @@
             return;
         }
         ws.onopen = function () {
-            delay = 1000;
             lastRx = lastTick = openedAt = nowMs();
             pingAt = 0;
-            fire('open');
         };
+        // 'open' and the reset of the backoff wait for the first message: a refused page (close 1013) gets none
         ws.onmessage = function (e) {
+            delay = 1000;
+            fire('open');
             lastRx = nowMs();
             pingAt = 0;
             let key, data;
@@ -93,6 +96,7 @@
         };
         // 1006 without a close frame is the device (or the network) dropping the TCP link.
         ws.onclose = function (e) {
+            if (e.code === 1013) return fail('Gerät beschäftigt: zu viele Seiten offen', true);
             fail((openedAt ? 'vom Gerät geschlossen (' : 'Verbindungsaufbau fehlgeschlagen (') + e.code + ')');
         };
     }
@@ -122,7 +126,7 @@
         need: function (key, ask) {
             const el = document.createElement('div');
             let t = 0, rx = -1e4;
-            function paint() { el.textContent = state === 'open' ? 'Lade Daten …' : 'Verbinde …'; }
+            function paint() { el.textContent = state === 'open' ? 'Lade Daten …' : busy ? 'Gerät beschäftigt: zu viele Seiten offen' : 'Verbinde …'; }
             function tick() {
                 t = setTimeout(tick, 1500);
                 if (state === 'open' && nowMs() - rx > 1500) ask();
@@ -209,7 +213,7 @@
         const dot = $('ws-dot');
         const open = state === 'open';
         if (dot) dot.className = 'prog-dot ' + (open ? 'dot-green' : 'dot-red');
-        text('ws-text', open ? 'Verbunden' : 'Getrennt');
+        text('ws-text', open ? 'Verbunden' : busy ? 'Beschäftigt' : 'Getrennt');
         const t = $('ws-text');
         if (t) t.title = open ? '' : reason;
     });

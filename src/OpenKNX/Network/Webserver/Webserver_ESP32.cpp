@@ -240,13 +240,6 @@ namespace OpenKNX
             int fd = httpd_req_to_sockfd(req);
             std::string uri = req->uri;
 
-            // Zuerst aus httpds Poll-Set lösen, sonst hält httpd die WS-Bytes für einen
-            // neuen HTTP-Request. Vor dem 101, damit ein Fehler hier noch eine normale
-            // HTTP-Fehlerantwort erlaubt.
-            httpd_req_t* async = nullptr;
-            if (httpd_req_async_handler_begin(req, &async) != ESP_OK)
-                return false;
-
             char resp[256];
             int rLen = snprintf(resp, sizeof(resp),
                                 "HTTP/1.1 101 Switching Protocols\r\n"
@@ -254,6 +247,30 @@ namespace OpenKNX
                                 "Connection: Upgrade\r\n"
                                 "Sec-WebSocket-Accept: %s\r\n\r\n",
                                 accept);
+#ifdef OPENKNX_WEBSOCKET_MAX
+            size_t pages;
+            {
+                WsStateGuard guard(wsObj);
+                pages = g_wsSessions.size();
+            }
+            if (pages >= OPENKNX_WEBSOCKET_MAX)
+            {
+                // one page too many: close 1013 (try again later) right after the handshake, httpd closes the socket
+                static const uint8_t busy[] = {0x88, 0x02, 0x03, 0xF5};
+                send(fd, resp, rLen, MSG_NOSIGNAL);
+                send(fd, busy, sizeof(busy), MSG_NOSIGNAL);
+                httpd_sess_trigger_close(req->handle, fd);
+                logWarning("Webserver", "WS refused: %u pages open", (unsigned)pages);
+                return true;
+            }
+#endif
+
+            // Take the socket out of httpd's poll set first, or httpd reads the WS bytes as a new
+            // HTTP request. Before the 101, so a failure here can still answer with a plain HTTP error.
+            httpd_req_t* async = nullptr;
+            if (httpd_req_async_handler_begin(req, &async) != ESP_OK)
+                return false;
+
             send(fd, resp, rLen, MSG_NOSIGNAL);
 
             // TCP keepalive — detect silently dead peers within ~9 s
