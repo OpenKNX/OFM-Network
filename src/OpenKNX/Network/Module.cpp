@@ -11,6 +11,7 @@
 #if defined(KNX_IP_LAN) || defined(KNX_IP_WIFI)
     #include <lwip/igmp.h>
     #include <lwip/netif.h>
+    #include <lwip/etharp.h>
     #ifdef ARDUINO_ARCH_ESP32
         #include <esp_netif.h>
         #include <lwip/tcpip.h>
@@ -134,6 +135,93 @@ WiFiUDP Udp;
 #pragma warn "Unsupported platform"
 #endif
 
+bool openknxLinkInUse()
+{
+#if defined(KNX_TUNNELING) && (MASK_VERSION == 0x091A || MASK_VERSION == 0x07B0)
+    IpTunnelServer &ts = knx.bau().getIpTunnelServer();
+    #ifdef OPENKNX_HW_BUSMON
+    if (ts.busMonitorActive()) return true;
+    #endif
+    return ts.tunnelCount() > 0;
+#else
+    return false;
+#endif
+}
+
+#ifdef OPENKNX_NET_GW_WATCH
+// What the watch takes from received frames; frames that still arrive do not prove that ours leave (see checkGatewayWatch).
+static volatile uint32_t s_gwAddr = 0;     // gateway asked
+static uint8_t s_gwMac[6] = {};            // its MAC, from its reply
+static volatile uint32_t s_gwReplyAt = 0;  // last reply of the gateway, for the console
+static volatile uint32_t s_gwHeard = 0;    // a host of our or the gateway's subnet heard since the last round
+static volatile uint32_t s_gwFrames = 0;   // frames received, for the console
+static volatile bool s_gwAlive = false;    // a frame of the gateway since the last round: it is on
+static volatile bool s_gwAnyReply = false; // an ARP reply to us in this round
+static volatile bool s_gwGwReply = false;  // the gateway's reply in this round
+static void gwSeeFrame(const struct pbuf *p, const struct netif *inp)
+{
+    s_gwFrames = s_gwFrames + 1;
+    const uint8_t *f = (const uint8_t *)p->payload;
+    if (p->len < 42) return;
+    // any frame of it, also forwarded traffic; not its DHCP replies (UDP source port 67)
+    if (memcmp(f + 6, s_gwMac, 6) == 0 && !(f[12] == 0x08 && f[13] == 0x00 && f[23] == 17 && f[34] == 0 && f[35] == 67)) s_gwAlive = true;
+    if (f[12] != 0x08) return;
+    uint32_t sender;
+    if (f[13] == 0x06) // ARP request or reply
+    {
+        memcpy(&sender, f + 28, sizeof(sender));
+        if (f[20] == 0 && f[21] == 2 && memcmp(f, inp->hwaddr, 6) == 0)
+        {
+            s_gwAnyReply = true;
+            if (sender == s_gwAddr)
+            {
+                memcpy(s_gwMac, f + 22, sizeof(s_gwMac));
+                s_gwGwReply = true;
+                s_gwAlive = true;
+                s_gwReplyAt = millis();
+            }
+        }
+    }
+    else if (f[13] == 0x00 && (f[0] & 1)) // IPv4 multicast or broadcast
+        memcpy(&sender, f + 26, sizeof(sender));
+    else
+        return;
+    const uint32_t own = ip4_addr_get_u32(netif_ip4_addr(inp)), mask = ip4_addr_get_u32(netif_ip4_netmask(inp));
+    if (own == 0 || sender == 0 || sender == own || sender == s_gwAddr) return;
+    if (((sender ^ own) & mask) == 0 || ((sender ^ s_gwAddr) & mask) == 0) s_gwHeard = sender; // own subnet or the gateway's (AutoIP)
+}
+    #if defined(ARDUINO_ARCH_ESP32) && defined(KNX_IP_LAN)
+static volatile bool s_gwEthFailed = false;
+static volatile bool s_gwEthBusy = false; // the task runs: no link-speed change from the loop meanwhile
+// Own task: esp_eth_start() waits for the auto-negotiation, up to 4 s on an RMII PHY.
+static void gwEthRestart(void *)
+{
+    esp_eth_handle_t h = ETH.handle();
+    if (h != nullptr)
+    {
+        esp_eth_stop(h); // a failed stop may have stopped the driver already: start in any case
+        vTaskDelay(pdMS_TO_TICKS(10)); // a link check still on the PHY bus
+        if (esp_eth_start(h) != ESP_OK) s_gwEthFailed = true; // the restart then restores the static address as well
+    }
+    s_gwEthBusy = false;
+    vTaskDelete(nullptr);
+}
+    #endif
+    #ifdef ARDUINO_ARCH_RP2040
+static netif_input_fn s_gwInput = nullptr;
+static err_t gwInput(struct pbuf *p, struct netif *inp)
+{
+    gwSeeFrame(p, inp);
+    return s_gwInput(p, inp);
+}
+// Wraps the input of a netif not wrapped yet; call with the lwIP context held.
+static void gwHook(netif *n)
+{
+    if (n != nullptr && n->input != gwInput) s_gwInput = n->input, n->input = gwInput;
+}
+    #endif
+#endif
+
 // Total LAN packet counters. Consumers: the DeviceDisplay net-speed widget, the overview page and the
 // `net` console output. Bytes aren't available (lwIP MIB2 is off in the prebuilt core), so packets are the
 // whole-interface figure.
@@ -143,9 +231,10 @@ void openknxLanTraffic(uint32_t &rxPackets, uint32_t &txPackets)
     rxPackets = KNX_NETIF.packetsReceived();
     txPackets = KNX_NETIF.packetsSent();
 }
-#elif defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_NET_HAVE_LAN_TRAFFIC)
-// ESP32: the netif's input and linkoutput are wrapped by two counting functions. Both run with the lwIP
-// core held, so the increments do not race; a reader takes a 32-bit snapshot.
+#endif
+#if defined(ARDUINO_ARCH_ESP32) && (defined(OPENKNX_NET_HAVE_LAN_TRAFFIC) || defined(OPENKNX_NET_GW_WATCH))
+// ESP32: the netif's input and linkoutput are wrapped by two counting functions. Each counter has one writer
+// at a time (input: the driver's RX task, output: under the tcpip core lock); a reader takes a 32-bit snapshot.
 static volatile uint32_t lanRxPackets = 0;
 static volatile uint32_t lanTxPackets = 0;
 static netif_input_fn lanOrigInput = nullptr;
@@ -155,6 +244,9 @@ static netif *lanHooked = nullptr;
 static err_t lanCountInput(struct pbuf *p, struct netif *inp)
 {
     lanRxPackets = lanRxPackets + 1;
+    #ifdef OPENKNX_NET_GW_WATCH
+    gwSeeFrame(p, inp);
+    #endif
     return lanOrigInput(p, inp);
 }
 
@@ -194,18 +286,24 @@ static void lanTrafficService()
     static uint32_t last = 0;
     if (!delayCheckMillis(last, 2000)) return;
     last = millis();
+    #ifdef KNX_IP_WIFI
+    esp_netif_t *en = WiFi.STA.netif();
+    #else
     esp_netif_t *en = KNX_NETIF.netif();
+    #endif
     if (en == nullptr) return;
     const int idx = esp_netif_get_netif_impl_index(en);
     if (idx <= 0) return;
     tcpip_try_callback(lanHookNetif, (void *)(uintptr_t)idx);
 }
 
+    #ifdef OPENKNX_NET_HAVE_LAN_TRAFFIC
 void openknxLanTraffic(uint32_t &rxPackets, uint32_t &txPackets)
 {
     rxPackets = lanRxPackets;
     txPackets = lanTxPackets;
 }
+    #endif
 #endif
 
 // mDNS "otamode" TXT value from the ETS OTA-Update setting (ParamNET_OTAUpdate): prog | always | off.
@@ -478,6 +576,11 @@ namespace OpenKNX
                     // The hostname must be set after the interface is started, but needs
                     // to be set before DHCP, so set it from the event handler thread.
                     KNX_NETIF.setHostname(_hostName);
+#if defined(OPENKNX_NET_GW_WATCH) && defined(KNX_IP_LAN)
+                    // a watch restart may clear a static address (esp_netif stop path): set it again
+                    if (_gwRestarted && _useStaticIP) KNX_NETIF.config(_staticLocalIP, _staticGatewayIP, _staticSubnetMask, _staticNameServerIP);
+                    _gwRestarted = false;
+#endif
                     requestKnxIp(false);
 
                     break;
@@ -1156,10 +1259,195 @@ namespace OpenKNX
 #endif
         }
 
+#ifdef OPENKNX_NET_GW_WATCH
+        static constexpr uint32_t GW_PROBE_MS = 30000; // a round: ARP request to the gateway
+        static constexpr uint32_t GW_RETRY_MS = 2000;  // wait for the reply, and between tries of a round
+        static constexpr uint32_t GW_UP_MS = 5000;     // first round after a link-up
+        static constexpr uint8_t GW_TRIES = 3;         // tries of a round
+        static constexpr uint8_t GW_MISSES = 5;        // silent rounds before the first restart, about 3 min
+        static constexpr uint8_t GW_MISSES_MAX = 100;  // each further restart doubles the wait, up to about 1 h
+
+        /**
+         * @brief Restarts a link whose frames no longer leave: after the gateway answered once, nobody answers our ARP requests
+         *        although the gateway or a host asked in the same round was heard (without an address: the gateway was
+         *        heard), for 5..100 rounds, doubled while in use.
+         *        RFC 1122 3.3.1.4: failure to ARP may be used as negative advice; see README "Gateway watch".
+         */
+        void Module::checkGatewayWatch(bool carrier, bool established)
+        {
+            const uint32_t now = millis();
+    #if defined(ARDUINO_ARCH_ESP32) && defined(KNX_IP_LAN)
+            if (s_gwEthFailed)
+            {
+                logErrorP("Link restart failed, restarting the device");
+                openknx.restart();
+            }
+    #endif
+    #ifdef OPENKNX_WIFI_AP
+            if (_wifiApActive) return; // setup or own AP: the client link is not restarted
+        #ifdef ARDUINO_ARCH_RP2040
+            if (_wifiJoinPending) return;
+        #endif
+        #ifdef OPENKNX_WIFI_SCAN
+            if (_wifiScanRunning) return;
+        #endif
+    #endif
+            if (!established)
+            {
+                _gwSent = 0; // the silent rounds stay: a link loss of its own does not end the gateway's silence
+                s_gwHeard = 0;
+                if (_gwUp) // the address just went: frames seen before do not count
+                {
+                    _gwUp = false;
+                    s_gwAlive = false;
+                    _gwProbeAt = now;
+                }
+    #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_WIFI)
+                const struct netif *sta = __getCYW43Netif();
+                carrier = sta != nullptr && netif_is_up(sta) && netif_is_link_up(sta); // associated; the carrier of this build needs an address
+    #endif
+                // without an address nobody can be asked: during a silence a round counts when the gateway still sent a
+                // frame, since DHCP then gets no answer to frames of ours that do not arrive
+                const bool silence = _gwRestarts != 0 || _gwMisses != 0;
+                if (carrier && silence)
+                {
+    #ifdef ARDUINO_ARCH_RP2040
+        #ifdef KNX_IP_WIFI
+                    netif *in = __getCYW43Netif();
+        #else
+                    netif *in = KNX_NETIF.getNetIf();
+        #endif
+                    {
+                        LWIPMutex m;
+                        gwHook(in); // a rebuilt interface is not wrapped yet
+                    }
+    #endif
+                    if (now - _gwProbeAt >= GW_PROBE_MS + GW_TRIES * GW_RETRY_MS)
+                    {
+                        _gwProbeAt = now;
+                        if (s_gwAlive) gwSilentRound();
+                        s_gwAlive = false;
+                    }
+                    return;
+                }
+                s_gwAlive = false;
+                _gwProbeAt = silence ? now : now - GW_PROBE_MS + GW_UP_MS; // without a silence the first round 5 s after the address is back
+                return;
+            }
+            _gwUp = true;
+            if (now - _gwProbeAt < (_gwSent ? GW_RETRY_MS : GW_PROBE_MS)) return;
+            _gwProbeAt = now;
+            if (_gwSent && s_gwAnyReply) // somebody answered: our frames leave
+            {
+                if (s_gwGwReply) _gwSeen = true, _gwRestarts = 0;
+                _gwMisses = _gwSent = 0;
+                s_gwAlive = false;
+                s_gwHeard = 0;
+                return;
+            }
+            if (_gwSent >= GW_TRIES)
+            {
+                _gwSent = 0;
+                const bool proof = s_gwAlive || _gwAskedNb; // gateway on, or a host heard and asked: their silence is ours
+                s_gwAlive = false;
+                s_gwHeard = 0;
+                if (_gwSeen && proof) gwSilentRound(); // nothing heard: the gateway may just be off
+                return;
+            }
+            if (_gwSent == 0) // a new round
+            {
+                s_gwAnyReply = false;
+                s_gwGwReply = false;
+                _gwAskedNb = false;
+            }
+    #ifdef ARDUINO_ARCH_RP2040
+        #ifdef KNX_IP_WIFI
+            netif *n = __getCYW43Netif();
+        #else
+            netif *n = KNX_NETIF.getNetIf();
+        #endif
+            if (n == nullptr) return;
+            LWIPMutex m;
+            gwHook(n);
+    #else
+            LOCK_TCPIP_CORE();
+            esp_netif_t *en =
+        #ifdef KNX_IP_WIFI
+                WiFi.STA.netif();
+        #else
+                KNX_NETIF.netif();
+        #endif
+            netif *n = en ? netif_get_by_index((u8_t)esp_netif_get_netif_impl_index(en)) : nullptr;
+    #endif
+            uint32_t gw = n ? ip4_addr_get_u32(netif_ip4_gw(n)) : 0;
+            if (gw == 0) gw = s_gwAddr; // AutoIP clears the gateway after a failed DHCP: keep asking the last one
+            if (n != nullptr && netif_is_up(n) && gw != 0)
+            {
+                if (gw != s_gwAddr) // another gateway: nothing known about it
+                {
+                    s_gwAddr = gw;
+                    memset(s_gwMac, 0, sizeof(s_gwMac));
+                    _gwSeen = false;
+                    _gwMisses = _gwRestarts = 0;
+                }
+                ip4_addr_t a;
+                ip4_addr_set_u32(&a, gw);
+                etharp_request(n, &a);
+                const uint32_t nb = s_gwHeard;
+                if (_gwSent && nb != 0) // from the 2nd try also a host heard since the last round
+                {
+                    ip4_addr_set_u32(&a, nb);
+                    etharp_request(n, &a);
+                    _gwAskedNb = true;
+                }
+                _gwSent++;
+            }
+    #ifndef ARDUINO_ARCH_RP2040
+            UNLOCK_TCPIP_CORE();
+    #endif
+        }
+
+        /** @brief One silent round: restarts the link once the rounds reach the current wait. */
+        void Module::gwSilentRound()
+        {
+            _gwMisses += _gwMisses < 255;
+            const uint8_t due = _gwRestarts < 5 ? GW_MISSES << _gwRestarts : GW_MISSES_MAX; // 5..80, then 100
+            if (_gwMisses < due || (_gwMisses < 2 * due && openknxLinkInUse())) return;
+    #if defined(ARDUINO_ARCH_ESP32) && defined(KNX_IP_LAN)
+            _gwRestarted = true;
+            s_gwEthBusy = true;
+            if (xTaskCreate(gwEthRestart, "gwRestart", 4096, nullptr, 1, nullptr) != pdPASS)
+            {
+                _gwRestarted = false;
+                s_gwEthBusy = false;
+                logErrorP("Link restart: no task, next round");
+                return;
+            }
+    #endif
+            logInfoP("Gateway silent: link restart %u", (unsigned)_gwRestarts + 1);
+            _gwMisses = 0;
+    #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_WIFI)
+            startWifiJoinCycle(); // waits for the leave like 'net wifi reconnect'; joins anyway if the link stays up
+    #elif defined(ARDUINO_ARCH_RP2040)
+            resetNetwork(); // W5500: PHY bounce like a cable re-plug, returns at once
+    #elif !defined(KNX_IP_LAN)
+            WiFi.reconnect(); // leave and join, the address settings kept
+    #endif
+            _gwRestarts += _gwRestarts < 255;
+        }
+
+        void Module::showGatewayWatch()
+        {
+            if (_gwSeen)
+                logInfoP("Gateway:   ARP reply %lu s ago, %u silent rounds, %u restarts, %lu frames in", (unsigned long)((millis() - s_gwReplyAt) / 1000),
+                         (unsigned)_gwMisses, (unsigned)_gwRestarts, (unsigned long)s_gwFrames);
+        }
+#endif
+
         void Module::checkLinkStatus()
         {
             if (!delayCheckMillis(_lastLinkCheck, 500)) return;
-#if defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_NET_HAVE_LAN_TRAFFIC)
+#if defined(ARDUINO_ARCH_ESP32) && (defined(OPENKNX_NET_HAVE_LAN_TRAFFIC) || defined(OPENKNX_NET_GW_WATCH))
             lanTrafficService();
 #endif
 
@@ -1176,6 +1464,9 @@ namespace OpenKNX
             checkKnxIpDeviceState(establishedState && knxIpEnabled());
 
             refreshMulticastMembership(establishedState); // reuses this tick's debounced state
+#ifdef OPENKNX_NET_GW_WATCH
+            checkGatewayWatch(carrier, establishedState);
+#endif
 
 #ifdef ARDUINO_ARCH_ESP32
             // Level-triggered: follows the link state every tick, so a failing join is retried every 500 ms.
@@ -1198,7 +1489,10 @@ namespace OpenKNX
             const bool newLinkState = establishedState || carrier;
 
 #if defined(KNX_IP_LAN) && defined(OPENKNX_ETH_AUTO_FALLBACK)
-            _ethLink.tick(newLinkState, establishedState); // ~2 Hz link tick; walks the auto-fallback ladder
+    #if defined(OPENKNX_NET_GW_WATCH) && defined(ARDUINO_ARCH_ESP32)
+            if (!s_gwEthBusy) // the watch task stops and starts the driver: no speed change in between
+    #endif
+                _ethLink.tick(newLinkState, establishedState); // ~2 Hz link tick; walks the auto-fallback ladder
 #endif
 #if defined(ARDUINO_ARCH_RP2040)
             // re-register mDNS on the link-up edge (the service is lost with the old netif on a W5500 recovery)
@@ -2010,6 +2304,9 @@ namespace OpenKNX
                 logInfoP("DNS: %s", nameServerIP().toString().c_str());
 #ifdef KNX_IP_LAN
                 _ethLink.logLinkInfo(); // "ETH link: X Mbit Y-duplex (fixed/auto)"
+    #ifdef OPENKNX_NET_GW_WATCH
+                showGatewayWatch();
+    #endif
 #endif
 #ifdef OPENKNX_NET_HAVE_LAN_TRAFFIC
                 {
@@ -3072,6 +3369,9 @@ namespace OpenKNX
         // VERSIONR since esp_eth owns the W5500 SPI bus. After a long down: stop, pulse RSTn, re-apply link, begin.
         void Module::checkEthHealthEsp()
         {
+    #if defined(OPENKNX_NET_GW_WATCH) && defined(KNX_IP_LAN)
+            if (s_gwEthBusy) return; // the watch task stops and starts the driver
+    #endif
             if (established())
             {
                 _lastEthDownEsp = 0;

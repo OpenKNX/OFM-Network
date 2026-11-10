@@ -130,6 +130,15 @@ namespace TPUart
 
 typedef std::function<void(bool)> NetworkChangeCallback;
 
+// Gateway watch: RP2040 WiFi always; with OPENKNX_NET_GATEWAY_WATCH also LAN (RP2040 W5500, ESP32) and ESP32 WiFi.
+// WiFi needs the WiFi module (OPENKNX_WIFI_AP).
+#if (defined(KNX_IP_WIFI) && defined(OPENKNX_WIFI_AP) && (defined(ARDUINO_ARCH_RP2040) || (defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_NET_GATEWAY_WATCH)))) || \
+    (defined(KNX_IP_LAN) && defined(OPENKNX_NET_GATEWAY_WATCH) && ((defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)) || defined(ARDUINO_ARCH_ESP32)))
+#define OPENKNX_NET_GW_WATCH 1
+#endif
+/** @brief True while a tunnel or the busmonitor is open (interface, router): a silent gateway then waits twice as long. */
+bool openknxLinkInUse();
+
 namespace OpenKNX
 {
     namespace Network
@@ -552,6 +561,19 @@ namespace OpenKNX
             void initIp();
             void loadSettings();
             void checkLinkStatus();
+#ifdef OPENKNX_NET_GW_WATCH
+            uint32_t _gwProbeAt = 0;     // last step of the watch: try, evaluation or round without an address
+            uint8_t _gwSent = 0;         // tries of the running round
+            uint8_t _gwMisses = 0;       // silent rounds since the last reply
+            uint8_t _gwRestarts = 0;     // link restarts in this silence: each doubles the wait for the next
+            bool _gwSeen = false;        // the gateway answered once: only then a silence counts
+            bool _gwAskedNb = false;     // a host heard since the last round was asked in this round
+            bool _gwUp = false;          // the last tick past the pauses had an address
+            volatile bool _gwRestarted = false; // ESP32 LAN: the next start re-applies a static address
+            void checkGatewayWatch(bool carrier, bool established);
+            void gwSilentRound();
+            void showGatewayWatch(); // console
+#endif
             void refreshMulticastMembership(bool linkEstablished); // periodic IGMP re-report; see the comment at the definition
             void checkIpStatus();
             void loadCallbacks(bool state);
@@ -649,13 +671,6 @@ namespace OpenKNX
             bool _wifiJoinPending = false; // left, finishWifiJoinCycle() joins once the leave settled and no scan runs
             uint32_t _wifiLeftAt = 0;      // start of the pending join cycle (its leave)
             uint32_t _wifiFailedSince = 0; // first tick with a failure driver state, 0 = none
-            uint32_t _wifiGwProbeAt = 0;   // last gateway check, start of its wait
-            uint32_t _wifiGwReplyAt = 0;   // reply time seen at the last check
-            uint8_t _wifiGwMisses = 0;     // rounds in a row without a reply
-            uint8_t _wifiGwSent = 0;       // requests of the running round
-            bool _wifiGwSeen = false;      // this gateway answered once: only then its silence counts
-            uint8_t _wifiGwRejoins = 0;    // rejoins in this silence: each doubles the wait for the next
-            void checkWifiGateway(uint32_t now);
             void startWifiJoinCycle();
             void finishWifiJoinCycle();
 #endif
