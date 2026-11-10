@@ -653,9 +653,8 @@ namespace OpenKNX
             uint32_t _wifiGwReplyAt = 0;   // reply time seen at the last check
             uint8_t _wifiGwMisses = 0;     // rounds in a row without a reply
             uint8_t _wifiGwSent = 0;       // requests of the running round
-            bool _wifiGwForceJoin = false; // our rejoin joins without waiting for a reported link loss
             bool _wifiGwSeen = false;      // this gateway answered once: only then its silence counts
-            bool _wifiGwRejoined = false;  // rejoined for this silence: no further rejoin until a reply
+            uint8_t _wifiGwRejoins = 0;    // rejoins in this silence: each doubles the wait for the next
             void checkWifiGateway(uint32_t now);
             void startWifiJoinCycle();
             void finishWifiJoinCycle();
