@@ -1,5 +1,11 @@
 # Changes
 
+## ec/v0.9.0-beta.4: not released
+
+* Fix (RP2040, WiFi): the gateway watch rejoined only once per silence; it now rejoins again after 10, 20, 40, 80, then every 100 silent rounds (about 1 h), twice as long while a tunnel or the busmonitor is open
+* Fix (RP2040, WiFi): a gateway that is only switched off no longer starts a rejoin, unless a host heard on the network ignores our ARP as well. With an address, a round without a reply counts as silent only when a frame of the gateway itself (not a DHCP reply) arrived since the last round, or a host heard since then was asked too and stayed silent; a quiet network where neither the gateway sends anything nor another host a broadcast or multicast is therefore not watched
+* New (LAN, ESP32 WiFi): `-D OPENKNX_NET_GATEWAY_WATCH` runs the same watch on the LAN of RP2040 W5500 and ESP32 and on the ESP32 WiFi (with `OPENKNX_WIFI_AP`); it restarts the link without blocking (RP2040 W5500 PHY bounce, ESP32 LAN `esp_eth_stop`/`esp_eth_start` in a task of its own, ESP32 WiFi `WiFi.reconnect()`); without an address during a silence (ESP32 after any link loss, RP2040 without AutoIP at the lease end) each 36 s in which a frame of the gateway arrived (its DHCP replies excepted) counts as a silent round; a failed ESP32 start restarts the device. `net` (LAN) and `net wifi` show the silent rounds, the restarts and the frames received once the gateway answered
+
 ## ec/v0.9.0-beta.3: 2026-11-05
 
 Web server, download, DNS, Ethernet and WiFi fixes on top of `ec/v0.9.0-beta.2`.
