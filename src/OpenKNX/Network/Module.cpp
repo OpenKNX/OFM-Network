@@ -415,12 +415,12 @@ namespace OpenKNX
             });
 
 #if defined(OPENKNX_TELEGRAMJSON) && defined(OPENKNX_MQTT)
-            // setup() runs once, so registerReceivedFrame() cannot stack up (it appends
+            // setup() runs once, so registerFrameCallback() cannot stack up (it appends
             // to a vector). knx.start() comes later; the callback just stays idle until then.
             if (configured && ParamNET_MQTT && ParamNET_MQTTTPRawData)
             {
                 _telegramTopic = mqtt.devicePrefix() + "knx/tp/telegramm";
-                tpUart().registerReceivedFrame(
+                tpUart().registerFrameCallback(
                     [](TPUart::Frame &frame) { openknxNetwork.publishTelegram(frame); });
             }
 #endif

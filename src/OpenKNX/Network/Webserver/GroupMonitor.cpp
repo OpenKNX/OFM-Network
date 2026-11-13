@@ -116,7 +116,7 @@ namespace OpenKNX
 
             // Paralleler Tap am KNX-Stack vorbei: jedes vom TP-UART empfangene Frame
             // landet im onFrame()-Callback (loop-Kontext, gleicher Task wie der Webserver).
-            openknxNetwork.tpUart().registerReceivedFrame(
+            openknxNetwork.tpUart().registerFrameCallback(
                 [](TPUart::Frame& f) { openknxNetwork.groupmonitor.onFrame(f); });
         }
 

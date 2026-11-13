@@ -923,7 +923,7 @@ namespace OpenKNX
                 now.cpuC = (int16_t)openknx.hardware.cpuTemperature();
             }
 #if defined(OPENKNX_TELEGRAMJSON) && defined(OPENKNX_WEBMONITOR) && MASK_VERSION != 0x091A
-            now.busmon = openknxNetwork.tpUart().isMonitoring();
+            now.busmon = openknxNetwork.tpUart().isBusMonitor();
 #endif
 
             if (!force && _lastStatus.valid &&
