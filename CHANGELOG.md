@@ -2,6 +2,13 @@
 
 ## ec/v0.9.0-beta.4: not released
 
+* Change (display): the widgets draw with the shared helpers of OFM-DeviceDisplay (`OpenKNX::Ui`), which this version needs
+* Change (LAN-Speed widget): the module samples the rates once a second whether the widget is shown or not, so the graph holds its 126 s in the rotation
+* Change (WiFi widget): a client shows a status card ("Online" or "No WiFi"), the signal with a 10 min RSSI history, the details ("WiFi DHCP" / "WiFi FIX") and a network page with host, link and up time; the own AP shows "AP on" with its clients and a details page; the setup QR shows the time until the AP closes while it has a deadline and no phone is connected
+* Change (Network widget): on LAN a status card ("Online" with address and method, or "No LAN") and a details page; a build with the WiFi setup AP (`OPENKNX_WIFI_AP`) does not register this widget, the WiFi widget carries its values
+* Change (setup AP): the WiFi widget is pinned while the setup AP waits for a phone; once a phone joined and the panel is lit it shows the address page and the rotation resumes, the last phone gone pins it again
+* Feature (display): a lost LAN or WiFi link shows an error card, "LAN up" / "WiFi up" with the address retracts it. A drop the module causes itself (adapter reset, link mode, auto-fallback step, W5500 recovery, rejoin, gateway watch restart) is held up to its bound. "WiFi setup on" when the setup AP starts by the prog button, the console or after the boot check
+* Change (menu Network): the store results show as toasts with their level: "Stored, restarting" Ok, "No change" Info, every "Not stored" Warn
 * Fix: the web console drops a log line for which the heap has no block (ESP32 largest free block, RP2040 free heap, each with 1 KB left) instead of aborting the device in `std::bad_alloc`, and names the dropped bytes once a second; a line takes one allocation instead of two
 * Fix (RP2040, WiFi): CYW43 power save is switched off after every association of the client (start, rejoin, after the setup AP), as `setSleep(false)` on the ESP32; the core switches it off only after its own successful `begin()`
 * Change (RP2040, WiFi): client SSID/PSK and the own-AP password live in the last flash sector (core EEPROM emulation) instead of `/WIFI.TXT` and `/WIFIAP.TXT`; the web file manager and a file transfer no longer reach them. A `/WIFI.TXT` or `/WIFIAP.TXT` that ends with a line break is stored there, then removed. Older firmware does not read the sector: after a downgrade the access data must be set again
