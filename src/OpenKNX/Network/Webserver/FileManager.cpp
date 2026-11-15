@@ -375,19 +375,16 @@ namespace OpenKNX
             if (d == DSD)
             {
                 if (!sd::fileStore.dirOpen(dir.c_str())) return false;
+                struct DirClose { ~DirClose() { sd::fileStore.dirClose(); } } dirClose; // also when fn() throws
                 char nm[64];
                 uint32_t sz = 0;
                 for (uint8_t t; (t = sd::fileStore.dirNext(nm, sizeof(nm), &sz)) != 0;)
                 {
                     if (seen++ >= FM_MAX_ENTRIES)
-                    {
-                        sd::fileStore.dirClose();
                         return true;
-                    }
                     std::string p = absPath(dir, nm);
                     fn(p.substr(p.rfind('/') + 1), sz, t == 2);
                 }
-                sd::fileStore.dirClose();
                 return false;
             }
 #endif
@@ -395,19 +392,16 @@ namespace OpenKNX
             if (d == DEFC)
             {
                 if (!efc::fileStore.dirOpen(dir.c_str())) return false;
+                struct DirClose { ~DirClose() { efc::fileStore.dirClose(); } } dirClose; // also when fn() throws
                 char nm[64];
                 uint32_t sz = 0;
                 for (uint8_t t; (t = efc::fileStore.dirNext(nm, sizeof(nm), &sz)) != 0;)
                 {
                     if (seen++ >= FM_MAX_ENTRIES)
-                    {
-                        efc::fileStore.dirClose();
                         return true;
-                    }
                     std::string p = absPath(dir, nm);
                     fn(p.substr(p.rfind('/') + 1), sz, t == 2);
                 }
-                efc::fileStore.dirClose();
                 return false;
             }
 #endif
@@ -735,6 +729,8 @@ namespace OpenKNX
             }
 
             FmCtx* ctx = new FmCtx{d, File(), 0};
+            // closes the file if an allocation below throws before sendStream() takes the context
+            struct CtxGuard { FmCtx* c; ~CtxGuard() { if (c) fmCleanup(c); } } guard{ctx};
             int32_t size = -1;
             if (d == DINT)
             {
@@ -751,6 +747,7 @@ namespace OpenKNX
 #endif
             if (size < 0)
             {
+                guard.c = nullptr;
                 delete ctx;
                 res.setStatus(404);
                 res.send("Datei nicht gefunden");
@@ -762,6 +759,7 @@ namespace OpenKNX
             res.setContentType("application/octet-stream");
             res.setHeader("Content-Disposition", cd.c_str());
             res.sendStream((size_t)size, fmRead, fmCleanup, ctx);
+            guard.c = nullptr; // the response owns the context now
         }
 
         // ── Upload (chunked: jeder Chunk ist ein separater POST) ─────
