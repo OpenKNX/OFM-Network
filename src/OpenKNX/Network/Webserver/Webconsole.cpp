@@ -7,12 +7,33 @@
 #include "OpenKNX/Network/Webserver/Webserver.h"
 #include "webassets.h"
 
+#include <cstdint>
 #include <cstring>
+#ifdef ARDUINO_ARCH_ESP32
+#include <esp_heap_caps.h>
+#endif
 
 namespace OpenKNX
 {
     namespace Network
     {
+        namespace
+        {
+            constexpr size_t kHeapFloor = 1024; // left free beside a line incl. its block header: operator new on an empty heap ends in a restart
+
+            /** @brief Largest block a line may take now: ESP32 the largest free block, RP2040 the free heap (the core reports no largest block). */
+            size_t heapForLine()
+            {
+#if defined(ARDUINO_ARCH_ESP32)
+                return heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+#elif defined(ARDUINO_ARCH_RP2040)
+                const int heap = rp2040.getFreeHeap();
+                return heap > 0 ? (size_t)heap : 0;
+#else
+                return SIZE_MAX;
+#endif
+            }
+        } // namespace
 
         void Webconsole::setup()
         {
@@ -94,6 +115,7 @@ namespace OpenKNX
                 _readPos = writePos;
                 // Don't report loss from a session nobody watches to the next client.
                 _lostBytes = 0;
+                _noMemBytes = 0;
                 return;
             }
 
@@ -131,10 +153,25 @@ namespace OpenKNX
                 }
             }
 
+            if (_noMemBytes && (millis() - _lostReported) >= 1000)
+            {
+                _lostReported = millis();
+                char note[80];
+                int n = snprintf(note, sizeof(note), "\x1B[33m[... %u bytes of log dropped, no memory ...]\x1B[0m\n", (unsigned)_noMemBytes);
+                if (n > 0 && ws.txFits("log", (size_t)n))
+                {
+                    ws.ui.sendMessage("log", note, (size_t)n); // the queue is a fixed ring: no heap
+                    _noMemBytes = 0;
+                }
+            }
+
             // Each line must fit without evicting; only the first may exceed the per-tick quarter.
             if (!ws.txFits("log", 0)) return; // full: don't build lines just to discard them
             uint32_t budget = (uint32_t)ws.txCapacity() / 4;
             bool firstLine = true;
+            size_t heap = 0; // largest block, read once per pass at the first line: each line is freed before the next
+            bool heapRead = false;
+            const char* ring = openknx.logger.ringBuf();
 
             while (_readPos != writePos)
             {
@@ -142,28 +179,40 @@ namespace OpenKNX
                 // to carry state across messages. Fall back to a fixed chunk if no
                 // newline within maxLine bytes (e.g. very long hex-dump lines).
                 uint32_t pos = _readPos;
+                uint32_t high = 0; // bytes >= 0x80: two or three bytes in UTF-8
                 const uint32_t scanEnd = (writePos - _readPos < maxLine) ? writePos : _readPos + maxLine;
                 bool foundNewline = false;
                 while (pos != scanEnd)
                 {
-                    if (openknx.logger.ringBuf()[pos % Log::Logger::RING_SIZE] == '\n')
+                    const char c = ring[pos % Log::Logger::RING_SIZE];
+                    pos++;
+                    if (c == '\n')
                     {
                         foundNewline = true;
-                        pos++;
                         break;
                     }
-                    pos++;
+                    high += (uint8_t)c >= 0x80;
                 }
                 if (!foundNewline && writePos - _readPos < maxLine) break;
 
-                // Ring buffer is ISO-8859-15; WS text frame needs UTF-8.
-                std::string raw;
-                raw.reserve(pos - _readPos);
-                for (uint32_t i = _readPos; i != pos; i++)
-                    raw += openknx.logger.ringBuf()[i % Log::Logger::RING_SIZE];
+                // Ring buffer is ISO-8859-15; WS text frame needs UTF-8: one allocation of the upper bound, no growth.
+                const uint32_t len = pos - _readPos;
+                const size_t utf8Max = (size_t)len + 2 * (size_t)high;
+                if (!heapRead)
+                    heap = heapForLine(), heapRead = true;
+                if (utf8Max + 1 + kHeapFloor > heap)
+                {
+                    _noMemBytes += len; // dropped, reported once a second above
+                    _readPos = pos;
+                    continue;
+                }
                 std::string line;
-                line.reserve(raw.size());
-                OpenKNX::Charset::encodeUtf8(line, raw.data(), raw.size());
+                line.reserve(utf8Max);
+                const uint32_t at = _readPos % Log::Logger::RING_SIZE;
+                const uint32_t first = (len <= Log::Logger::RING_SIZE - at) ? len : Log::Logger::RING_SIZE - at;
+                OpenKNX::Charset::encodeUtf8(line, ring + at, first);
+                if (first < len)
+                    OpenKNX::Charset::encodeUtf8(line, ring, len - first); // the line wraps at the ring end
 
                 if (!ws.txFits("log", line.size())) break;
                 const uint32_t cost = (uint32_t)ws.txCost("log", line.size());

@@ -26,6 +26,7 @@ namespace OpenKNX
             // would emit one report per tick.
             uint32_t _lostBytes = 0;
             uint32_t _lostReported = 0;
+            uint32_t _noMemBytes = 0; // log bytes dropped for want of heap, reported like _lostBytes
             char _pendingCmd[256] = {};
             // Separates Flag: ein leeres Enter (Befehl der Länge 0) lässt sich nicht
             // über _pendingCmd[0] != '\0' abbilden, soll aber serverseitig als Zeile
