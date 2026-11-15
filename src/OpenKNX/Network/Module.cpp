@@ -2190,8 +2190,24 @@ namespace OpenKNX
 #ifdef KNX_IP_WIFI
             else if (cmd == "net wifi erase" || cmd == "erase wifi") // "erase wifi": former name, still accepted
             {
-                saveWifiSettings("", "", true); // triggers the restart timer
-                logInfoP("Wifi settings erased");
+                bool ok = saveWifiSettings("", "", true); // triggers the restart timer
+#ifdef OPENKNX_WIFI_AP
+                // the password of the own AP goes as well
+#ifdef ARDUINO_ARCH_RP2040
+                WifiStore store;
+                loadWifiStore(store);
+                memset(store.apPsk, 0, sizeof(store.apPsk));
+                ok = saveWifiStore(store) && ok;
+                wipeSecret(&store, sizeof(store));
+#elif ARDUINO_ARCH_ESP32
+                Preferences preferences;
+                preferences.begin("WIFI", false);
+                preferences.remove("APPSK");
+                preferences.end();
+#endif
+#endif
+                if (ok)
+                    logInfoP("Wifi settings erased");
                 return true;
             }
             else if (cmd.compare(0, 12, "net wifi set") == 0 && cmd.length() > 13)
