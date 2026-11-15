@@ -2,6 +2,23 @@
 
 ## ec/v0.9.0-beta.4: not released
 
+* Fix: the web console drops a log line for which the heap has no block (ESP32 largest free block, RP2040 free heap, each with 1 KB left) instead of aborting the device in `std::bad_alloc`, and names the dropped bytes once a second; a line takes one allocation instead of two
+* Fix (RP2040, WiFi): CYW43 power save is switched off after every association of the client (start, rejoin, after the setup AP), as `setSleep(false)` on the ESP32; the core switches it off only after its own successful `begin()`
+* Change (RP2040, WiFi): client SSID/PSK and the own-AP password live in the last flash sector (core EEPROM emulation) instead of `/WIFI.TXT` and `/WIFIAP.TXT`; the web file manager and a file transfer no longer reach them. A `/WIFI.TXT` or `/WIFIAP.TXT` that ends with a line break is stored there, then removed. Older firmware does not read the sector: after a downgrade the access data must be set again
+* Fix (WiFi): a trace build no longer logs the payload of commands 1 and 2 of function property 160/5 (SSID, PSK, AP password)
+* Change (RP2040, WiFi): such a file put on the file system at runtime is stored once its size held for 5 s; the device restarts when the stored data changed. A file without a line is removed, erasing is `net wifi erase`
+* Change (WiFi): `net wifi erase` also erases the password of the own AP
+* Fix (application): the hint above "Nameserver" names 0.0.0.0, the default of the field, for the gateway instead of an empty field; "empty" in the beta.3 entry means the same
+* Fix (application): the parameter "Webserver" was spelled "Weberver"
+* New (ESP32): `OPENKNX_HTTPD_STACK` sets the stack of the web server task, default 8192
+* Fix (ESP32): a request that finds no memory gets 503 "Zu wenig Speicher, bitte erneut laden" instead of aborting the device, also in a loop route and a WebSocket upgrade
+* Change (ESP32): MQTT and the web client include `NetworkClient`/`NetworkServer`; a LAN target can build without the WiFi library
+* Fix (WiFi): a `net wifi set` with a wrong format or a too long SSID or PSK no longer repeats the line, password included, as "command not found"
+* Fix (RP2040, WiFi): the WiFi page answers 500 and the WiFi function property result 1 when the settings could not be stored
+* Fix (RP2040, WiFi): the copies of the stored WiFi secrets in Module.cpp are zeroed with writes the compiler keeps; WifiSetup.cpp clears its two copies with memset
+* Fix: a directory listing on SD or external flash is closed also when the listing callback throws
+* Change (RP2040): a sent response releases its text buffers
+* Fix (ESP32): when an allocation throws, a file download closes its file, the web client frees its request, an http get fetch ends as failed instead of staying running, and a WebSocket session is closed
 * New (ESP32): `OPENKNX_WEBSOCKET_MAX` limits the open pages; one more gets the close code 1013 and the page shows "Gerät beschäftigt" until one closes. Unset: only the slot pool limits them
 * Change (pages): the connection is reported as open after the first message from the device; the backoff restarts only then, so a refused page retries at 1, 2, 4 up to 30 s
 * Fix (RP2040, WiFi): the gateway watch rejoined only once per silence; it now rejoins again after 10, 20, 40, 80, then every 100 silent rounds (about 1 h), twice as long while a tunnel or the busmonitor is open
