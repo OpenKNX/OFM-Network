@@ -13,6 +13,7 @@
 #include <functional>
 #include <string>
 #include <vector>
+#include <memory>
 #include <deque>
 
 #ifndef OPENKNX_WEBCLIENT_SLOTS

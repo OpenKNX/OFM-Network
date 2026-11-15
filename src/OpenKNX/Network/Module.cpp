@@ -3721,6 +3721,13 @@ namespace OpenKNX
             int drive = FileManager::driveFromPath(rawPath, rel);
             _fetch = HttpFetch();
             _fetch.state = HttpFetch::State::RUNNING;
+            // an allocation that throws before the request is armed must not leave the fetch RUNNING for good
+            struct ArmGuard
+            {
+                HttpFetch& f;
+                bool armed = false;
+                ~ArmGuard() { if (!armed) { f.state = HttpFetch::State::FAILED; f.error = "no memory"; } } // fits the small-string buffer
+            } armGuard{_fetch};
             _fetch.drive = drive;
             _fetch.path = rel;
             _fetch.startedMs = millis();
@@ -3763,6 +3770,7 @@ namespace OpenKNX
             };
             logInfoP("GET %s -> %s", url.c_str(), rawPath.c_str());
             _fetchArm(url);
+            armGuard.armed = true;
             return true;
         }
 #endif

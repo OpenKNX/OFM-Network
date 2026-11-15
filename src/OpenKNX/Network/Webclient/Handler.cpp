@@ -180,7 +180,9 @@ namespace OpenKNX
 #ifdef ARDUINO_ARCH_ESP32
                 if (_requestQueue == nullptr) initTask();
 
-                TaskRequest *tr = new TaskRequest();
+                // owned here until the queue takes it: any throw below (callback list, onDone) frees it
+                std::unique_ptr<TaskRequest> owner(new TaskRequest());
+                TaskRequest *tr = owner.get();
                 tr->requestId = _nextRequestId++;
                 tr->timeoutMs = OPENKNX_WEBCLIENT_TIMEOUT;
                 strncpy(tr->method, req.method, sizeof(tr->method) - 1);
@@ -196,7 +198,6 @@ namespace OpenKNX
                 if (!parseUrl(req.url, tr->host, tr->port, tr->path, tr->ssl))
                 {
                     logError("Webclient", "Invalid URL: %s", req.url.c_str());
-                    delete tr;
                     if (req.onDone)
                     {
                         Response res;
@@ -220,9 +221,9 @@ namespace OpenKNX
                         Response res;
                         cb.onDone(res);
                     }
-                    delete tr;
                     return false;
                 }
+                owner.release(); // the task deletes it after the request
                 return true;
 #else
                 for (int i = 0; i < OPENKNX_WEBCLIENT_SLOTS; i++)
