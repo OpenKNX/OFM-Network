@@ -43,18 +43,28 @@ namespace
     void applyAction()
     {
         using Result = OpenKNX::Network::Module::LocalApplyResult;
-        const char *message = "No change";
+        ToastLevel level = ToastLevel::Warn; // every "Not stored"
+        const char *line1 = "Not stored:", *line2 = nullptr;
         switch (openknxNetwork.applyLocalNetworkConfig(s_edit))
         {
-            case Result::Restarting: message = "Stored, restarting"; break;
-            case Result::Unchanged: message = "No change"; break;
-            case Result::NotProgrammed: message = "Not stored:\nnot programmed"; break;
-            case Result::Invalid: message = "Not stored: check\nIP, mask, gateway"; break;
-            case Result::SetupActive: message = "Not stored:\nWiFi AP active"; break;
-            case Result::NotSupported: message = "Not stored:\nset by parameters"; break;
-            case Result::UpdateRunning: message = "Not stored:\nupdate running"; break;
+            case Result::Restarting:
+                level = ToastLevel::Ok;
+                line1 = "Stored, restarting";
+                break;
+            case Result::Unchanged:
+                level = ToastLevel::Info;
+                line1 = "No change";
+                break;
+            case Result::NotProgrammed: line2 = "not programmed"; break;
+            case Result::Invalid:
+                line1 = "Not stored: check";
+                line2 = "IP, mask, gateway";
+                break;
+            case Result::SetupActive: line2 = "WiFi AP active"; break;
+            case Result::NotSupported: line2 = "set by parameters"; break;
+            case Result::UpdateRunning: line2 = "update running"; break;
         }
-        openknxDisplayModule.showToast(message); // lines of at most 21 chars (128 px / 6 px)
+        openknxDisplayModule.toast(level, nullptr, line1, line2); // menu open: a banner, 18 characters per row
     }
 
     MenuOption &addRow(std::vector<MenuOption> &rows, const char *label, MenuConfig::MenuElementType type, const char *key = "")
