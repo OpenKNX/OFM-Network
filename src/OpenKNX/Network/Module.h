@@ -63,6 +63,9 @@
 #if defined(OPENKNX_WIFI_AP) && defined(DEVICE_DISPLAY_MODULE)
 class Widget;
 #endif
+#if defined(DEVICE_DISPLAY_MODULE) && defined(KNX_IP_LAN)
+class WidgetNetSpeed;
+#endif
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_WIFI)
 struct netif *__getCYW43Netif(); // arduino-pico (lwIP_CYW43): the client interface, null before the first begin()
 #endif
@@ -369,6 +372,9 @@ namespace OpenKNX
             bool _useStaticIP = false;
 #ifdef DEVICE_DISPLAY_MODULE
             bool _netSpeedWidgetAdded = false;
+#endif
+#if defined(DEVICE_DISPLAY_MODULE) && defined(KNX_IP_LAN)
+            WidgetNetSpeed *_netSpeedWidget = nullptr; // owned by the WidgetsManager, which deletes only AutoRemove widgets
 #endif
             bool _useMDNS = false;
             bool _otaAllowed = false;

@@ -1688,7 +1688,9 @@ namespace OpenKNX
 #ifdef KNX_IP_LAN
                 auto *netSpeed = new WidgetNetSpeed(10000, WidgetFlags::DefaultWidget);
                 netSpeed->setName("LAN-Speed");
-                if (!openknxDisplayModule.tryAddWidget(netSpeed))
+                if (openknxDisplayModule.tryAddWidget(netSpeed))
+                    _netSpeedWidget = netSpeed; // deleted by tryAddWidget() on false
+                else
                     logDebugP("WidgetNetSpeed not registered (no display/manager)");
 #endif
 #ifdef OPENKNX_WIFI_AP
@@ -1709,6 +1711,10 @@ namespace OpenKNX
                 if (!registerNetworkMenu())
                     logDebugP("Menu Network not registered (no menu registry)");
             }
+#endif
+#if defined(DEVICE_DISPLAY_MODULE) && defined(KNX_IP_LAN)
+            // History in the background: the span label holds whether the widget is shown or not.
+            if (_netSpeedWidget) _netSpeedWidget->sample();
 #endif
 #ifdef ARDUINO_ARCH_ESP32
             // Ahead of the _powerSave/_otaActive returns, so KNX-IP follows the network in every state.

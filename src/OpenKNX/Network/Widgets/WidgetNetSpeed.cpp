@@ -1,7 +1,11 @@
 #ifdef DEVICE_DISPLAY_MODULE
 
 #include "WidgetNetSpeed.h"
+#include "DisplayUi.h"
 #include "OpenKNX.h"
+#include <string.h>
+
+namespace Ui = OpenKNX::Ui;
 
 // Total LAN packet counters, provided by NetworkModule (lwIP byte counters aren't available: prebuilt core).
 // RP2040 takes them from the W5500 driver, ESP32 with wired LAN counts at the lwIP netif. A build without
@@ -26,8 +30,6 @@ void WidgetNetSpeed::start()
     if (_state == WidgetState::RUNNING) return;
     _state = WidgetState::RUNNING;
     _forceRedraw = true;
-    _haveBase = false; // the first sample only takes the base; a rate over the time off would stand for the whole gap
-    _haveRate = false;
 }
 
 void WidgetNetSpeed::stop()
@@ -51,16 +53,12 @@ void WidgetNetSpeed::resume()
     {
         _state = WidgetState::RUNNING;
         _forceRedraw = true;
-        _haveBase = false;
-        _haveRate = false;
     }
 }
 
 void WidgetNetSpeed::loop()
 {
     if (_state != WidgetState::RUNNING || !_display) return;
-
-    sampleRates(); // keep the history continuous regardless of redraw timing
 
     const uint32_t now = millis();
     if (_forceRedraw || now - _lastDraw >= REDRAW_INTERVAL_MS)
@@ -72,7 +70,7 @@ void WidgetNetSpeed::loop()
 }
 
 // Read the packet counters, turn the per-window delta into packets/s, push into the history ring.
-void WidgetNetSpeed::sampleRates()
+void WidgetNetSpeed::sample()
 {
     const uint32_t now = millis();
     if (now - _lastSample < SAMPLE_INTERVAL_MS) return;
@@ -89,12 +87,11 @@ void WidgetNetSpeed::sampleRates()
     {
         _rxRate = (uint32_t)((uint64_t)(rxCount - _lastRxPackets) * 1000u / dtMs); // uint32 delta wraps safely
         _txRate = (uint32_t)((uint64_t)(txCount - _lastTxPackets) * 1000u / dtMs);
-        _haveRate = true;
     }
     _lastRxPackets = rxCount;
     _lastTxPackets = txCount;
     _haveBase = true;
-    if (!haveBase) return; // first sample after start/resume only takes the base, it pushes no bar
+    if (!haveBase) return; // the first sample only takes the base, it pushes no bar
 
     _rxHist[_histHead] = (uint16_t)(_rxRate > 0xFFFF ? 0xFFFF : _rxRate);
     _txHist[_histHead] = (uint16_t)(_txRate > 0xFFFF ? 0xFFFF : _txRate);
@@ -127,7 +124,7 @@ void WidgetNetSpeed::drawRate(int16_t x, int16_t xEnd, uint32_t pps)
     auto *g = _display->display;
     char val[12], unit[8];
     fmtParts(pps, val, sizeof(val), unit, sizeof(unit));
-    if (!_haveRate) snprintf(val, sizeof(val), "-");
+    if (_histCount == 0) snprintf(val, sizeof(val), "-"); // the first rate comes with the first bar
     const int16_t len = (int16_t)strlen(val);
     const uint8_t size = (x + len * 12 + (int16_t)strlen(unit) * 6 <= xEnd) ? 2 : 1;
     g->setTextSize(size);
@@ -165,25 +162,19 @@ void WidgetNetSpeed::drawMirror(int16_t y, int16_t h, uint32_t scale)
 void WidgetNetSpeed::draw()
 {
     auto *g = _display->display;
-    const int16_t W = (int16_t)_display->GetDisplayWidth();
+    Ui::begin(*g);
     g->clearDisplay();
-    g->setTextColor(WHITE);
+    Ui::header(*g, "Network"); // fixed: the rotation keys on the widget name, not on this title
 
 #ifndef WIDGET_NETSPEED_HAVE_COUNTERS
-    // No packet counter in this build (WiFi): show a short note instead of a permanently-zero graph, and
-    // log it once -- only while the widget is actually on screen.
+    // No packet counter in this build: "n/a" instead of a permanently-zero graph, logged once.
     static bool warnedNoCounters = false;
     if (!warnedNoCounters)
     {
         warnedNoCounters = true;
         logInfoP("net-speed: this build has no packet counter");
     }
-    g->setTextSize(1);
-    g->setCursor(12, 0);
-    g->print("NETWORK");
-    g->drawLine(0, 10, W, 10, WHITE);
-    g->setCursor(0, 16);
-    g->print("Speed: n/a");
+    Ui::row(*g, 0, "Speed", "n/a", 6);
     _display->displayBuff();
     return;
 #endif
@@ -196,32 +187,29 @@ void WidgetNetSpeed::draw()
         if (_txHist[i] > scale) scale = _txHist[i];
     }
 
-    // header: 3-bar icon + title + divider
-    g->fillRect(1, 3, 2, 4, WHITE);
-    g->fillRect(4, 1, 2, 6, WHITE);
-    g->fillRect(7, 4, 2, 3, WHITE);
-    g->setTextSize(1);
-    g->setCursor(12, 0); // left, right after the 3-bar icon (x 1..8)
-    g->print("NETWORK");
-    g->drawLine(0, 10, W, 10, WHITE);
-
     // two big values: TX (up) left up to the RX arrow, RX (down) right up to the edge
-    drawArrow(2, 14, true);
-    drawRate(8, 66, _txRate);
-    drawArrow(66, 14, false);
-    drawRate(72, W, _rxRate);
+    drawArrow(0, 15, true);
+    drawRate(7, 64, _txRate);
+    drawArrow(66, 15, false);
+    drawRate(73, (int16_t)_display->GetDisplayWidth(), _rxRate);
 
-    // mirror history + peak label
+    // mirror history, peak label left and time span right, both on a black field over the bars
     drawMirror(32, 32, scale);
-    g->setTextSize(1);
     char pk[12], pu[8];
     fmtParts(scale, pk, sizeof(pk), pu, sizeof(pu));
-    // clear behind the peak label: it is drawn over the mirrored bars and was white on white
-    g->fillRect(0, 31, (int16_t)strlen(pk) * 6 + 2, 9, BLACK);
-    g->setCursor(1, 32);
-    g->print(pk);
+    if (_histCount == 0) snprintf(pk, sizeof(pk), "-"); // no rate yet
+    drawLabel(0, pk);
+    drawLabel((int16_t)(_display->GetDisplayWidth() - (int16_t)strlen(SPAN_TEXT) * Ui::CharW - 2), SPAN_TEXT);
 
     _display->displayBuff();
+}
+
+// Text at (x + 1, 34) on a black field 2 px wider than the text (peak and span label of the mirror graph).
+void WidgetNetSpeed::drawLabel(int16_t x, const char *text)
+{
+    _display->display->fillRect(x, 33, (int16_t)strlen(text) * Ui::CharW + 2, 9, BLACK);
+    _display->display->setCursor(x + 1, 34);
+    _display->display->print(text);
 }
 
 #endif // DEVICE_DISPLAY_MODULE

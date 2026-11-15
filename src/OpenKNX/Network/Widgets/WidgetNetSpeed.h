@@ -8,7 +8,7 @@
 /**
  * @brief LAN traffic widget (single page): live TX and RX rate in packets per second with a mirrored history.
  *
- * Samples the whole-interface packet counters of openknxLanTraffic(); a build without them shows "n/a".
+ * Samples the whole-interface packet counters of openknxLanTraffic() via sample(); a build without them shows "n/a".
  */
 class WidgetNetSpeed : public Widget
 {
@@ -45,6 +45,12 @@ class WidgetNetSpeed : public Widget
     void nextPage() override {}
     void prevPage() override {}
 
+    /**
+     * @brief Takes one rate sample per SAMPLE_INTERVAL_MS into the history; returns at once in between.
+     * Called by the network module's loop, so the history covers the span label also while the widget is not shown.
+     */
+    void sample();
+
   private:
     WidgetState _state;
     uint32_t _displayTime;
@@ -55,6 +61,8 @@ class WidgetNetSpeed : public Widget
     static constexpr uint32_t REDRAW_INTERVAL_MS = 500;
     static constexpr uint32_t SAMPLE_INTERVAL_MS = 1000; // rate window
     static constexpr uint8_t SPARK_LEN = 126;            // one per display column
+    static constexpr const char *SPAN_TEXT = "126 s";    // SPARK_LEN samples of SAMPLE_INTERVAL_MS, on screen only
+    static_assert(SPARK_LEN * SAMPLE_INTERVAL_MS == 126000, "SPAN_TEXT must follow the history length");
     uint32_t _lastDraw = 0;
     bool _forceRedraw = true;
 
@@ -62,8 +70,7 @@ class WidgetNetSpeed : public Widget
     uint32_t _lastSample = 0;
     uint32_t _lastRxPackets = 0, _lastTxPackets = 0;
     uint32_t _rxRate = 0, _txRate = 0; // packets/s
-    bool _haveBase = false;
-    bool _haveRate = false; // a rate was measured since the last start/resume
+    bool _haveBase = false; // the first sample only takes the counters
 
     // history ring (packets/s), auto-scaled at draw time
     uint16_t _rxHist[SPARK_LEN] = {0};
@@ -71,11 +78,11 @@ class WidgetNetSpeed : public Widget
     uint8_t _histHead = 0;
     uint8_t _histCount = 0;
 
-    void sampleRates();
     void draw();
     void drawMirror(int16_t y, int16_t h, uint32_t scale);    // TX up / RX down from a centre baseline
     void drawArrow(int16_t x, int16_t y, bool up);            // small up/down triangle
     void drawRate(int16_t x, int16_t xEnd, uint32_t pps);     // one rate value + unit inside [x, xEnd)
+    void drawLabel(int16_t x, const char *text);              // graph label on a black field from y33, text at y34
     static void fmtParts(uint32_t rate, char *val, size_t vN, char *unit, size_t uN);
 };
 
