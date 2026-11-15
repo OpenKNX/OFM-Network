@@ -2,6 +2,7 @@
 
 ## ec/v0.9.0-beta.4: not released
 
+* Change (LAN-Speed widget): the title reads "LAN traffic"; it read "Network" like the Network widget
 * Change (display): the widgets draw with the shared helpers of OFM-DeviceDisplay (`OpenKNX::Ui`), which this version needs
 * Change (LAN-Speed widget): the module samples the rates once a second whether the widget is shown or not, so the graph holds its 126 s in the rotation
 * Change (WiFi widget): a client shows a status card ("Online" or "No WiFi"), the signal with a 10 min RSSI history, the details ("WiFi DHCP" / "WiFi FIX") and a network page with host, link and up time; the own AP shows "AP on" with its clients and a details page; the setup QR shows the time until the AP closes while it has a deadline and no phone is connected
