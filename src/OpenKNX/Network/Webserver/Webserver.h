@@ -50,6 +50,11 @@
 #error "OPENKNX_WEBSOCKET_MAX must be 1..OPENKNX_WEBSERVER_MAX_CONN"
 #endif
 
+// ESP32 httpd task stack: the logger mutex needs ~400 B over the IDF default 4096; REG1 measured a peak of 4.3 KB
+#ifndef OPENKNX_HTTPD_STACK
+#define OPENKNX_HTTPD_STACK 8192
+#endif
+
 // Sendequeue: ein Ring für alle Clients (Senderichtung). Nicht zu verwechseln mit
 // OPENKNX_WEBSOCKET_RX_CAP, das den Empfangs-Sammelpuffer je Verbindung begrenzt.
 // Dimensionierend ist der Schwall pro Tick, nicht die Dauerlast.

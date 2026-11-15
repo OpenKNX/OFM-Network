@@ -534,7 +534,7 @@ namespace OpenKNX
             config.lru_purge_enable = true; // free idle HTTP keep-alives so new WS upgrades find a slot
             config.recv_wait_timeout = 5;
             config.send_wait_timeout = 5;
-            config.stack_size = 8192; // Logger-Mutex (xSemaphoreTakeRecursive) braucht ~400 B extra gegenüber Default 4096
+            config.stack_size = OPENKNX_HTTPD_STACK;
 #if !CONFIG_FREERTOS_UNICORE && !defined(OPENKNX_DUALCORE) // with it, loop1 runs on core 0
             config.core_id = ARDUINO_RUNNING_CORE ? 0 : 1; // unpinned, every wake by lwIP (core 0, prio 18) preempts loop() on its core
 #endif
