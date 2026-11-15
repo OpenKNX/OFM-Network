@@ -2843,7 +2843,7 @@ namespace OpenKNX
 
             if (length < 1) return false;
 
-            logHexTraceP(data, length);
+            if (data[0] > 2) logHexTraceP(data, length); // commands 1 and 2 carry the passwords
 
             switch (data[0])
             {
