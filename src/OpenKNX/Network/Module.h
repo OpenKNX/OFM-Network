@@ -264,6 +264,18 @@ namespace OpenKNX
                 uint8_t clients;  // AP only
             };
             WifiInfo wifiInfo() const;
+            /** @brief RSSI history length: one sample per 10 s while credentials are stored and no own AP is configured. */
+            uint8_t wifiRssiHistCount() const { return _wifiRssiCount; }
+            /** @brief RSSI history sample i, 0 = oldest; 0 dBm = no connection (also for i out of range). */
+            int8_t wifiRssiHistAt(uint8_t i) const
+            {
+                return i < _wifiRssiCount ? _wifiRssiHist[(_wifiRssiHead + WIFI_HIST_LEN - _wifiRssiCount + i) % WIFI_HIST_LEN] : 0;
+            }
+            /**
+             * @brief Setup AP: ms until it closes unused (1 once due), 0 = no deadline. spanMs, if given, gets the full term
+             * (only when the result is > 0).
+             */
+            uint32_t wifiApTimeLeftMs(uint32_t *spanMs = nullptr) const;
 #else
             bool wifiApActive() const { return false; }
             bool wifiSetupPathAllowed(const std::string &) const { return true; }

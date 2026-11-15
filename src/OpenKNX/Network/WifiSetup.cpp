@@ -1161,6 +1161,19 @@ namespace OpenKNX
         }
 
         /**
+         * @brief Same rule as loopWifiAp(): a setup AP with stored credentials closes after the idle term, from AP start
+         *        or the last poll that saw a station. Own AP and a setup AP without credentials never close.
+         */
+        uint32_t Module::wifiApTimeLeftMs(uint32_t *spanMs) const
+        {
+            if (!_wifiApActive || _wifiOwnAp || _wifiSSID[0] == 0) return 0;
+            const uint32_t span = _wifiApByProg ? WIFI_AP_PROG_IDLE_MS : WIFI_AP_RETRY_MS;
+            if (spanMs) *spanMs = span;
+            const uint32_t idle = millis() - _wifiApIdleSince;
+            return idle < span ? span - idle : 1; // due: closes on the next 1 s poll (or restarts)
+        }
+
+        /**
          * @brief Open setup AP: only the setup page, its assets and the captive probes; console, file manager,
          *        OTA page and websockets stay closed for anyone in radio range.
          */

@@ -6,8 +6,9 @@
 #include <string>
 
 /**
- * @brief WiFi widget: client (network, signal, channel, IP), setup AP (QR code to join + info page)
- *        or own AP (name, channel, address, stations). Page count follows the state.
+ * @brief WiFi widget. Client: card, signal page with history, details page, network page (host, link, up time);
+ *        offline: card + network page; setup AP: QR code to join + info page; own AP: card + values page (name,
+ *        security, channel, address, stations). Page count follows the state.
  */
 class WidgetWifi : public Widget
 {
@@ -58,15 +59,10 @@ class WidgetWifi : public Widget
     uint8_t _qr[((QR_VERSION_MAX * 4 + 17) * (QR_VERSION_MAX * 4 + 17) + 7) / 8 + 1] = {};
     std::string _qrFor; // SSID the cached QR code was built for
     bool _qrOk = false;
+    uint8_t _shownState = 0xFF; // WifiState of the last draw or setPage(), 0xFF = none
 
     void draw();
-    void drawHeader(const char *title);
-    void drawCentered(int16_t y, const char *text);
-    void drawCentered(int16_t x0, int16_t x1, int16_t y, const char *text);
-    void drawClient();
-    void drawSetupQr();
-    void drawSetupInfo();
-    void drawOwnAp();
+    void drawSetupQr(Adafruit_SSD1306 &d, const char *ssid, uint8_t clients);
     bool buildQr(const char *ssid);
 };
 
