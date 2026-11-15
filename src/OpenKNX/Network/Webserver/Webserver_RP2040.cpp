@@ -161,7 +161,7 @@ namespace OpenKNX
             if (s->idx >= 0 && s->idx < MAX_CONN)
             {
                 g_response[s->idx].reset(); // body and layout shells
-                g_pending[s->idx] = std::string();
+                std::string().swap(g_pending[s->idx]); // releases the buffer; assigning std::string() keeps it
                 if (s->streaming && s->streamCleanup) g_streamGc[s->idx] = {s->streamCleanup, s->streamCtx};
             }
             if (s->bodyBuf)

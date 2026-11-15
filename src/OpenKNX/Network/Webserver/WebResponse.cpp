@@ -213,9 +213,9 @@ namespace OpenKNX
             _streamCleanupFn = nullptr;
             _streamCtx = nullptr;
 
-            // Zuweisung statt clear(): gibt den Heap-Puffer wirklich frei
-            _layoutHeader = std::string();
-            _layoutFooter = std::string();
+            // swap with an empty string releases the heap buffer; assigning std::string() keeps it (libstdc++)
+            std::string().swap(_layoutHeader);
+            std::string().swap(_layoutFooter);
             _segCount = 0;
         }
 
