@@ -638,6 +638,37 @@ namespace OpenKNX
             bool _localWritePending = false; // loop() still has to write _localPending
             bool _localApplied = false;      // an Apply was accepted, the restart is pending
             void storeLocalNetworkConfig();
+            bool _netDownNoted = false;      // a link-down toast was shown: the next establish shows the up toast
+            bool _netDownHeld = false;       // a lost edge inside an expected bounce: toast only if the bounce outlasts its bound
+            uint32_t _netBounceEnd = 0;      // millis() the expected bounce of our own ends, 0 = none
+    #ifdef KNX_IP_WIFI
+            // Rejoin: leave, 0.5 s settle, join; a failed join is retried 10 s after it (WIFI_REJOIN_FAILED_MS) with its own
+            // settle, about 11.5 s in on the 500 ms tick; that join's association gets the rest.
+            static constexpr uint32_t NET_BOUNCE_MS = 20000;
+    #else
+            // PHY reset or link mode change; longest path: net reset's blocking 0.5 + 0.6 s re-init, then up to 4 s autoneg
+            // (esp_eth start waits as long), plus the 500 ms tick.
+            static constexpr uint32_t NET_BOUNCE_MS = 10000;
+    #endif
+    #if defined(KNX_IP_LAN) && defined(OPENKNX_ETH_AUTO_FALLBACK)
+            uint8_t _netLadderSteps = 0;     // EthLinkManager::ladderSteps() at the last link tick
+            uint32_t _netLadderStepAt = 0;   // millis() of the last ladder step on an up link, 0 = none
+        #if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500)
+            static constexpr uint32_t NET_DOWN_DEBOUNCE_MS = LINK_DEBOUNCE_SAMPLES * 500; // linkCarrier(), 500 ms link tick
+        #elif defined(ARDUINO_ARCH_ESP32)
+            static constexpr uint32_t NET_DOWN_DEBOUNCE_MS = 2500; // esp_eth polls the PHY link every 2 s, plus the tick
+        #else
+            static constexpr uint32_t NET_DOWN_DEBOUNCE_MS = 0; // linkCarrier() passes the driver's link state through
+        #endif
+    #endif
+            void expectLinkBounce(uint32_t ms); // the module takes the link down itself: a lost edge within ms is held
+            void noteLinkLost();                // lost edge: toast at once, or held inside an expected bounce
+            void noteLinkHold();                // per link tick: an expected bounce over with the link still down gets its toast
+            void noteLink(bool up);
+    #ifdef OPENKNX_WIFI_AP
+            bool _wifiApBootDone = false; // an automatic check ended without a setup AP: a later automatic one gets a toast
+            bool _wifiApAsked = false;    // the next setup AP was asked for (prog button, console): it gets a toast
+    #endif
 #endif
 
 #ifdef OPENKNX_PING

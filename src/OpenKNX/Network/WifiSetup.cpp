@@ -29,6 +29,7 @@ static constexpr uint32_t WIFI_SCAN_MAX_MS = 15000; // a scan without an end eve
 #endif
 #ifdef DEVICE_DISPLAY_MODULE
 #include "DeviceDisplay.h"
+#include "Icons/UiIcons.h"
 #endif
 #ifdef ARDUINO_ARCH_RP2040
 #include <LittleFS.h>
@@ -445,7 +446,13 @@ namespace OpenKNX
                 return;
             }
 
-            if (_wifiApChecked) return;
+            if (_wifiApChecked)
+            {
+#ifdef DEVICE_DISPLAY_MODULE
+                _wifiApBootDone = true; // this check ended without a setup AP
+#endif
+                return;
+            }
 
             if (wifiOwnApConfigured())
             {
@@ -515,6 +522,9 @@ namespace OpenKNX
             if (!ok)
             {
                 logErrorP("WiFi: setup AP failed");
+#ifdef DEVICE_DISPLAY_MODULE
+                _wifiApAsked = false; // the request is over: a later automatic AP is not the asked one
+#endif
                 return;
             }
             _wifiApActive = true;
@@ -522,6 +532,12 @@ namespace OpenKNX
             _wifiApClients = 0;
             memset(_wifiApStas, 0, sizeof(_wifiApStas));
             strncpy(_wifiApSsid, _hostName, sizeof(_wifiApSsid) - 1);
+#ifdef DEVICE_DISPLAY_MODULE
+            // Not for the boot AP and its own retries (no link for good): those come back every few minutes.
+            if (_wifiApAsked || _wifiApBootDone)
+                openknxDisplayModule.toast(ToastLevel::Warn, ::OpenKNX::Ui::kRowWifi, "WiFi setup on", _wifiApSsid);
+            _wifiApAsked = false;
+#endif
             s_wifiApDns.start(53, "*", WiFi.softAPIP());
             // Open AP: no KNXnet/IP. controlKnxIp() leaves an interface (0x07B0) alone to keep live tunnels; an endpoint
             // from an earlier client link would answer tunnel requests on the AP, and there are no tunnels to keep.
@@ -769,6 +785,9 @@ namespace OpenKNX
             }
             if (millis() - _wifiProgPendingSince < WIFI_PROG_AP_DELAY_MS) return;
             _wifiProgPendingSince = 0;
+#ifdef DEVICE_DISPLAY_MODULE
+            _wifiApAsked = true;
+#endif
             startWifiAp();
             _wifiApByProg = _wifiApActive;
         }
@@ -1075,6 +1094,9 @@ namespace OpenKNX
                 leaveWifiAp();
                 return;
             }
+#ifdef DEVICE_DISPLAY_MODULE
+            expectLinkBounce(NET_BOUNCE_MS); // leave and join: a bounce of our own
+#endif
 #ifdef ARDUINO_ARCH_RP2040
             logInfoP("WiFi: rejoining \"%s\"", _wifiSSID);
             startWifiJoinCycle();
@@ -1112,6 +1134,9 @@ namespace OpenKNX
             }
             if (_currentLinkState) logInfoP("WiFi: leaving \"%s\" for setup AP", _wifiSSID);
             _wifiProgPendingSince = 0;
+#ifdef DEVICE_DISPLAY_MODULE
+            _wifiApAsked = true;
+#endif
             startWifiAp();
             if (!_wifiApActive) return;
             _wifiApByProg = true; // on demand: the 10 min idle rule of the prog button

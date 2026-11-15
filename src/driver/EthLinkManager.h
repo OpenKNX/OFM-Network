@@ -35,6 +35,10 @@ class EthLinkManager
 #ifdef OPENKNX_ETH_AUTO_FALLBACK
     void tick(bool carrierUp, bool established); // ~2 Hz link tick; walks the ladder (no-op if a fixed mode is set)
     void resetLadder();                          // restart the auto-fallback search from auto-negotiation
+#ifdef DEVICE_DISPLAY_MODULE
+    uint8_t ladderSteps() const { return _ladderSteps; } // counts applyStage() calls (wraps), for the link-down toast
+    static constexpr uint32_t settleMs() { return ETH_SETTLE_MS; } // flaps after a step that the ladder ignores
+#endif
 #endif
 
 #if defined(ARDUINO_ARCH_ESP32)
@@ -111,6 +115,9 @@ class EthLinkManager
     uint8_t _wrapCount = 0;                                 // fruitless full ladder passes (no IP) -> park after the cap
     bool _resting = false;                                  // parked at the safe fallback speed, waiting for a real cable (quiet)
     static constexpr uint8_t ETH_MAX_WRAPS = 1;             // after this many fruitless full passes -> rest at 10 Mbit half
+#ifdef DEVICE_DISPLAY_MODULE
+    uint8_t _ladderSteps = 0; // applyStage() calls, the module compares it per link tick
+#endif
 #endif
 };
 #endif

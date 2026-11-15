@@ -19,6 +19,7 @@
 #endif
 #ifdef DEVICE_DISPLAY_MODULE
     #include "DeviceDisplay.h"
+    #include "Icons/UiIcons.h"
     #include "Widgets/WidgetNetSpeed.h"
     #ifndef OPENKNX_WIFI_AP // the WiFi widget carries the network values on its own page
         #include "Widgets/WidgetNetInfo.h"
@@ -355,6 +356,9 @@ namespace OpenKNX
         {
             logInfoP("Reset network adapter");
             logIndentUp();
+#ifdef DEVICE_DISPLAY_MODULE
+            expectLinkBounce(NET_BOUNCE_MS);
+#endif
 #ifdef OPENKNX_WIFI_AP
             stopWifiAp(); // the re-init below decides again (loopWifiAp)
 #endif
@@ -1202,7 +1206,92 @@ namespace OpenKNX
             logEnd();
 
             _ipShown = true;
+#ifdef DEVICE_DISPLAY_MODULE
+            if (_netDownNoted) noteLink(true);
+#endif
         }
+
+#ifdef DEVICE_DISPLAY_MODULE
+        /**
+         * @brief The module takes the link down itself (PHY reset, link mode, rejoin): a lost edge within ms gets no toast
+         *        unless the link is still down when ms are over. A later call extends the window.
+         */
+        void Module::expectLinkBounce(uint32_t ms)
+        {
+            const uint32_t end = (millis() + ms) | 1; // 0 means none
+            if (_netBounceEnd == 0 || (int32_t)(end - _netBounceEnd) > 0) _netBounceEnd = end;
+    #if defined(KNX_IP_LAN) && defined(OPENKNX_ETH_AUTO_FALLBACK)
+            // Another bounce of our own runs to its own bound; a ladder step stamps itself again right after this call.
+            _netLadderStepAt = 0;
+    #endif
+        }
+
+        /** @brief Lost edge: the error card at once, or held while an expected bounce runs. */
+        void Module::noteLinkLost()
+        {
+            if (_netBounceEnd != 0)
+                _netDownHeld = true;
+            else
+                noteLink(false);
+        }
+
+        /**
+         * @brief Ends an expected bounce at its bound, or after a ladder step once settled with the link up; a lost edge
+         *        held in it gets its card when the link is still down at the bound.
+         */
+        void Module::noteLinkHold()
+        {
+    #if defined(KNX_IP_LAN) && defined(OPENKNX_ETH_AUTO_FALLBACK)
+            // After a ladder step: a drop within its settle time has its edge by settle + debounce; past that, a link
+            // that is up ends the window as a got-link edge would.
+            if (_netLadderStepAt != 0 && _currentLinkState &&
+                millis() - _netLadderStepAt >= EthLinkManager::settleMs() + NET_DOWN_DEBOUNCE_MS)
+            {
+                _netLadderStepAt = 0;
+                _netBounceEnd = 0;
+                _netDownHeld = false;
+                return;
+            }
+    #endif
+            if (_netBounceEnd == 0 || (int32_t)(millis() - _netBounceEnd) < 0) return;
+            _netBounceEnd = 0;
+    #if defined(KNX_IP_LAN) && defined(OPENKNX_ETH_AUTO_FALLBACK)
+            _netLadderStepAt = 0;
+    #endif
+            if (_netDownHeld && !_currentLinkState) noteLink(false);
+            _netDownHeld = false;
+        }
+
+        /**
+         * @brief Error card for a lost link, and Ok toast for the next establish after it (which retracts the card). Boot
+         *        and the setup AP have no lost edge; a bounce of our own back within its bound shows nothing.
+         */
+        void Module::noteLink(bool up)
+        {
+            _netDownNoted = !up;
+            if (!up)
+            {
+    #ifdef KNX_IP_WIFI
+                openknxDisplayModule.toast(ToastLevel::Error, ::OpenKNX::Ui::kRowWifi, "WiFi lost", _wifiSSID);
+    #else
+                openknxDisplayModule.toast(ToastLevel::Error, ::OpenKNX::Ui::kRowLan, "LAN down", "Check cable");
+    #endif
+                return;
+            }
+            const IPAddress ip = localIP();
+            char line[24]; // "255.255.255.255 DHCP"
+            const int n = snprintf(line, sizeof(line), "%u.%u.%u.%u %s", (unsigned)ip[0], (unsigned)ip[1], (unsigned)ip[2],
+                                   (unsigned)ip[3], localUsesStaticIp() ? "FIX" : "DHCP");
+            if (n > DisplayToast::NarrowChars) *strrchr(line, ' ') = '\0'; // the address alone when both do not fit every form
+    #ifdef KNX_IP_WIFI
+            openknxDisplayModule.retractToast("WiFi lost");
+            openknxDisplayModule.toast(ToastLevel::Ok, ::OpenKNX::Ui::kRowWifi, "WiFi up", line);
+    #else
+            openknxDisplayModule.retractToast("LAN down");
+            openknxDisplayModule.toast(ToastLevel::Ok, ::OpenKNX::Ui::kRowLan, "LAN up", line);
+    #endif
+        }
+#endif
 
         // 03_08_03 3.5.3 p.20: the IP-fault bit of PID_KNXNETIP_DEVICE_STATE is set once communication to the
         // IP network has failed for five seconds and cleared when it resumes. established() is the accurate
@@ -1458,6 +1547,9 @@ namespace OpenKNX
     #endif
             logInfoP("Gateway silent: link restart %u", (unsigned)_gwRestarts + 1);
             _gwMisses = 0;
+    #ifdef DEVICE_DISPLAY_MODULE
+            expectLinkBounce(NET_BOUNCE_MS); // ESP32 LAN: the task above stops and starts the driver
+    #endif
     #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_WIFI)
             startWifiJoinCycle(); // waits for the leave like 'net wifi reconnect'; joins anyway if the link stays up
     #elif defined(ARDUINO_ARCH_RP2040)
@@ -1604,6 +1696,15 @@ namespace OpenKNX
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_LAN)
                 setLwipLinkState(true); // DHCP: REBOOTING (reclaims the lease) -> DISCOVER -> AutoIP
 #endif
+#ifdef DEVICE_DISPLAY_MODULE
+    #if defined(KNX_IP_LAN) && defined(OPENKNX_ETH_AUTO_FALLBACK)
+                // Back: an expected bounce is over; after a ladder step noteLinkHold() ends it (the link may drop again).
+                if (_netLadderStepAt == 0) _netBounceEnd = 0;
+    #else
+                _netBounceEnd = 0; // back: an expected bounce is over, a lost edge held in it gets no toast
+    #endif
+                _netDownHeld = false;
+#endif
                 _linkUpSinceSec = uptime();
                 if (_linkEverDown)
                 {
@@ -1635,9 +1736,28 @@ namespace OpenKNX
             {
                 onLinkLost();
                 logInfoP("Link disconnected");
+#ifdef DEVICE_DISPLAY_MODULE
+                noteLinkLost();
+#endif
             }
 
             _currentLinkState = newLinkState;
+#if defined(DEVICE_DISPLAY_MODULE) && defined(KNX_IP_LAN) && defined(OPENKNX_ETH_AUTO_FALLBACK)
+            if (_ethLink.ladderSteps() != _netLadderSteps)
+            {
+                // The ladder changed the speed on a link that is up: the drop that follows is a bounce of our own. After
+                // the edges, so a got-link edge in this tick does not end the window at once.
+                _netLadderSteps = _ethLink.ladderSteps();
+                if (newLinkState)
+                {
+                    expectLinkBounce(NET_BOUNCE_MS);
+                    _netLadderStepAt = millis() != 0 ? millis() : UINT32_MAX; // 0 means none; never after now
+                }
+            }
+#endif
+#ifdef DEVICE_DISPLAY_MODULE
+            noteLinkHold();
+#endif
             _lastLinkCheck = millis();
 #if defined(ARDUINO_ARCH_RP2040) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
             checkIpWatchdog(carrier);
@@ -1750,11 +1870,17 @@ namespace OpenKNX
             if (phyToolActive())
             {
                 phyToolLoop(); // 'net phy reset|pin' owns RSTn and the SPI bus until it is done
+    #ifdef DEVICE_DISPLAY_MODULE
+                noteLinkHold(); // no link tick meanwhile: a recovery outlasting its bound still gets its card
+    #endif
                 return;
             }
             if (_ethDegraded)
             {
                 ethSelfHeal(); // W5500 not up yet: keep retrying a clean bring-up; skip normal link handling
+    #ifdef DEVICE_DISPLAY_MODULE
+                noteLinkHold();
+    #endif
                 return;
             }
             checkEthHealth(); // runtime W5500 wedge watchdog -> clean recovery
@@ -2176,6 +2302,9 @@ namespace OpenKNX
                     }
                 }
 
+#ifdef DEVICE_DISPLAY_MODULE
+                expectLinkBounce(NET_BOUNCE_MS); // the PHY renegotiates or is forced: a bounce of our own
+#endif
 #ifdef OPENKNX_ETH_RMII
                 if (mode != 0 && dup.empty())
                 {
@@ -3023,6 +3152,10 @@ namespace OpenKNX
         // Startup-delay hook -> EthLinkManager re-applies a persisted fixed link mode (flash now loaded).
         void Module::processAfterStartupDelay()
         {
+    #if defined(DEVICE_DISPLAY_MODULE) && defined(ParamNET_LanMode)
+            // A fixed ETS link mode (EthLinkManager etsLinkMode(): 1 = 100 Mbit, 3 = 10 Mbit) bounces the PHY.
+            if (knx.configured() && (ParamNET_LanMode == 1 || ParamNET_LanMode == 3)) expectLinkBounce(NET_BOUNCE_MS);
+    #endif
             _ethLink.onStartupDelay();
         }
         static constexpr uint16_t NET_ETHLINK_FLASH_SIZE = 3; // EthLink owns [version=2][mode][fullDuplex]; keep in sync with EthLinkManager::flashSize()
@@ -3291,6 +3424,9 @@ namespace OpenKNX
                     _healFailures = 0;
                     controlKnxIp(true); // recoverEth() disabled it; nothing else re-enables it on RP2040
                     _ipLedState = 0;         // force checkLinkStatus() to re-evaluate the LED from the real link
+#ifdef DEVICE_DISPLAY_MODULE
+                    expectLinkBounce(NET_BOUNCE_MS); // the link comes up through the re-begin (and a fixed mode below)
+#endif
                     _ethLink.applyEtsMode(); // the re-begin left the PHY at its default -> re-apply the ETS mode
                     logInfoP("W5500 recovered - network back online");
                     return;
@@ -3354,6 +3490,13 @@ namespace OpenKNX
             // answers; a stale _started is cleared by beginEthAfterReset() once it is back.
             const bool chipAnswers = (_ethLink.chipVersion() == 0x04);
             if (chipAnswers) controlKnxIp(false);
+#ifdef DEVICE_DISPLAY_MODULE
+            // onLinkLost() below takes the link down past the edge in checkLinkStatus(): note it here, held for one
+            // re-begin retry (ETH_HEAL_INTERVAL_MS) and the bounce, a later successful re-begin extends it by its own
+            // bound; loop() checks the hold while it skips the link tick.
+            expectLinkBounce(NET_BOUNCE_MS + ETH_HEAL_INTERVAL_MS);
+            if (_currentLinkState) noteLinkLost();
+#endif
             onLinkLost(); // before end(): the lwIP link-down has to reach a netif that still exists
             if (chipAnswers) KNX_NETIF.end();
             _ethBadProbes = 0;
@@ -3455,6 +3598,9 @@ namespace OpenKNX
                      (int)PIN_ETH_RES, (unsigned)seconds);
 
             recoverEth();
+    #ifdef DEVICE_DISPLAY_MODULE
+            expectLinkBounce((uint32_t)seconds * 1000 + NET_BOUNCE_MS + ETH_HEAL_INTERVAL_MS); // the network is down on purpose
+    #endif
             pinMode(PIN_ETH_RES, OUTPUT);
             digitalWrite(PIN_ETH_RES, HIGH);
             _phyToolLevel = true;
@@ -3474,6 +3620,14 @@ namespace OpenKNX
             if (_phyTool == PhyTool::None) return;
 #if defined(PIN_ETH_RES)
             digitalWrite(PIN_ETH_RES, HIGH);
+#endif
+#ifdef DEVICE_DISPLAY_MODULE
+            if (_phyTool == PhyTool::PinToggle && _netBounceEnd != 0)
+            {
+                // The toggle window ends now: from here the bound of a recovery, if that is shorter.
+                const uint32_t end = (millis() + NET_BOUNCE_MS + ETH_HEAL_INTERVAL_MS) | 1;
+                if ((int32_t)(end - _netBounceEnd) < 0) _netBounceEnd = end;
+            }
 #endif
             _phyTool = PhyTool::None;
             _lastEthHeal = 0;

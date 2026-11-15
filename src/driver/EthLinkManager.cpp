@@ -271,6 +271,9 @@ static const char *ethStageName(uint8_t stage)
 void EthLinkManager::applyStage(uint8_t stage)
 {
     _stage = stage;
+#ifdef DEVICE_DISPLAY_MODULE
+    ++_ladderSteps;
+#endif
     // stage -> (speed100, fullDuplex); stage 0 = auto-negotiation. 1=100F 2=100H 3=10F 4=10H.
     const bool speed100 = (stage == 1 || stage == 2);
     const bool full = (stage == 1 || stage == 3);
