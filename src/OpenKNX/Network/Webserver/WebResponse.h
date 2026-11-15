@@ -82,6 +82,9 @@ namespace OpenKNX
             int totalLength() const;
 
             void reset(); // RP2040: eine Instanz pro Verbindungsslot, wiederverwendet
+            /** @brief After a failed allocation: drops body, stream and layout use and answers 503 without allocating.
+             *  The caller runs finalizeSegments() unless handleRequest() still does. */
+            void sendOutOfMemory();
 
             ~WebResponse();
 

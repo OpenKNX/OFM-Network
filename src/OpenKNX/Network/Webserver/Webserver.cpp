@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <new> // std::bad_alloc
 #include <string>
 
 namespace OpenKNX
@@ -1079,7 +1080,22 @@ namespace OpenKNX
             _loopAt.store(millis(), std::memory_order_relaxed);
             if (_loopCall.load(std::memory_order_relaxed))
                 if (LoopCall* c = _loopCall.exchange(nullptr)) // an addLoopRoute() request, httpd waits for the give
-                    (*c->handler)(*c->req, *c->res), xSemaphoreGive((SemaphoreHandle_t)_loopDone);
+                {
+                    char oomUri[48] = "";
+                    try
+                    {
+                        (*c->handler)(*c->req, *c->res);
+                    }
+                    catch (const std::bad_alloc&)
+                    {
+                        // runs in the loop task: the catch in the httpd handler cannot see this throw
+                        c->res->sendOutOfMemory();
+                        strncpy(oomUri, c->req->uri.c_str(), sizeof(oomUri) - 1);
+                    }
+                    xSemaphoreGive((SemaphoreHandle_t)_loopDone); // first: httpd sends the 503 while the loop logs
+                    if (oomUri[0])
+                        openknx.logger.logWithPrefixAndValues("Webserver", "out of memory: 503 for %s", oomUri);
+                }
 #endif
 
             if (_pendingProg >= 0)

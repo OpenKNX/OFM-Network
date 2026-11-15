@@ -182,6 +182,15 @@ namespace OpenKNX
             return total;
         }
 
+        void WebResponse::sendOutOfMemory()
+        {
+            cleanupStream();
+            reset(); // allocates nothing: the header vector keeps its capacity, both header strings fit the small-string buffer
+            setStatus(503);
+            setContentType("text/plain; charset=utf-8");
+            sendStatic("Zu wenig Speicher, bitte erneut laden");
+        }
+
         void WebResponse::reset()
         {
             if (_bodyOwned) free(_body); // PSRAM_MALLOC

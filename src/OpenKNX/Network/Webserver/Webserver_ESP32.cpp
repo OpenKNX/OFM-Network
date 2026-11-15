@@ -8,6 +8,8 @@
 #include <arpa/inet.h>
 #include <cstdint>
 #include <esp_http_server.h>
+#include <memory>
+#include <new> // std::bad_alloc
 #include <fcntl.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -265,6 +267,13 @@ namespace OpenKNX
             }
 #endif
 
+            // Allocate the session and its list slot before the 101: after it a throw could only leave a stuck socket
+            std::unique_ptr<WsSession> sess(new WsSession{wsObj, fd, uri, nullptr, {}});
+            {
+                WsStateGuard guard(wsObj);
+                g_wsSessions.reserve(g_wsSessions.size() + 1); // only this task appends, the loop task only erases
+            }
+
             // Take the socket out of httpd's poll set first, or httpd reads the WS bytes as a new
             // HTTP request. Before the 101, so a failure here can still answer with a plain HTTP error.
             httpd_req_t* async = nullptr;
@@ -284,13 +293,22 @@ namespace OpenKNX
             int fl = fcntl(fd, F_GETFL, 0);
             if (fl >= 0) fcntl(fd, F_SETFL, fl | O_NONBLOCK);
 
-            WsSession* sess = new WsSession{wsObj, fd, uri, async, {}};
+            sess->async = async;
             {
                 WsStateGuard guard(wsObj);
-                g_wsSessions.push_back(sess);
+                g_wsSessions.push_back(sess.release()); // capacity reserved above: no allocation
             }
 
-            wsObj->notifySocketConnect(uri.c_str(), fd, true);
+            try
+            {
+                wsObj->notifySocketConnect(uri.c_str(), fd, true);
+            }
+            catch (const std::bad_alloc&)
+            {
+                // the 101 is out: no HTTP answer possible; loop() reaps the session and hands the socket back to httpd
+                markSessionDead(wsObj, fd);
+                logError("Webserver", "out of memory: WS %s closed", uri.c_str());
+            }
             return true;
         }
 
@@ -304,7 +322,26 @@ namespace OpenKNX
             return WEB_GET;
         }
 
+        static esp_err_t platformHttpHandlerBody(httpd_req_t* req);
+
+        // Everything the body allocates before handleRequest() (URI copy, request, POST body, WS session) can throw too.
+        // Nothing has been sent at those points: doWsUpgrade() allocates before its 101 and catches after it.
         static esp_err_t platformHttpHandler(httpd_req_t* req)
+        {
+            try
+            {
+                return platformHttpHandlerBody(req);
+            }
+            catch (const std::bad_alloc&)
+            {
+                openknx.logger.logWithPrefixAndValues("Webserver", "out of memory: 503 for %s", req->uri);
+                httpd_resp_set_status(req, "503 Service Unavailable");
+                httpd_resp_set_type(req, "text/plain; charset=utf-8");
+                return httpd_resp_sendstr(req, "Zu wenig Speicher, bitte erneut laden") == ESP_OK ? ESP_OK : ESP_FAIL;
+            }
+        }
+
+        static esp_err_t platformHttpHandlerBody(httpd_req_t* req)
         {
             Webserver* ws = (Webserver*)req->user_ctx;
             std::string uri = req->uri;
@@ -418,9 +455,18 @@ namespace OpenKNX
             }
 
             WebResponse response;
-            ws->handleRequest(request, response);
-
-            ws->logRequest(request, response);
+            try
+            {
+                ws->handleRequest(request, response);
+                ws->logRequest(request, response);
+            }
+            catch (const std::bad_alloc&)
+            {
+                // A page built in std::string under a full heap: answer 503 instead of std::terminate -> abort()
+                response.sendOutOfMemory();
+                response.finalizeSegments(); // reset() cleared the segments: without it the text is not sent
+                openknx.logger.logWithPrefixAndValues("Webserver", "out of memory: 503 for %s", uri.c_str());
+            }
 
             int statusCode = response.statusCode();
             const char* statusText = "OK";
@@ -570,15 +616,27 @@ namespace OpenKNX
 
             // Nur diese Schleife löscht Sessions, der Snapshot bleibt also gültig
             std::vector<WsSession*> sessions;
+            try
             {
                 WsStateGuard guard(this);
                 sessions = g_wsSessions;
+            }
+            catch (const std::bad_alloc&)
+            {
+                return; // no snapshot this tick: the sessions are served on the next one
             }
             if (sessions.empty()) return;
 
             // Hand the socket back to httpd (which closes it), then clear the registry.
             auto reap = [this](WsSession* sess) {
-                notifySocketConnect(sess->uri.c_str(), sess->fd, false);
+                try
+                {
+                    notifySocketConnect(sess->uri.c_str(), sess->fd, false);
+                }
+                catch (const std::bad_alloc&)
+                {
+                    logError("Webserver", "out of memory: WS %s disconnect callback", sess->uri.c_str()); // the reap goes on
+                }
                 httpd_req_async_handler_complete(sess->async);
                 {
                     WsStateGuard guard(this);
@@ -601,32 +659,40 @@ namespace OpenKNX
 
                 bool dead = false;
 
-                // Drain whatever is available right now — fully non-blocking.
-                for (;;)
+                try
                 {
-                    int n = recv(sess->fd, tmp, sizeof(tmp), MSG_DONTWAIT);
-                    if (n > 0)
+                    // Drain whatever is available right now — fully non-blocking.
+                    for (;;)
                     {
-                        sess->rx.insert(sess->rx.end(), tmp, tmp + n);
-                        if (sess->rx.size() > OPENKNX_WEBSOCKET_RX_CAP)
+                        int n = recv(sess->fd, tmp, sizeof(tmp), MSG_DONTWAIT);
+                        if (n > 0)
                         {
-                            dead = true;
+                            sess->rx.insert(sess->rx.end(), tmp, tmp + n);
+                            if (sess->rx.size() > OPENKNX_WEBSOCKET_RX_CAP)
+                            {
+                                dead = true;
+                                break;
+                            }
+                            continue;
+                        }
+                        if (n == 0)
+                        {
+                            dead = true; // peer closed
                             break;
                         }
-                        continue;
-                    }
-                    if (n == 0)
-                    {
-                        dead = true; // peer closed
+                        if (errno == EAGAIN || errno == EWOULDBLOCK)
+                            break; // nothing more pending
+                        dead = true; // real socket error
                         break;
                     }
-                    if (errno == EAGAIN || errno == EWOULDBLOCK)
-                        break; // nothing more pending
-                    dead = true; // real socket error
-                    break;
-                }
 
-                if (!dead && wsParseFrames(sess)) dead = true;
+                    if (!dead && wsParseFrames(sess)) dead = true;
+                }
+                catch (const std::bad_alloc&)
+                {
+                    dead = true; // received bytes are lost, the frame stream is out of step: end the session
+                    logError("Webserver", "out of memory: WS %s closed", sess->uri.c_str());
+                }
 
                 if (dead) reap(sess);
             }
