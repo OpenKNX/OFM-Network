@@ -2599,7 +2599,7 @@ namespace OpenKNX
             if (pos == std::string::npos)
             {
                 logErrorP("Expected format: net wifi set<Sep><SSID><Sep><PSK> with <Sep> single char not in <SSID>");
-                return false;
+                return true; // handled: false would echo the line, PSK included, as "command not found"
             }
             const std::string ssid = arg.substr(1, pos - 1);
             const std::string psk = arg.substr(pos + 1);
@@ -2608,7 +2608,7 @@ namespace OpenKNX
             if (ssid.length() > 32 || psk.length() > 63)
             {
                 logErrorP("SSID max. 32, PSK max. 63 Zeichen");
-                return false;
+                return true;
             }
 
             if (ssid.empty())
