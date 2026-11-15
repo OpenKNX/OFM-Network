@@ -61,7 +61,6 @@ static constexpr uint32_t WIFI_INFO_MS = 2000;          // RSSI/channel cache re
 static constexpr uint32_t WIFI_RSSI_SAMPLE_MS = 10000;  // RSSI history: 60 samples = 10 minutes
 static constexpr uint32_t WIFI_PING_MS = 1000;          // gateway ping interval while /wifi is open
 static constexpr uint32_t WIFI_PING_IDLE_MS = 10000;    // ping stops this long after the last /wifi/status request
-static constexpr uint32_t WIFI_WIDGET_SHOW_MS = 30000;  // setup AP: keep trying to bring the widget up this long
 #ifndef OPENKNX_WIFI_AP_IP
 #define OPENKNX_WIFI_AP_IP 10, 42, 0, 1 // AP address, /24; clients get theirs from the AP's DHCP server
 #endif
@@ -407,15 +406,25 @@ namespace OpenKNX
                 const uint32_t now = millis();
                 if (now - _wifiApPollAt < 1000) return;
                 _wifiApPollAt = now;
+#ifdef DEVICE_DISPLAY_MODULE
+                const uint8_t clientsBefore = _wifiApClients;
+#endif
                 pollWifiApStations();
                 if (_wifiApClients) _wifiApIdleSince = now;
 #ifdef DEVICE_DISPLAY_MODULE
-                if (_wifiWidgetShowSince != 0)
+                // Setup AP: the widget holds the screen until a phone joined and it showed the address once (it stays
+                // pinned until it is on screen for that); then the rotation resumes. The last phone gone pins it again.
+                WidgetsManager *manager = openknxDisplayModule.getWidgetManager();
+                if (!_wifiOwnAp && manager != nullptr && _wifiWidget != nullptr)
                 {
-                    WidgetsManager *manager = openknxDisplayModule.getWidgetManager();
-                    if ((manager != nullptr && _wifiWidget != nullptr && manager->showDefaultWidget(_wifiWidget)) ||
-                        now - _wifiWidgetShowSince >= WIFI_WIDGET_SHOW_MS)
-                        _wifiWidgetShowSince = 0;
+                    if (_wifiApClients == 0 || clientsBefore == 0) manager->pin(_wifiWidget);
+                    const PowerSaveMode mode = manager->getPowerSaveMode(); // a dark panel keeps the current widget
+                    const bool lit = !manager->isForcedOff() && (mode == PowerSaveMode::Active || mode == PowerSaveMode::Dimmed);
+                    if (_wifiApClients != 0 && lit && manager->pinnedWidget() == _wifiWidget && manager->getCurrentWidget() == _wifiWidget)
+                    {
+                        _wifiWidget->setPage(1); // "Open in browser" and the address
+                        manager->unpin(_wifiWidget);
+                    }
                 }
 #endif
                 // Own AP, or setup AP without credentials: nothing to go back to
@@ -512,9 +521,6 @@ namespace OpenKNX
             _wifiApIdleSince = millis();
             _wifiApClients = 0;
             memset(_wifiApStas, 0, sizeof(_wifiApStas));
-#ifdef DEVICE_DISPLAY_MODULE
-            _wifiWidgetShowSince = millis() | 1; // 0 means none
-#endif
             strncpy(_wifiApSsid, _hostName, sizeof(_wifiApSsid) - 1);
             s_wifiApDns.start(53, "*", WiFi.softAPIP());
             // Open AP: no KNXnet/IP. controlKnxIp() leaves an interface (0x07B0) alone to keep live tunnels; an endpoint
@@ -649,7 +655,7 @@ namespace OpenKNX
             _wifiApClients = 0;
             _wifiApSince = millis();
 #ifdef DEVICE_DISPLAY_MODULE
-            _wifiWidgetShowSince = 0;
+            if (WidgetsManager *manager = openknxDisplayModule.getWidgetManager()) manager->unpin(_wifiWidget);
 #endif
         }
 

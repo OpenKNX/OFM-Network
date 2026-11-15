@@ -708,8 +708,7 @@ namespace OpenKNX
             void loopWifiPing();
 #endif
 #ifdef DEVICE_DISPLAY_MODULE
-            Widget *_wifiWidget = nullptr;
-            uint32_t _wifiWidgetShowSince = 0; // setup AP started: bring the widget up once, 0 = done
+            Widget *_wifiWidget = nullptr; // pinned by the manager while the setup AP waits for a phone
 #endif
             void checkWifiProgAp(bool up);
             void loopWifiClient(bool up);
