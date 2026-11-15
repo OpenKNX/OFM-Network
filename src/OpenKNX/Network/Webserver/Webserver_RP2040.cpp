@@ -6,6 +6,7 @@
 #include "OpenKNX/Crypto/SHA1.h"
 #include "OpenKNX/Network/Module.h"
 #include "OpenKNX/Network/Webserver/Webserver.h"
+#include "OpenKNX/Network/Webserver/HeapAdmission.h"
 #include <algorithm>
 #include <lwip/tcp.h>
 #include <lwip_wrap.h> // LWIPMutex: makes the ethernet IRQ defer
@@ -109,10 +110,7 @@ namespace OpenKNX
             uint32_t bodyReceived = 0;
             bool waitingForBody = false;
 
-            // Streaming Download (LittleFS → TCP)
-            WebStreamReadFn streamReader = nullptr;
-            WebStreamCleanupFn streamCleanup = nullptr;
-            void* streamCtx = nullptr;
+            // Streaming response (HTML or file → TCP)
             size_t streamTotal = 0;
             size_t streamSent = 0;
             bool streaming = false;
@@ -160,9 +158,12 @@ namespace OpenKNX
             s->pendOff = 0;
             if (s->idx >= 0 && s->idx < MAX_CONN)
             {
-                g_response[s->idx].reset(); // body and layout shells
+                // Transfer ownership before reset: file close must stay in the loop.
+                void* ctx = nullptr;
+                auto cleanup = g_response[s->idx].releaseStream(ctx);
+                if (cleanup) g_streamGc[s->idx] = {cleanup, ctx};
+                g_response[s->idx].reset();
                 g_pending[s->idx] = std::string();
-                if (s->streaming && s->streamCleanup) g_streamGc[s->idx] = {s->streamCleanup, s->streamCtx};
             }
             if (s->bodyBuf)
             {
@@ -170,9 +171,6 @@ namespace OpenKNX
                 s->bodyBuf = nullptr;
             }
             s->streaming = false;
-            s->streamReader = nullptr;
-            s->streamCleanup = nullptr;
-            s->streamCtx = nullptr;
             s->pcb = nullptr;
         }
 
@@ -268,7 +266,7 @@ namespace OpenKNX
             tcp_output(s->pcb);
         }
 
-        // Loop context only: the reader touches the filesystem. A few chunks per tick,
+        // Loop context only: file readers touch the filesystem. A few chunks per tick,
         // so a large download does not stretch the loop.
         static void tcpSendStream(ConnSlot* s)
         {
@@ -282,7 +280,7 @@ namespace OpenKNX
                 size_t rem = s->streamTotal - s->streamSent;
                 if (toRead > rem) toRead = rem;
 
-                size_t got = s->streamReader(s->streamCtx, buf, toRead);
+                size_t got = g_response[s->idx].readStreamChunk(buf, toRead);
                 if (got == 0)
                 {
                     s->streamSent = s->streamTotal; // early EOF, the close ends it
@@ -291,7 +289,7 @@ namespace OpenKNX
                 s->streamSent += got;
                 if (tcp_write(s->pcb, buf, (u16_t)got, TCP_WRITE_FLAG_COPY) != ERR_OK)
                 {
-                    // Already consumed from the file -- dropping it would corrupt the download.
+                    // Already consumed from the stream -- retain it until TCP accepts it.
                     g_pending[s->idx].assign((const char*)buf, got);
                     s->pendOff = 0;
                     break;
@@ -460,8 +458,39 @@ namespace OpenKNX
             hdr[hLen] = '\0';
         }
 
+        // Error responses for requests that never reach the router.
+        static err_t rejectRequest(ConnSlot* s, const char* resp, size_t len)
+        {
+            tcp_write(s->pcb, resp, (u16_t)len, TCP_WRITE_FLAG_COPY);
+            tcp_output(s->pcb);
+            return closeSlot(s);
+        }
+
+        static const char MEMORY_UNAVAILABLE[] =
+            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n"
+            "Retry-After: 5\r\nConnection: close\r\n\r\n";
+
+        static bool rpHeapFits(size_t bodyLength)
+        {
+            const int available = rp2040.getFreeHeap();
+            const size_t freeBytes = available > 0 ? (size_t)available : 0;
+#ifdef OPENKNX_PSRAM
+            const int psramAvailable = rp2040.getFreePSRAMHeap();
+            return webHeapReserveFits(freeBytes, 0, OPENKNX_WEBSERVER_MIN_FREE_HEAP) &&
+                   bodyLength <= (size_t)std::max(psramAvailable, 0);
+#else
+            return webHeapReserveFits(freeBytes, bodyLength, OPENKNX_WEBSERVER_MIN_FREE_HEAP);
+#endif
+        }
+
         static void doHttpDispatch(ConnSlot* s)
         {
+            if (!rpHeapFits(0))
+            {
+                rejectRequest(s, MEMORY_UNAVAILABLE, sizeof(MEMORY_UNAVAILABLE) - 1);
+                return;
+            }
+
             if (s->isWs && !s->ws->hasSocket(s->uri))
             {
                 const char resp[] = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
@@ -614,9 +643,6 @@ namespace OpenKNX
 
                 g_pending[s->idx].assign(hdr, (size_t)hLen);
                 s->pendOff = 0;
-                s->streamReader = response.streamReadFn();
-                s->streamCleanup = response.streamCleanupFn();
-                s->streamCtx = response.streamCtx();
                 s->streamTotal = response.streamTotal();
                 s->streamSent = 0;
                 s->streaming = true;
@@ -843,14 +869,6 @@ namespace OpenKNX
             return txDone(s) ? closeSlot(s) : ERR_OK;
         }
 
-        // Error responses for requests that never reach the router.
-        static err_t rejectRequest(ConnSlot* s, const char* resp, size_t len)
-        {
-            tcp_write(s->pcb, resp, (u16_t)len, TCP_WRITE_FLAG_COPY);
-            tcp_output(s->pcb);
-            return closeSlot(s);
-        }
-
         static err_t onRecv(void* arg, tcp_pcb* tpcb, pbuf* p, err_t err)
         {
             ConnSlot* s = (ConnSlot*)arg;
@@ -931,13 +949,17 @@ namespace OpenKNX
                                     "HTTP/1.1 413 Content Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
                                 ret = rejectRequest(s, resp413, sizeof(resp413) - 1);
                             }
+                            else if (!rpHeapFits(s->contentLength))
+                            {
+                                ret = rejectRequest(s, MEMORY_UNAVAILABLE, sizeof(MEMORY_UNAVAILABLE) - 1);
+                            }
                             else
                             {
                                 // Body buffer, seeded with what already arrived
                                 s->bodyBuf = (uint8_t*)PSRAM_MALLOC(s->contentLength);
                                 if (s->bodyBuf == nullptr)
                                 {
-                                    ret = closeSlot(s);
+                                    ret = rejectRequest(s, MEMORY_UNAVAILABLE, sizeof(MEMORY_UNAVAILABLE) - 1);
                                 }
                                 else
                                 {

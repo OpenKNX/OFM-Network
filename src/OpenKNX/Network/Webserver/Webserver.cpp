@@ -151,7 +151,8 @@ namespace OpenKNX
         void Webserver::buildOverviewPage(WebResponse& res)
         {
             char buf[64];
-            std::string page = "<div class='container'><h1>Übersicht</h1>";
+            HtmlWriter page(res);
+            page += "<div class='container'><h1>Übersicht</h1>";
 
             // Appends straight into page instead of building+copying a separate string per row.
             // id nur für die Felder, die der Status live nachzieht.
@@ -312,7 +313,6 @@ namespace OpenKNX
             page += "</div>";
             res.setContentType("text/html");
             res.setLayout(true);
-            res.send(page.c_str());
         }
 #endif // OPENKNX_WEBSERVER
 
@@ -520,15 +520,13 @@ namespace OpenKNX
                          "<p class='meta'>Die angeforderte Seite existiert nicht.</p>");
             }
 
-            // Layout anwenden und die Antwort in ihre Sendeblöcke zerlegen. Bewusst hier
-            // und nicht im Plattformcode: der kennt danach nur noch res.segments() und
-            // muss weder useLayout() auswerten noch buildHeader()/buildFooter() kennen.
+            // Keep layout assembly here; transports consume segments or readStreamChunk().
+            if (res.useLayout())
+                res.setLayoutChrome(
+                    buildHeader(res.activeMenuUri().empty() ? path : res.activeMenuUri()),
+                    buildFooter());
             if (!res.isStreaming())
             {
-                if (res.useLayout())
-                    res.setLayoutChrome(
-                        buildHeader(res.activeMenuUri().empty() ? path : res.activeMenuUri()),
-                        buildFooter());
                 res.finalizeSegments();
             }
 
