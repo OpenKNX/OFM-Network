@@ -5,7 +5,12 @@
 #include "OpenKNX.h"
 #include <algorithm>
 
+#if __has_include(<NetworkClient.h>)
+#include <NetworkClient.h> // core 3.x: WiFiClient.h only aliases it, a LAN build links without the WiFi library
+typedef NetworkClient WiFiClient;
+#else
 #include <WiFiClient.h>
+#endif
 #include <WiFiClientSecure.h>
 
 #ifdef CONFIG_SPIRAM

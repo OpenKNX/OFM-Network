@@ -6,8 +6,18 @@
 #include <algorithm>
 
 #if defined(ARDUINO_ARCH_ESP32)
+#if __has_include(<NetworkClient.h>)
+#include <NetworkClient.h> // core 3.x: WiFiClient.h only aliases it, a LAN build links without the WiFi library
+typedef NetworkClient WiFiClient;
+#else
 #include <WiFiClient.h>
+#endif
+#if __has_include(<NetworkServer.h>)
+#include <NetworkServer.h>
+typedef NetworkServer WiFiServer;
+#else
 #include <WiFiServer.h>
+#endif
 #if defined(KNX_IP_LAN)
 #include <ETH.h>
 #else
