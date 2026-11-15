@@ -571,13 +571,10 @@ namespace OpenKNX
         {
             char psk[64] = {};
 #ifdef ARDUINO_ARCH_RP2040
-            File file = LittleFS.open("/WIFIAP.TXT", "r");
-            if (file)
-            {
-                const String line = file.readStringUntil('\n');
-                file.close();
-                strncpy(psk, line.c_str(), sizeof(psk) - 1);
-            }
+            WifiStore store;
+            loadWifiStore(store); // readWifiSettings() took over a WIFIAP.TXT at start
+            strncpy(psk, store.apPsk, sizeof(psk) - 1);
+            memset(&store, 0, sizeof(store));
 #else
             Preferences preferences;
             preferences.begin("WIFI", true);
@@ -1273,10 +1270,12 @@ namespace OpenKNX
         bool Module::saveWifiApPassword(const char *psk)
         {
 #ifdef ARDUINO_ARCH_RP2040
-            File file = LittleFS.open("/WIFIAP.TXT", "w");
-            if (!file) return false;
-            file.println(psk);
-            file.close();
+            WifiStore store;
+            loadWifiStore(store);
+            strncpy(store.apPsk, psk, sizeof(store.apPsk) - 1);
+            const bool ok = saveWifiStore(store);
+            memset(&store, 0, sizeof(store));
+            if (!ok) return false;
 #else
             Preferences preferences;
             preferences.begin("WIFI", false);
@@ -1472,7 +1471,12 @@ namespace OpenKNX
                     return;
                 }
                 logInfoP("WiFi SSID: %s (web)", ssid.c_str());
-                saveWifiSettings(ssid.c_str(), psk.c_str(), true); // restart timer: the answer goes out first
+                if (!saveWifiSettings(ssid.c_str(), psk.c_str(), true)) // restart timer: the answer goes out first
+                {
+                    res.setStatus(500);
+                    res.sendStatic("Nicht gespeichert. Das Ger\xC3\xA4t startet neu.");
+                    return;
+                }
                 res.sendStatic("Gespeichert. Das Ger\xC3\xA4t startet neu.");
             });
 

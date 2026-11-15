@@ -15,5 +15,5 @@ Verwandt: [`Module.md`](Module.md), [`WebserverPlatform.md`](WebserverPlatform.m
 **Important platform notes:**
 - RP2040 uses **arduino-pico** by Earle Philhower (not the official Arduino Mbed Core) — lwIP in single-thread mode (`NO_SYS=1`), no FreeRTOS
 - ESP32 has FreeRTOS; DNS must be called via the TCPIP task callback (see `PingHandler_ESP32.cpp`)
-- W5500 SPI speed: `OPENKNX_NET_SPI_SPEED` (default 28 MHz), credentials in LittleFS (`/WIFI.TXT`)
+- W5500 SPI speed: `OPENKNX_NET_SPI_SPEED` (default 28 MHz); RP2040 WiFi credentials in the last flash sector (core EEPROM emulation), a `/WIFI.TXT` or `/WIFIAP.TXT` ending with a line break is stored there and removed (at start, or at runtime after 5 s of stable size)
 - ESP32 WiFi credentials via `Preferences` API

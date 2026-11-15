@@ -179,9 +179,26 @@ namespace OpenKNX
             bool processFunctionProperty(uint8_t objectIndex, uint8_t propertyId, uint8_t length, uint8_t *data, uint8_t *resultData, uint8_t &resultLength) override;
 
 #ifdef KNX_IP_WIFI
-            void saveWifiSettings(const char *ssid, const char *passphrase, bool scheduleRebootToTakeEffect);
+            bool saveWifiSettings(const char *ssid, const char *passphrase, bool scheduleRebootToTakeEffect);
             void readWifiSettings();
             bool setWifiFromConsole(const std::string &arg); // "<SEP><ssid><SEP><psk>"
+#ifdef ARDUINO_ARCH_RP2040
+            /** @brief WiFi secrets in the last flash sector (core EEPROM emulation), outside the file system. */
+            struct WifiStore
+            {
+                uint32_t magic;
+                char ssid[33];
+                char psk[64];
+                char apPsk[64];
+                char reserved[3]; // explicit padding: put() compares every byte
+            };
+            static void loadWifiStore(WifiStore &store);
+            static bool saveWifiStore(const WifiStore &store);
+            bool takeWifiFiles(WifiStore &store);
+            void loopWifiFiles();
+            uint32_t _wifiFileCheckAt = 0;
+            int32_t _wifiFileSize = -1; // both files' sizes at the last check, -1 = none
+#endif
 #endif
 
 #ifdef OPENKNX_NETWORK_USB_EXCHANGE

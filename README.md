@@ -85,9 +85,12 @@ without WiFi keep their parameter layout. Firmware side: `OPENKNX_WIFI_AP`.
 
 - Stored: operating mode (client / own AP), setup AP on/off, AP name (empty = host name), AP channel (auto / 1-13).
 - Not in the device parameters: client SSID/PSK and the AP password go online through function property 160/5
-  (commands 1 and 2) into the device (RP2040: LittleFS files, ESP32: NVS). The ETS fields are project parameters
-  that the script clears after a successful transfer; until then they are in the project (and in a ConfigTransfer
-  export). RP2040: the files (`/WIFI.TXT`, `/WIFIAP.TXT`) are readable through the web file manager (`OPENKNX_WEBFS`) and, with OFM-FileTransferModule, an FTC download (reads are not access-controlled); documented, not blocked.
+  (commands 1 and 2) into the device (RP2040: the last flash sector through the core EEPROM emulation, outside the
+  file system; ESP32: NVS). The ETS fields are project parameters that the script clears after a successful
+  transfer; until then they are in the project (and in a ConfigTransfer export). RP2040: a `/WIFI.TXT` (SSID, PSK)
+  or `/WIFIAP.TXT` (AP password) that ends with a line break is stored in that sector, then removed: at start, or at
+  runtime once its size held for 5 s (restart when the stored data changed). The web file manager and a file transfer
+  no longer reach them.
 - Online scan: commands 3 (start) and 4 (state + up to 8 networks), shown on the ETS page with "Übernehmen".
 - Own AP: WPA2 only (RP2040: the driver sets WPA/WPA2, switched to WPA2 after the start, since a Broadcom Windows client rejects WPA/WPA2; restarted with WPA/WPA2 when the switch does not read back, page and display then show it), no client at the same time; the KNXnet/IP properties report the AP address.
 - Regulatory domain: set `-D WIFICC=CYW43_COUNTRY_...` in the env (arduino-pico default is worldwide).

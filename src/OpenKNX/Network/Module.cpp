@@ -38,6 +38,18 @@
 #ifdef OPENKNX_SSL_STEP_PROFILE
     #include <LittleFS.h>
 #endif
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_WIFI)
+    #include <EEPROM.h>
+extern "C" uint8_t _EEPROM_start[]; // linker: the sector the core EEPROM emulation writes
+
+/** @brief Zeroes a copy of the WiFi secrets; volatile: a memset before the copy ends may be dropped by the compiler. */
+static void wipeSecret(void *p, size_t n)
+{
+    volatile uint8_t *v = static_cast<volatile uint8_t *>(p);
+    while (n--)
+        *v++ = 0;
+}
+#endif
 #ifdef OPENKNX_WEBCLIENT_TEST
     #include "Webserver/FileManager.h" // drive routing for "http get" -- /flash, sd/, efc/
 #endif
@@ -1731,6 +1743,9 @@ namespace OpenKNX
 #ifdef OPENKNX_WIFI_AP
             loopWifiAp();
 #endif
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_WIFI)
+            loopWifiFiles();
+#endif
 #ifdef OPENKNX_WEBCLIENT
             if (established()) webclient.loop();
 #endif
@@ -2561,18 +2576,96 @@ namespace OpenKNX
             dst[len] = '\0';
         }
 
-        void Module::saveWifiSettings(const char *ssid, const char *passphrase, bool scheduleRebootToTakeEffect)
+#ifdef ARDUINO_ARCH_RP2040
+        static constexpr uint32_t kWifiStoreMagic = 0x31464957; // "WIF1"
+
+        void Module::loadWifiStore(WifiStore &store)
         {
+            EEPROM.begin(sizeof(WifiStore));
+            EEPROM.get(0, store);
+            EEPROM.end(); // nothing changed: no flash write
+            if (store.magic != kWifiStoreMagic)
+                memset(&store, 0, sizeof(store));
+            store.ssid[sizeof(store.ssid) - 1] = 0;
+            store.psk[sizeof(store.psk) - 1] = 0;
+            store.apPsk[sizeof(store.apPsk) - 1] = 0;
+        }
+
+        bool Module::saveWifiStore(const WifiStore &store)
+        {
+            WifiStore copy = store;
+            copy.magic = kWifiStoreMagic;
+            memset(copy.reserved, 0, sizeof(copy.reserved));
+            EEPROM.begin(sizeof(WifiStore));
+            EEPROM.put(0, copy);
+            EEPROM.end(); // commit: interrupts off, other core idle, as the knx flash write
+            const bool ok = memcmp(_EEPROM_start, &copy, sizeof(copy)) == 0; // commit() does not read back
+            wipeSecret(&copy, sizeof(copy));
+            return ok;
+        }
+
+        /**
+         * @brief Reads the first two non-empty lines of the file path into lines; the caller removes it after storing.
+         *        Only a file ending in a line break counts (an upload may be running or cut off); one with bytes but no line is removed.
+         * @return false when path is missing, a directory, incomplete or without a line.
+         */
+        static bool takeWifiFile(const char *path, char (&lines)[2][100])
+        {
+            memset(lines, 0, sizeof(lines));
+            File file = LittleFS.open(path, "r");
+            if (!file) return false;
+            if (file.isDirectory())
+            {
+                file.close();
+                return false;
+            }
+            const size_t size = file.size();
+            if (!size || !file.seek(size - 1) || (file.peek() != '\n' && file.peek() != '\r') || !file.seek(0))
+            {
+                file.close();
+                return false;
+            }
+            uint8_t found = 0;
+            size_t pos = 0;
+            while (file.available() && found < 2)
+            {
+                const int value = file.read();
+                const bool end = value == '\n' || value == '\r';
+                if (!end && pos < sizeof(lines[0]) - 1)
+                    lines[found][pos++] = (char)value;
+                if ((end || !file.available()) && pos > 0)
+                    found++, pos = 0;
+            }
+            file.close();
+            if (!found) LittleFS.remove(path); // only line breaks: nothing to take
+            return found > 0;
+        }
+
+        /** @brief Removes a WiFi file once its content is stored. */
+        static bool dropWifiFile(const char *path)
+        {
+            if (LittleFS.remove(path)) return true;
+            logError("Network", "WiFi: %s could not be removed", path);
+            return false;
+        }
+#endif
+
+        bool Module::saveWifiSettings(const char *ssid, const char *passphrase, bool scheduleRebootToTakeEffect)
+        {
+            bool ok = true;
             logDebugP("Write WiFi settings");
 
 #ifdef ARDUINO_ARCH_RP2040
             if (!scheduleRebootToTakeEffect)
                 KNX_NETIF.disconnect();
 
-            File file = LittleFS.open("/WIFI.TXT", "w");
-            file.println(ssid);
-            file.println(passphrase);
-            file.close();
+            WifiStore store;
+            loadWifiStore(store);
+            copyBounded(store.ssid, sizeof(store.ssid), ssid, strlen(ssid));
+            copyBounded(store.psk, sizeof(store.psk), passphrase, strlen(passphrase));
+            ok = saveWifiStore(store);
+            wipeSecret(&store, sizeof(store));
+            if (!ok) logErrorP("WiFi: settings not stored");
 
 #elif ARDUINO_ARCH_ESP32
             if (!scheduleRebootToTakeEffect)
@@ -2587,6 +2680,7 @@ namespace OpenKNX
 #endif
             if (scheduleRebootToTakeEffect)
                 _restartTimer = delayTimerInit();
+            return ok;
         }
 
         /**
@@ -2611,13 +2705,78 @@ namespace OpenKNX
                 return true;
             }
 
+            if (!saveWifiSettings(ssid.c_str(), psk.c_str(), true)) // triggers the restart timer; logs a failure
+                return true;
             if (ssid.empty())
                 logInfoP("Wifi settings erased");
             else
                 logInfoP("WiFi SSID: %s", ssid.c_str());
-            saveWifiSettings(ssid.c_str(), psk.c_str(), true); // triggers the restart timer
             return true;
         }
+
+#ifdef ARDUINO_ARCH_RP2040
+        /**
+         * @brief A WIFI.TXT or WIFIAP.TXT (USB, file transfer, older firmware) is stored, then removed from the file system.
+         * @return true when the stored data changed.
+         */
+        bool Module::takeWifiFiles(WifiStore &store)
+        {
+            WifiStore before = store;
+            bool ok = true;
+            char lines[2][100] = {};
+            if (takeWifiFile("/WIFI.TXT", lines))
+            {
+                copyBounded(store.ssid, sizeof(store.ssid), lines[0], strlen(lines[0]));
+                copyBounded(store.psk, sizeof(store.psk), lines[1], strlen(lines[1]));
+                const bool saved = saveWifiStore(store);
+                if (!saved || !dropWifiFile("/WIFI.TXT"))
+                    _wifiFileSize = INT32_MIN; // no retry at runtime: every round would erase the sector or log again
+                logInfoP("WiFi settings of /WIFI.TXT %s", saved ? "stored" : "not stored, file kept");
+                ok = ok && saved;
+            }
+            if (takeWifiFile("/WIFIAP.TXT", lines))
+            {
+                copyBounded(store.apPsk, sizeof(store.apPsk), lines[0], strlen(lines[0]));
+                const bool saved = saveWifiStore(store);
+                if (!saved || !dropWifiFile("/WIFIAP.TXT"))
+                    _wifiFileSize = INT32_MIN; // no retry at runtime: every round would erase the sector or log again
+                logInfoP("WiFi AP password of /WIFIAP.TXT %s", saved ? "stored" : "not stored, file kept");
+                ok = ok && saved;
+            }
+            wipeSecret(lines, sizeof(lines));
+            const bool changed = ok && memcmp(&before, &store, sizeof(store)) != 0;
+            wipeSecret(&before, sizeof(before));
+            return changed;
+        }
+
+        void Module::loopWifiFiles()
+        {
+            // a file put on the file system at runtime: taken over once its size held for 5 s (a transfer may still write it)
+            if (_wifiFileSize == INT32_MIN || !delayCheck(_wifiFileCheckAt, 5000)) return; // INT32_MIN: a save or remove failed
+            _wifiFileCheckAt = millis();
+            int32_t size = 0;
+            for (const char *path : {"/WIFI.TXT", "/WIFIAP.TXT"})
+            {
+                File file = LittleFS.open(path, "r");
+                if (file)
+                {
+                    size += (int32_t)file.size(); // an empty file is never taken
+                    file.close();
+                }
+            }
+            if (!size || size != _wifiFileSize)
+            {
+                _wifiFileSize = size ? size : -1;
+                return;
+            }
+            _wifiFileSize = -1;
+            WifiStore store;
+            loadWifiStore(store);
+            if (takeWifiFiles(store))
+                _restartTimer = delayTimerInit(); // changed settings take effect with the start
+            wipeSecret(&store, sizeof(store));
+        }
+#endif
 
         void Module::readWifiSettings()
         {
@@ -2625,50 +2784,13 @@ namespace OpenKNX
             uint8_t found = 0;
 
 #ifdef ARDUINO_ARCH_RP2040
-            logInfoP("Read Wifi settings from WIFI.TXT");
-            logIndentUp();
-
-            File file = LittleFS.open("/WIFI.TXT", "r");
-            if (!file)
-            {
-                logErrorP("File /WIFI.TXT not found!");
-                logIndentDown();
-                return;
-            }
-
-            int pos = 0;
-            char buffer[100] = {};
-            while (file.available())
-            {
-                uint8_t value = 0;
-                file.read(&value, 1);
-
-                if (value != '\n' && value != '\r')
-                {
-                    if (pos < (int)sizeof(buffer) - 1)
-                        buffer[pos++] = value;
-                }
-
-                if (value == '\n' || value == '\r' || !file.available())
-                {
-                    if (pos > 0)
-                    {
-                        found++;
-                        if (found == 1) copyBounded(_wifiSSID, sizeof(_wifiSSID), buffer, pos);
-                        if (found == 2) copyBounded(_wifiPassphrase, sizeof(_wifiPassphrase), buffer, pos);
-                        logTraceP("%i -> %i: %s", found, pos, buffer);
-
-                        // Reset buffer
-                        memset(buffer, 0x0, 100);
-                        pos = 0;
-                    }
-                }
-
-                // ssid and passphrase found
-                if (found >= 2) break;
-            }
-
-            logIndentDown();
+            WifiStore store;
+            loadWifiStore(store);
+            takeWifiFiles(store);
+            copyBounded(_wifiSSID, sizeof(_wifiSSID), store.ssid, strlen(store.ssid));
+            copyBounded(_wifiPassphrase, sizeof(_wifiPassphrase), store.psk, strlen(store.psk));
+            found = _wifiSSID[0] ? (_wifiPassphrase[0] ? 2 : 1) : 0;
+            wipeSecret(&store, sizeof(store));
 #elif ARDUINO_ARCH_ESP32
 
             Preferences preferences;
@@ -2734,8 +2856,7 @@ namespace OpenKNX
                     memcpy(psk, data + 3 + ssidLen + 1, pskLen);
 
                     logInfoP("Received wifi settings for %s", ssid);
-                    saveWifiSettings(ssid, psk, true);
-                    resultData[0] = 0;
+                    resultData[0] = saveWifiSettings(ssid, psk, true) ? 0 : 1;
 #else
                     logErrorP("Unsupported: Received wifi settings");
                     resultData[0] = 2;
