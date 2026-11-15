@@ -558,6 +558,8 @@ namespace OpenKNX
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_WIFI)
             void startWifiJoin();     // requests the client join
             void clearWifiLinkFlag(); // client link flag down until the driver reports the next association
+            void keepWifiAwake();     // power save off once per association
+            bool _wifiAwake = false;  // power save switched off for the current association
 #ifdef OPENKNX_NETWORK_AUTOIP
             void stopStaleWifiAutoIp(); // AutoIP only with a link and never over a DHCP address
 #endif

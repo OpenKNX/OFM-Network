@@ -879,6 +879,7 @@ namespace OpenKNX
         void Module::rejoinWifiDriver()
         {
             clearWifiLinkFlag(); // left before (startWifiJoinCycle()): the next association comes from this join, a real link edge
+            _wifiAwake = false;  // keepWifiAwake() switches power save off again once this join associated
             const size_t pskLen = strlen(_wifiPassphrase);
             cyw43_wifi_join(&cyw43_state, strlen(_wifiSSID), (const uint8_t *)_wifiSSID, pskLen, pskLen ? (const uint8_t *)_wifiPassphrase : nullptr,
                             pskLen ? CYW43_AUTH_WPA2_AES_PSK : CYW43_AUTH_OPEN, nullptr, CYW43_CHANNEL_NONE);

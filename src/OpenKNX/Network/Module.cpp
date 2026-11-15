@@ -1066,8 +1066,26 @@ namespace OpenKNX
          */
         void Module::startWifiJoin()
         {
+            _wifiAwake = false;
             KNX_NETIF.beginNoBlock(_wifiSSID, _wifiPassphrase[0] ? _wifiPassphrase : nullptr); // nullptr = open network (WPA2 otherwise)
             if (_wifiPassphrase[0]) clearWifiLinkFlag(); // open: the core returned associated, the flag is right
+        }
+
+        /**
+         * @brief Switches the CYW43 power save off once the client is associated, again after every join, as ESP32 setSleep(false):
+         *        power save delays received frames by the beacon interval. The core does it only when its own begin() succeeded.
+         */
+        void Module::keepWifiAwake()
+        {
+            const struct netif *sta = __getCYW43Netif();
+            if (sta == nullptr || !netif_is_up(sta) || !netif_is_link_up(sta))
+            {
+                _wifiAwake = false; // a later association needs it again
+                return;
+            }
+            if (_wifiAwake) return;
+            WiFi.noLowPowerMode(); // cyw43_wifi_pm(0xA11140): no power save, as the core's begin()
+            _wifiAwake = true;
         }
 
         /**
@@ -1470,6 +1488,9 @@ namespace OpenKNX
             // instead of re-reading PHYCFGR, so a single garbled read cannot flip half the tick's decisions.
             const bool carrier = linkCarrier();
             const bool establishedState = carrier && (localIP() != IPAddress());
+#if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_WIFI)
+            keepWifiAwake();
+#endif
 
             // 03_08_03 3.5.3: the IP-fault bit means "IP network cannot be accessed" -- a link with an
             // address but no KNXnet/IP endpoint is exactly that, so it has to feed this too.
