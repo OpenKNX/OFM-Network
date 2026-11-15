@@ -20,7 +20,9 @@
 #ifdef DEVICE_DISPLAY_MODULE
     #include "DeviceDisplay.h"
     #include "Widgets/WidgetNetSpeed.h"
-    #include "Widgets/WidgetNetInfo.h"
+    #ifndef OPENKNX_WIFI_AP // the WiFi widget carries the network values on its own page
+        #include "Widgets/WidgetNetInfo.h"
+    #endif
     #include "Widgets/NetworkMenu.h"
     #ifdef OPENKNX_WIFI_AP
         #include "Widgets/WidgetWifi.h"
@@ -1702,12 +1704,14 @@ namespace OpenKNX
                     logDebugP("WidgetWifi not registered (no display/manager)");
 #endif
 
+#ifndef OPENKNX_WIFI_AP
                 // Host, IP and link state also belong to this module, not to the system-info
                 // widget of OGM-Common, which must not reach into OFM-Network.
                 auto *netInfo = new WidgetNetInfo(10000, WidgetFlags::DefaultWidget);
                 netInfo->setName("Network");
                 if (!openknxDisplayModule.tryAddWidget(netInfo))
                     logDebugP("WidgetNetInfo not registered (no display/manager)");
+#endif
                 if (!registerNetworkMenu())
                     logDebugP("Menu Network not registered (no menu registry)");
             }

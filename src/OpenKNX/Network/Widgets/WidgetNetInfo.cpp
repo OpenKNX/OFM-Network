@@ -1,8 +1,41 @@
 #ifdef DEVICE_DISPLAY_MODULE
 
 #include "WidgetNetInfo.h"
+#include "DisplayUi.h"
+#include "Icons/UiIcons.h"
 #include "OpenKNX.h"
 #include "OpenKNX/Network/Module.h"
+
+namespace Ui = OpenKNX::Ui;
+
+namespace
+{
+#ifndef KNX_IP_WIFI
+    /** @brief Card symbol: RJ45 socket seen from the front (body, 8 contacts, latch slot) in x46..77 y3..24. */
+    void drawJack(Adafruit_SSD1306 &d)
+    {
+        d.drawRect(46, 3, 32, 17, WHITE);
+        d.drawFastHLine(56, 19, 12, BLACK); // opening of the latch slot
+        d.drawFastVLine(56, 19, 6, WHITE);
+        d.drawFastVLine(67, 19, 6, WHITE);
+        d.drawFastHLine(56, 24, 12, WHITE);
+        for (int16_t x = 51; x <= 72; x += 3)
+            d.drawFastVLine(x, 6, 5, WHITE);
+    }
+#endif
+
+    /** @brief "DHCP", "FIX" or "AP": how the current address was assigned. */
+    const char *method()
+    {
+        return openknxNetwork.wifiApActive() ? "AP" : (openknxNetwork.localUsesStaticIp() ? "FIX" : "DHCP");
+    }
+
+    void formatIp(char (&ip)[16])
+    {
+        const IPAddress a = openknxNetwork.localIP();
+        snprintf(ip, sizeof(ip), "%u.%u.%u.%u", (unsigned)a[0], (unsigned)a[1], (unsigned)a[2], (unsigned)a[3]);
+    }
+} // namespace
 
 WidgetNetInfo::WidgetNetInfo(uint32_t displayTime, WidgetFlags action)
     : _state(WidgetState::STOPPED), _displayTime(displayTime), _action(action), _display(nullptr)
@@ -27,51 +60,81 @@ void WidgetNetInfo::loop()
     draw();
 }
 
-void WidgetNetInfo::drawKeyValueRow(uint8_t row, const char *key, const std::string &value)
-{
-    _display->display->setCursor(0, (int16_t)(15 + row * 12));
-    _display->display->print(key);
-    _display->display->print(": ");
-    _display->display->print(value.c_str());
-}
-
 void WidgetNetInfo::draw()
 {
-    const uint16_t W = _display->GetDisplayWidth();
-    _display->display->clearDisplay();
-    _display->display->setTextColor(WHITE);
-    _display->display->setTextSize(1);
-    _display->display->setCursor(0, 0);
-    _display->display->print(_name.c_str());
-    _display->display->drawLine(0, 10, W, 10, WHITE);
-
-    const std::string dash = "-"; // ASCII placeholder (SSD1306 CP437 has no em dash)
-    drawKeyValueRow(0, "Host", std::string(openknxNetwork.hostName()));
-
+    Adafruit_SSD1306 &d = *_display->display;
+    Ui::begin(d);
+    d.clearDisplay();
     // phyMode() is a stub, so established() (connected AND a non-zero IP) is the link indicator.
     const bool up = openknxNetwork.established();
-    drawKeyValueRow(2, "Link", up ? std::string("up") : std::string("down"));
-
-    // The label carries the assignment method, so it costs no extra row. Showing an IP while the
-    // link is down would only ever be a stale one.
-    if (up)
-        drawKeyValueRow(1, openknxNetwork.wifiApActive() ? "AP" : (openknxNetwork.localUsesStaticIp() ? "FIX" : "DHCP"),
-                        std::string(openknxNetwork.localIP().toString().c_str()));
+#ifdef KNX_IP_WIFI
+    drawDetails(d, up);
+#else
+    if (_page == 0)
+        drawCard(d, up);
     else
-        drawKeyValueRow(1, "IP", dash);
+        drawDetails(d, up);
+#endif
+    _display->displayBuff();
+}
+
+#ifndef KNX_IP_WIFI
+/** @brief Page 0: RJ45 socket, badge, "Online" with the address and how it was assigned, or the outage. */
+void WidgetNetInfo::drawCard(Adafruit_SSD1306 &d, bool up)
+{
+    char b[24];
+    if (up)
+    {
+        char ip[16];
+        formatIp(ip);
+        snprintf(b, sizeof(b), "%s %s", ip, method()); // 15 + 1 + 4 = 20 characters at most
+        Ui::statusCard(d, drawJack, Ui::kBadgeOk, "Online", b);
+    }
+    else
+        Ui::statusCard(d, drawJack, Ui::kBadgeError, "No LAN", "Check cable");
+    Ui::pageDots(d, 2, 0);
+}
+#endif
+
+/** @brief Page 1: host name, IP, link and link age as icon rows; the assignment method sits in the title. */
+void WidgetNetInfo::drawDetails(Adafruit_SSD1306 &d, bool up)
+{
+    // A 15-character IP keeps its row because the method is in the title. Showing an IP while the
+    // link is down would only ever be a stale one.
+    const char *title = _name.c_str();
+    char b[24];
+    if (up)
+    {
+        snprintf(b, sizeof(b), "%s %s", title, method());
+        title = b;
+    }
+    Ui::header(d, title, PAGES, PAGES - 1);
+
+    // No "Host" label: from 15 characters on it would be cut to a stub; the icon stands for it.
+    Ui::rowIcon(d, 0, Ui::kRowInfo, openknxNetwork.hostName());
+
+    char ip[16];
+    if (up)
+        formatIp(ip);
+    else
+        snprintf(ip, sizeof(ip), "-"); // ASCII placeholder (SSD1306 CP437 has no em dash)
+#ifdef KNX_IP_WIFI
+    Ui::rowIcon(d, 1, Ui::kRowWifi, "IP", ip);
+#else
+    Ui::rowIcon(d, 1, Ui::kRowLan, "IP", ip);
+#endif
+    Ui::rowIcon(d, 2, up ? Ui::kRowOk : Ui::kRowErr, "Link", up ? "up" : "down");
 
     // Age of the current link, or of the ongoing outage. Built on uptime() seconds, so it survives
-    // the 49.7-day millis() rollover.
+    // the 49.7-day millis() rollover. Short labels: "9999d 23:59:59" leaves 4 columns for the text.
     const uint32_t netUp = openknxNetwork.netUptimeSec();
     const uint32_t netDown = openknxNetwork.netDowntimeSec();
     if (netUp > 0)
-        drawKeyValueRow(3, "Net-Up", humanDuration(netUp));
+        Ui::rowIcon(d, 3, Ui::kRowClock, "Up", humanDuration(netUp).c_str());
     else if (netDown > 0)
-        drawKeyValueRow(3, "Net-Dn", humanDuration(netDown));
+        Ui::rowIcon(d, 3, Ui::kRowClock, "Down", humanDuration(netDown).c_str());
     else
-        drawKeyValueRow(3, "Net-Up", dash);
-
-    _display->displayBuff();
+        Ui::rowIcon(d, 3, Ui::kRowClock, "Up", "-");
 }
 
 #endif // DEVICE_DISPLAY_MODULE

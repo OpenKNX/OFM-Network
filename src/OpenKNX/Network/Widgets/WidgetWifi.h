@@ -9,6 +9,7 @@
  * @brief WiFi widget. Client: card, signal page with history, details page, network page (host, link, up time);
  *        offline: card + network page; setup AP: QR code to join + info page; own AP: card + values page (name,
  *        security, channel, address, stations). Page count follows the state.
+ *        With the setup AP (OPENKNX_WIFI_AP) it carries the network values; the Network widget is not registered there.
  */
 class WidgetWifi : public Widget
 {
