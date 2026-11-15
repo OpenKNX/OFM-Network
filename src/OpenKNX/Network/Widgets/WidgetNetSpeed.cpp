@@ -164,7 +164,7 @@ void WidgetNetSpeed::draw()
     auto *g = _display->display;
     Ui::begin(*g);
     g->clearDisplay();
-    Ui::header(*g, "Network"); // fixed: the rotation keys on the widget name, not on this title
+    Ui::header(*g, "LAN traffic"); // fixed: the rotation keys on the widget name, not on this title
 
 #ifndef WIDGET_NETSPEED_HAVE_COUNTERS
     // No packet counter in this build: "n/a" instead of a permanently-zero graph, logged once.
