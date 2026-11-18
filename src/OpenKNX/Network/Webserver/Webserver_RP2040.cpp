@@ -125,7 +125,7 @@ namespace OpenKNX
         // memset, which would wreck the std::string members.
         static WebResponse g_response[MAX_CONN];
 
-        // Sent before anything else: the HTTP header, or a stream chunk tcp_write() refused.
+        // Sent before anything else: a header that did not go out at once, or a stream chunk tcp_write() refused.
         static std::string g_pending[MAX_CONN];
 
         // Stream cleanups close files, so they run in loopPlatform() -- never in a
@@ -137,11 +137,22 @@ namespace OpenKNX
         };
         static StreamGc g_streamGc[MAX_CONN];
 
-        // Per HTTP connection; uncapped, one page takes most of the 16 KB lwIP heap.
-        static constexpr int HTTP_INFLIGHT = 2 * TCP_MSS;
-
         static constexpr size_t WS_FRAME_BUF = 1500;
         static constexpr size_t WS_MAX_PAYLOAD = WS_FRAME_BUF - 4; // 4 B header, 126..65535 form
+
+        // Unacknowledged bytes in the 16 KB lwIP heap, which MQTT, Notify and every received frame share. Two segments per
+        // connection, so a browser acknowledges at once; OPENKNX_WEBSERVER_TX_BUDGET caps the payload of all web connections
+        // in a slot together, and HTTP leaves one frame of it to the WebSockets (pong, page data). Not counted: the tail of
+        // a response that is closing. A page whose peer vanished holds its share until the 10 s silence rule drops it (with
+        // data queued for it) or lwIP gives up on it.
+        static constexpr int HTTP_INFLIGHT = 2 * TCP_MSS;
+#ifdef OPENKNX_WEBSERVER_TX_BUDGET
+        static constexpr int WS_INFLIGHT = HTTP_INFLIGHT;
+        static constexpr int TX_BUDGET = OPENKNX_WEBSERVER_TX_BUDGET;
+        static_assert(TX_BUDGET >= (int)WS_FRAME_BUF + TCP_MSS && WS_INFLIGHT >= (int)WS_FRAME_BUF, "the web send budget must hold a WebSocket frame and an HTTP segment");
+#else
+        static constexpr int WS_INFLIGHT = TCP_SND_BUF; // the whole send buffer, as before
+#endif
 
         // ── Slot management ───────────────────────────────────────────────────
 
@@ -216,10 +227,24 @@ namespace OpenKNX
                    s->txSegIdx >= g_response[s->idx].segmentCount();
         }
 
-        static int txRoom(tcp_pcb* pcb)
+        static inline int unacked(tcp_pcb* pcb) { return (int)(TCP_SND_BUF - tcp_sndbuf(pcb)); }
+
+        // What one more write of a connection may add: its own cap, and with a budget what all web connections leave
+        static int webRoom(tcp_pcb* pcb, int cap, int reserve)
         {
-            return HTTP_INFLIGHT - (int)(TCP_SND_BUF - tcp_sndbuf(pcb));
+            int room = cap - unacked(pcb);
+#ifdef OPENKNX_WEBSERVER_TX_BUDGET
+            int all = 0;
+            for (int i = 0; i < MAX_CONN; i++)
+                if (g_slots[i].pcb) all += unacked(g_slots[i].pcb);
+            if (TX_BUDGET - reserve - all < room) room = TX_BUDGET - reserve - all;
+#else
+            (void)reserve;
+#endif
+            return room;
         }
+
+        static int txRoom(tcp_pcb* pcb) { return webRoom(pcb, HTTP_INFLIGHT, (int)WS_FRAME_BUF); } // a frame stays for the WebSockets
 
         // false = bytes still waiting (window full or ERR_MEM), retried later.
         static bool flushPending(ConnSlot* s)
@@ -235,6 +260,20 @@ namespace OpenKNX
                 s->pendOff += (uint16_t)n;
             }
             return true;
+        }
+
+        /**
+         * @brief Queues the HTTP header ahead of the body.
+         * Straight into the send buffer. Only a header larger than the connection's room or refused by tcp_write() waits in g_pending,
+         * the one heap allocation left on the header path.
+         */
+        static void queueHeader(ConnSlot* s, const char* hdr, int hLen)
+        {
+            g_pending[s->idx].clear();
+            s->pendOff = 0;
+            // the connection's own cap, not the shared budget: a header of at most 511 B must not fall back to the heap
+            if (hLen <= HTTP_INFLIGHT - unacked(s->pcb) && tcp_write(s->pcb, hdr, (u16_t)hLen, TCP_WRITE_FLAG_COPY) == ERR_OK) return;
+            g_pending[s->idx].assign(hdr, (size_t)hLen);
         }
 
         static void tcpSendChunk(ConnSlot* s)
@@ -341,7 +380,7 @@ namespace OpenKNX
             if (frameLen > sizeof(frame)) return WsSendResult::Failed;
 
             int avail = (int)tcp_sndbuf(pcb);
-            if (avail < (int)frameLen) return WsSendResult::WouldBlock;
+            if (avail < (int)frameLen || webRoom(pcb, WS_INFLIGHT, 0) < (int)frameLen) return WsSendResult::WouldBlock;
 
             if (len > 0) memcpy(frame + hLen, data, len);
 
@@ -507,6 +546,26 @@ namespace OpenKNX
                                     "Sec-WebSocket-Accept: %s\r\n\r\n",
                                     accept);
 
+#ifdef OPENKNX_WEBSOCKET_MAX
+                int pages = 0;
+                for (int i = 0; i < MAX_CONN; i++)
+                    if (g_slots[i].pcb && g_slots[i].state == CS_WS) pages++;
+                if (pages >= OPENKNX_WEBSOCKET_MAX)
+                {
+                    // One page too many: the 101, then close 1013 (try again later); the page shows "busy"
+                    static const uint8_t busy[] = {0x88, 0x02, 0x03, 0xF5};
+                    if (tcp_write(s->pcb, resp, (u16_t)rLen, TCP_WRITE_FLAG_COPY) == ERR_OK)
+                        tcp_write(s->pcb, busy, sizeof(busy), TCP_WRITE_FLAG_COPY);
+                    tcp_output(s->pcb);
+                    logWarning("Webserver", "WS refused: %d pages open", pages);
+    #ifdef OPENKNX_MEM_STAT
+                    OpenKNX::Stat::memDiag.webRefused();
+    #endif
+                    closeSlot(s);
+                    return;
+                }
+#endif
+
                 // Without the 101 the browser would wait for its timeout; closing lets it retry now.
                 if (tcp_write(s->pcb, resp, (u16_t)rLen, TCP_WRITE_FLAG_COPY) != ERR_OK)
                 {
@@ -575,6 +634,13 @@ namespace OpenKNX
             WebResponse& response = g_response[s->idx];
             response.reset();
             s->ws->handleRequest(request, response);
+            if (!s->pcb)
+            {
+                // the connection went away meanwhile (lwIP freed it for an internal one): close what the handler opened
+                response.cleanupStream();
+                response.reset();
+                return;
+            }
 
             s->ws->logRequest(request, response);
 
@@ -618,8 +684,7 @@ namespace OpenKNX
                                     response.streamTotal());
                 appendResponseHeaders(hdr, sizeof(hdr), hLen, response);
 
-                g_pending[s->idx].assign(hdr, (size_t)hLen);
-                s->pendOff = 0;
+                queueHeader(s, hdr, hLen);
                 s->streamReader = response.streamReadFn();
                 s->streamCleanup = response.streamCleanupFn();
                 s->streamCtx = response.streamCtx();
@@ -655,10 +720,8 @@ namespace OpenKNX
 
             appendResponseHeaders(hdr, sizeof(hdr), hLen, response);
 
-            // Through g_pending like the body: an ERR_MEM here used to lose the header
-            // and send the body bare.
-            g_pending[s->idx].assign(hdr, (size_t)hLen);
-            s->pendOff = 0;
+            // A refused header waits in g_pending ahead of the body; dropping it sent the body bare.
+            queueHeader(s, hdr, hLen);
 
             // As much as fits now, the rest from onSent() and loopPlatform()
             tcpSendChunk(s);
@@ -1045,8 +1108,14 @@ namespace OpenKNX
         // connections and does not retry a script whose connection was reset. lwIP keeps the request (refused data)
         // until loopPlatform() hands over a slot. The listen backlog equals MAX_WAITING, so lwIP drops a SYN beyond it
         // and the client repeats the SYN; one pcb of the pool always stays free for MQTT, Notify and the webclient.
+        // OPENKNX_WEBSERVER_MAX_WAITING caps it, so more pcbs for the device do not become more waiting web clients
+#ifndef OPENKNX_WEBSERVER_MAX_WAITING
+    #define OPENKNX_WEBSERVER_MAX_WAITING 4
+#endif
         static constexpr int WAIT_ROOM = MEMP_NUM_TCP_PCB - MAX_CONN - 1;
-        static constexpr int MAX_WAITING = WAIT_ROOM < 1 ? 1 : WAIT_ROOM > 4 ? 4 : WAIT_ROOM;
+        static constexpr int WAIT_CAP = OPENKNX_WEBSERVER_MAX_WAITING < 1 ? 1 : OPENKNX_WEBSERVER_MAX_WAITING;
+        static constexpr int MAX_WAITING = WAIT_ROOM < 1 ? 1 : WAIT_ROOM > WAIT_CAP ? WAIT_CAP : WAIT_ROOM;
+        static_assert(MAX_CONN + MAX_WAITING + 1 <= MEMP_NUM_TCP_PCB, "web slots and wait queue must leave an lwIP pcb for MQTT, Notify and the webclient");
         static constexpr uint8_t WAIT_POLLS = 2; // aborted at the 3rd poll: about 5.5..6 s after the accept
         struct Waiting
         {
@@ -1080,6 +1149,9 @@ namespace OpenKNX
             w->pcb = nullptr;
             detach(pcb);
             tcp_abort(pcb); // also releases its place in the listen backlog
+#ifdef OPENKNX_MEM_STAT
+            OpenKNX::Stat::memDiag.webRefused();
+#endif
             return ERR_ABRT;
         }
 
@@ -1110,7 +1182,13 @@ namespace OpenKNX
 
         static err_t onAccept(void* arg, tcp_pcb* newpcb, err_t err)
         {
-            if (err != ERR_OK || newpcb == nullptr) return ERR_VAL;
+            if (err != ERR_OK || newpcb == nullptr)
+            {
+#ifdef OPENKNX_MEM_STAT
+                OpenKNX::Stat::memDiag.webRefused(); // lwIP had no pcb left for it
+#endif
+                return ERR_VAL;
+            }
 
             ConnSlot* s = freeSlot();
             if (!s)
@@ -1125,6 +1203,9 @@ namespace OpenKNX
                 if (!w)
                 {
                     tcp_abort(newpcb);
+#ifdef OPENKNX_MEM_STAT
+                    OpenKNX::Stat::memDiag.webRefused();
+#endif
                     return ERR_ABRT;
                 }
                 *w = {newpcb, (Webserver*)arg, ++g_waitSeq, 0};
@@ -1159,6 +1240,10 @@ namespace OpenKNX
                 tcp_close(pcb);
                 return;
             }
+            // Lowest priority, inherited by every accepted pcb: with the pool full, an internal connection (MQTT, Notify,
+            // webclient) may take the least active low-priority pcb (a web one, or an ArduinoOTA download); a web SYN
+            // can take none of them
+            tcp_setprio(pcb, TCP_PRIO_MIN);
             _listenPcb = tcp_listen_with_backlog(pcb, MAX_WAITING); // frees pcb on success only
             if (!_listenPcb)
             {
