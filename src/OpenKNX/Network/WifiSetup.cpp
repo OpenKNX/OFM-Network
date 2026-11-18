@@ -1,6 +1,14 @@
 #if defined(KNX_IP_WIFI)
 #include "OpenKNX/Network/Module.h"
 
+/** @brief Zeroes a copy of a WiFi secret; volatile: a memset of a buffer that is not read again may be dropped by the compiler. */
+[[maybe_unused]] static void wipeWifiSecret(void *p, size_t n)
+{
+    volatile uint8_t *v = static_cast<volatile uint8_t *>(p);
+    while (n--)
+        *v++ = 0;
+}
+
 #ifdef OPENKNX_WIFI_SCAN
 #include <WiFi.h>
 #include <algorithm>
@@ -596,7 +604,7 @@ namespace OpenKNX
             WifiStore store;
             loadWifiStore(store); // readWifiSettings() took over a WIFIAP.TXT at start
             strncpy(psk, store.apPsk, sizeof(psk) - 1);
-            memset(&store, 0, sizeof(store));
+            wipeWifiSecret(&store, sizeof(store));
 #else
             Preferences preferences;
             preferences.begin("WIFI", true);
@@ -606,6 +614,7 @@ namespace OpenKNX
             psk[strcspn(psk, "\r")] = 0;
             if (strlen(psk) < 8)
             {
+                wipeWifiSecret(psk, sizeof(psk));
                 logErrorP("WiFi: own AP needs a password");
                 return;
             }
@@ -630,7 +639,7 @@ namespace OpenKNX
                 _wifiApSecurity = 4; // WPA/WPA2
             }
 #endif
-            memset(psk, 0, sizeof(psk));
+            wipeWifiSecret(psk, sizeof(psk));
             if (!ok)
             {
                 logErrorP("WiFi: own AP \"%s\" failed", ssid);
@@ -1319,7 +1328,7 @@ namespace OpenKNX
             loadWifiStore(store);
             strncpy(store.apPsk, psk, sizeof(store.apPsk) - 1);
             const bool ok = saveWifiStore(store);
-            memset(&store, 0, sizeof(store));
+            wipeWifiSecret(&store, sizeof(store));
             if (!ok) return false;
 #else
             Preferences preferences;

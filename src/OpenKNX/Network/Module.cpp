@@ -44,9 +44,10 @@
 #if defined(ARDUINO_ARCH_RP2040) && defined(KNX_IP_WIFI)
     #include <EEPROM.h>
 extern "C" uint8_t _EEPROM_start[]; // linker: the sector the core EEPROM emulation writes
-
+#endif
+#ifdef KNX_IP_WIFI
 /** @brief Zeroes a copy of the WiFi secrets; volatile: a memset before the copy ends may be dropped by the compiler. */
-static void wipeSecret(void *p, size_t n)
+[[maybe_unused]] static void wipeSecret(void *p, size_t n)
 {
     volatile uint8_t *v = static_cast<volatile uint8_t *>(p);
     while (n--)
@@ -3068,7 +3069,7 @@ namespace OpenKNX
                     memcpy(psk, data + 2, data[1]);
                     logInfoP("Received WiFi AP password");
                     resultData[0] = saveWifiApPassword(psk) ? 0 : 1;
-                    memset(psk, 0, sizeof(psk));
+                    wipeSecret(psk, sizeof(psk));
                     resultLength = 1;
                     return true;
                 }
