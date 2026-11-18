@@ -98,7 +98,8 @@ namespace OpenKNX
 
                 void acceptNew();
                 void serviceConn(Conn &c);
-                void closeConn(Conn &c);
+                /** @brief Ends a connection; abort drops it with RST and frees its queued data at once (RP2040). */
+                void closeConn(Conn &c, bool abort = false);
                 void handlePacket(Conn &c, const Packet &pkt);
                 void handleConnect(Conn &c, const Packet &pkt);
                 void handleSubscribe(Conn &c, const Packet &pkt);

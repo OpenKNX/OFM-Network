@@ -193,7 +193,7 @@ namespace OpenKNX
                     delayCheck(c.lastActivity, (uint32_t)c.keepAlive * 1500))
                 {
                     logInfo("MQTT", "broker: client '%s' keepalive timeout", c.clientId);
-                    closeConn(c);
+                    closeConn(c, true); // a silent client may not read: a close would keep its unsent data
                     return;
                 }
 
@@ -220,9 +220,10 @@ namespace OpenKNX
                 }
             }
 
-            void Broker::closeConn(Conn &c)
+            void Broker::closeConn(Conn &c, bool abort)
             {
 #if defined(ARDUINO_ARCH_ESP32)
+                (void)abort; // WiFiClient::stop() has no abort
                 if (c.wifiClient)
                 {
                     static_cast<WiFiClient *>(c.wifiClient)->stop();
@@ -247,7 +248,7 @@ namespace OpenKNX
                     tcp_arg(pcb, nullptr);
                     tcp_recv(pcb, nullptr);
                     tcp_err(pcb, nullptr);
-                    if (tcp_close(pcb) != ERR_OK) tcp_abort(pcb);
+                    if (abort || tcp_close(pcb) != ERR_OK) tcp_abort(pcb);
                 }
 #endif
                 c.connected = false;
