@@ -1,4 +1,5 @@
 #include "OpenKNX/Network/Webserver/Webserver.h"
+#include "OpenKNX/Network/Webserver/BoundedText.h"
 
 #if defined(OPENKNX_WEBSERVER) && (defined(KNX_IP_WIFI) || defined(KNX_IP_LAN))
 
@@ -209,55 +210,116 @@ namespace OpenKNX
         }
 
 #ifdef OPENKNX_WEBSERVER
+        // A row of the overview, written whole or not at all: a cut page still closes its table and container.
+        namespace
+        {
+            struct OverviewPage
+            {
+                static constexpr size_t CLOSE = sizeof("</tbody></table></div>") - 1;
+                BoundedText& t;
+                bool tableOpen = false;
+                bool full = false;
+
+                // Keeps what was written since mark when it fit with room for the closing tags, else drops it and stops.
+                bool commit(size_t mark)
+                {
+                    if (!t.cut() && t.room() >= CLOSE) return true;
+                    t.rollback(mark);
+                    full = true;
+                    return false;
+                }
+                void open(const char* title)
+                {
+                    if (full) return;
+                    const size_t m = t.size();
+                    t += "<h2>";
+                    t += title;
+                    t += "</h2><table class='attribute-table'><tbody>";
+                    if (commit(m)) tableOpen = true;
+                }
+                void close()
+                {
+                    if (full) return;
+                    const size_t m = t.size();
+                    t += "</tbody></table>";
+                    if (commit(m)) tableOpen = false;
+                }
+                void raw(const char* html)
+                {
+                    if (full) return;
+                    const size_t m = t.size();
+                    t += html;
+                    commit(m);
+                }
+                // id nur für die Felder, die der Status live nachzieht.
+                void row(const char* label, const char* val, const char* id = nullptr)
+                {
+                    if (full) return;
+                    const size_t m = t.size();
+                    t += "<tr><td>";
+                    t += label;
+                    t += "</td><td";
+                    if (id)
+                    {
+                        t += " id='";
+                        t += id;
+                        t += "'";
+                    }
+                    t += ">";
+                    t += val;
+                    t += "</td></tr>";
+                    commit(m);
+                }
+                void finish()
+                {
+                    // the room for this was kept by every commit()
+                    if (tableOpen) t += "</tbody></table>";
+                    t += "</div>";
+                }
+            };
+        } // namespace
+
         void Webserver::buildOverviewPage(WebResponse& res)
         {
+            // 4 KB: fixed text and row frames at most 2.1 KB, the values up to about 0.7 KB, each module row about 50 B.
+            // What does not fit is left out row by row.
+            BoundedText text(4096);
+            if (text.failed())
+            {
+                res.sendOutOfMemory();
+                return;
+            }
             char buf[64];
-            std::string page = "<div class='container'><h1>Übersicht</h1>";
-
-            // Appends straight into page instead of building+copying a separate string per row.
-            // id nur für die Felder, die der Status live nachzieht.
-            auto row = [&page](const char* label, const std::string& val, const char* id = nullptr) {
-                page += "<tr><td>";
-                page += label;
-                page += "</td><td";
-                if (id)
-                {
-                    page += " id='";
-                    page += id;
-                    page += "'";
-                }
-                page += ">";
-                page += val;
-                page += "</td></tr>";
-            };
+            OverviewPage page{text};
+            text += "<div class='container'><h1>Übersicht</h1>";
 
             // ── Gerät ──────────────────────────────────────────────────────────
-            page += "<h2>Gerät</h2><table class='attribute-table'><tbody>";
+            page.open("Gerät");
 #ifdef DEVICE_ID
-            row("ID", DEVICE_ID);
+            page.row("ID", DEVICE_ID);
 #endif
 #ifdef DEVICE_NAME
-            row("Name", DEVICE_NAME);
+            page.row("Name", DEVICE_NAME);
 #elif defined(HARDWARE_NAME)
-            row("Name", HARDWARE_NAME);
+            page.row("Name", HARDWARE_NAME);
 #endif
-            row("Seriennummer", openknx.info.humanSerialNumber());
-            page += "</tbody></table>";
+            page.row("Seriennummer", openknx.info.humanSerialNumber().c_str());
+            page.close();
 
             // ── Firmware ───────────────────────────────────────────────────────
-            page += "<h2>Firmware</h2><table class='attribute-table'><tbody>";
-            row("Name", openknx.info.firmwareName());
-            row("Version", openknx.info.humanFirmwareVersion(true));
-            row("Nummer", openknx.info.humanFirmwareNumber());
+            page.open("Firmware");
+            page.row("Name", openknx.info.firmwareName().c_str());
+            page.row("Version", openknx.info.humanFirmwareVersion(true).c_str());
+            page.row("Nummer", openknx.info.humanFirmwareNumber().c_str());
 #if MASK_VERSION == 0x07B0
-            row("KNX-Typ", "TP (07B0)");
+            page.row("KNX-Typ", "TP (07B0)");
 #elif MASK_VERSION == 0x57B0
-            row("KNX-Typ", "IP (57B0)");
+            page.row("KNX-Typ", "IP (57B0)");
 #elif MASK_VERSION == 0x091A
-            row("KNX-Typ", "Router (091A)");
+            page.row("KNX-Typ", "Router (091A)");
 #else
             snprintf(buf, sizeof(buf), "%04X", MASK_VERSION);
-            row("KNX-Typ", buf);
+            page.row("KNX-Typ", buf);
 #endif
             {
 #ifdef OPENKNX_DUALCORE
@@ -271,32 +333,32 @@ namespace OpenKNX
                     // Nur die Zahl bekommt eine id -- der Kernmodus davor ändert sich nie.
                     // Whole degrees like the status JSON, else the first update jumps.
                     snprintf(buf, sizeof(buf), "%s (<span id='ov-cpu'>%d</span> °C)", cpuMode, (int)temp);
-                    row("CPU-Modus", buf);
+                    page.row("CPU-Modus", buf);
                 }
                 else
-                    row("CPU-Modus", cpuMode);
+                    page.row("CPU-Modus", cpuMode);
             }
-            page += "</tbody></table>";
+            page.close();
 
             // ── Applikation ────────────────────────────────────────────────────
-            page += "<h2>Applikation</h2><table class='attribute-table'><tbody>";
+            page.open("Applikation");
             {
-                std::string addr = "<span id='ov-pa'>";
-                addr += openknx.info.humanIndividualAddress();
-                addr += knx.configured()
-                            ? "</span> <span id='ov-cfg' class='green'>(Konfiguriert)</span>"
-                            : "</span> <span id='ov-cfg' class='gray'>(Nicht konfiguriert)</span>";
-                row("KNX-Adresse", addr);
+                const uint16_t ia = knx.individualAddress();
+                char addr[112];
+                snprintf(addr, sizeof(addr), "<span id='ov-pa'>%d.%d.%d%s", (ia & 0xF000) >> 12, (ia & 0x0F00) >> 8, ia & 0x00FF,
+                         knx.configured() ? "</span> <span id='ov-cfg' class='green'>(Konfiguriert)</span>"
+                                          : "</span> <span id='ov-cfg' class='gray'>(Nicht konfiguriert)</span>");
+                page.row("KNX-Adresse", addr);
             }
             if (openknx.info.applicationNumber() > 0)
             {
-                row("Version", openknx.info.humanApplicationVersion());
-                row("Nummer", openknx.info.humanApplicationNumber());
+                page.row("Version", openknx.info.humanApplicationVersion().c_str());
+                page.row("Nummer", openknx.info.humanApplicationNumber().c_str());
             }
-            page += "</tbody></table>";
+            page.close();
 
             // ── Laufzeit ───────────────────────────────────────────────────────
-            page += "<h2>Laufzeit</h2><table class='attribute-table'><tbody>";
+            page.open("Laufzeit");
             {
                 uint32_t s = uptime();
                 uint32_t d = s / 86400;
@@ -307,26 +369,26 @@ namespace OpenKNX
                 s %= 60;
                 snprintf(buf, sizeof(buf), "%ud %02u:%02u:%02u", d, h, m, s);
                 // Danach zählt der Browser selbst weiter -- dafür muss nichts gesendet werden.
-                row("Uptime", buf, "ov-up");
+                page.row("Uptime", buf, "ov-up");
             }
             {
                 uint32_t fm = (uint32_t)(freeMemory() / 1024);
                 float fmMin = openknx.common.freeMemoryMin() / 1024.0f;
                 snprintf(buf, sizeof(buf), "<span id='ov-mem'>%u</span> KiB (min. %.3f KiB)", fm, fmMin);
-                row("Freier Speicher", buf);
+                page.row("Freier Speicher", buf);
             }
 #ifdef OPENKNX_WATCHDOG
             if (openknx.watchdog.active())
             {
                 snprintf(buf, sizeof(buf), "Running (%is)", (int)openknx.watchdog.maxPeriod());
-                row("Watchdog", buf);
+                page.row("Watchdog", buf);
             }
             else
-                row("Watchdog", "Disabled");
+                page.row("Watchdog", "Disabled");
 #else
-            row("Watchdog", "Unsupported");
+            page.row("Watchdog", "Unsupported");
 #endif
-            page += "</tbody></table>";
+            page.close();
 
             // ── Netzwerk ───────────────────────────────────────────────────────
             {
@@ -337,50 +399,48 @@ namespace OpenKNX
                          mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
                 bool net = openknxNetwork.established();
 
-                page += "<h2>Netzwerk</h2><table class='attribute-table'><tbody>";
-                row("Hostname", htmlEscape(openknxNetwork.hostName())); // same ETS text as the title above
-                row("MAC", macStr);
-                row("IP-Adresse", net ? openknxNetwork.localIP().toString().c_str()
-                                              : "–", "ov-ip");
-                row("Subnetz", net ? openknxNetwork.subnetMask().toString().c_str()
-                                           : "–", "ov-mask");
-                row("Gateway", net ? openknxNetwork.gatewayIP().toString().c_str()
-                                           : "–", "ov-gw");
+                page.open("Netzwerk");
+                page.row("Hostname", htmlEscape(openknxNetwork.hostName()).c_str()); // same ETS text as the title
+                page.row("MAC", macStr);
+                page.row("IP-Adresse", net ? openknxNetwork.localIP().toString().c_str() : "–", "ov-ip");
+                page.row("Subnetz", net ? openknxNetwork.subnetMask().toString().c_str() : "–", "ov-mask");
+                page.row("Gateway", net ? openknxNetwork.gatewayIP().toString().c_str() : "–", "ov-gw");
 #ifdef OPENKNX_NET_HAVE_LAN_TRAFFIC
                 {
                     uint32_t rxPackets = 0, txPackets = 0;
                     openknxLanTraffic(rxPackets, txPackets);
-                    row("Pakete RX/TX", humanCount(rxPackets) + " / " + humanCount(txPackets));
+                    page.row("Pakete RX/TX", (humanCount(rxPackets) + " / " + humanCount(txPackets)).c_str());
                 }
 #endif
-                row("DNS", net ? openknxNetwork.nameServerIP().toString().c_str()
-                                       : "–", "ov-dns");
-                page += "</tbody></table>";
+                page.row("DNS", net ? openknxNetwork.nameServerIP().toString().c_str() : "–", "ov-dns");
+                page.close();
             }
 
             // ── Versionen ──────────────────────────────────────────────────────
-            page += "<h2>Versionen</h2><table class='attribute-table'><tbody>";
-            row("This Firmware", openknx.info.humanFirmwareVersion(true));
+            page.open("Versionen");
+            page.row("This Firmware", openknx.info.humanFirmwareVersion(true).c_str());
 #ifdef KNX_Version
-            row("KNX", KNX_Version);
+            page.row("KNX", KNX_Version);
 #endif
 #ifdef MODULE_Common_Version
-            row(openknx.common.logPrefix().c_str(), MODULE_Common_Version);
+            page.row(openknx.common.logPrefix().c_str(), MODULE_Common_Version);
 #endif
             for (uint8_t i = 0; i < openknx.modules.count; i++)
             {
                 if (openknx.modules.list[i]->version().empty()) continue;
-                row(openknx.modules.list[i]->name().c_str(),
-                            openknx.modules.list[i]->version());
+                page.row(openknx.modules.list[i]->name().c_str(), openknx.modules.list[i]->version().c_str());
             }
-            page += "<tr><td colspan='2' style='padding-top:1em'></td></tr>";
-            row("Buildtime", BUILD_DATETIME);
-            page += "</tbody></table>";
+            page.raw("<tr><td colspan='2' style='padding-top:1em'></td></tr>");
+            page.row("Buildtime", BUILD_DATETIME);
+            page.close();
 
-            page += "</div>";
+            if (page.full) logWarning("Webserver", "overview cut at %u B", (unsigned)text.size());
+            page.finish();
             res.setContentType("text/html");
             res.setLayout(true);
-            res.send(page.c_str());
+            int len = 0;
+            uint8_t* body = text.take(len);
+            res.sendOwned(body, len);
         }
 #endif // OPENKNX_WEBSERVER
 
@@ -1144,7 +1204,7 @@ namespace OpenKNX
                 publishStatus(true);
             }
 
-            if (!heapShort()) // they build strings: they wait until the heap is back
+            if ((_txQueue.clientCount() > 0 || ui.hasClients()) && !heapShort()) // they build strings: they wait until the heap is back; heapShort() only when a client could use it
             {
                 deliverPendingConnects();
                 publishStatus(false);
