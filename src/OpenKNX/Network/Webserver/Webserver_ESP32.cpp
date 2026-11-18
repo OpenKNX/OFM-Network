@@ -208,10 +208,22 @@ namespace OpenKNX
                     close = true;
                     break;
                 }
-                if (op == 0x09) // Ping → pong
+                if (op == 0x09) // Ping → pong with the same application data (RFC 6455 5.5.3)
                 {
-                    uint8_t pong[2] = {0x8A, 0x00};
-                    wsRawSend(sess->fd, pong, 2);
+                    if (payLen > 125) // a control frame carries at most 125 B (5.5)
+                    {
+                        close = true;
+                        break;
+                    }
+                    uint8_t pong[2 + 125];
+                    pong[0] = 0x8A;
+                    pong[1] = (uint8_t)payLen;
+                    if (payLen) memcpy(pong + 2, payload.data(), (size_t)payLen);
+                    if (wsRawSend(sess->fd, pong, 2 + (size_t)payLen) != (int)(2 + payLen)) // a partial pong desyncs the stream
+                    {
+                        close = true;
+                        break;
+                    }
                     continue;
                 }
                 if (op == 0x0A) // Pong → silently discard

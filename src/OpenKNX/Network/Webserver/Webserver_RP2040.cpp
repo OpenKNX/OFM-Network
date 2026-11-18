@@ -889,10 +889,14 @@ namespace OpenKNX
                         // Frame complete
                         if (s->wsOpcode == 0x08) // Close
                             return wsClose(s);
-                        else if (s->wsOpcode == 0x09) // Ping → Pong
+                        else if (s->wsOpcode == 0x09) // Ping → Pong with the same application data (RFC 6455 5.5.3)
                         {
-                            uint8_t pong[2] = {0x8A, 0x00};
-                            tcp_write(s->pcb, pong, 2, TCP_WRITE_FLAG_COPY);
+                            if (s->wsPayRcvd > 125) return closeSlot(s); // a control frame carries at most 125 B (5.5)
+                            static uint8_t pong[2 + 125]; // static: keeps the receive path's stack small (W5500 IRQ in builds without MAINLOOP_RX)
+                            pong[0] = 0x8A;
+                            pong[1] = (uint8_t)s->wsPayRcvd;
+                            memcpy(pong + 2, s->rxBuf, s->wsPayRcvd);
+                            tcp_write(s->pcb, pong, (uint16_t)(2 + s->wsPayRcvd), TCP_WRITE_FLAG_COPY);
                             tcp_output(s->pcb);
                         }
                         else if (s->wsOpcode == 0x01 || s->wsOpcode == 0x02) // text/binary
