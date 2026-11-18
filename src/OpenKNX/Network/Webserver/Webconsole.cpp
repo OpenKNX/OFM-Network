@@ -27,6 +27,7 @@ namespace OpenKNX
 #if defined(ARDUINO_ARCH_ESP32)
                 return heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
 #elif defined(ARDUINO_ARCH_RP2040)
+                if (Webserver::heapShort()) return 0; // the free heap may be split into blocks smaller than one line
                 const int heap = rp2040.getFreeHeap();
                 return heap > 0 ? (size_t)heap : 0;
 #else

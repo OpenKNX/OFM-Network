@@ -1,5 +1,10 @@
 #pragma once
 
+// RP2040: below this free heap, or without a free block of OPENKNX_WEBSERVER_MIN_BLOCK, a request gets a fixed 503
+#ifndef OPENKNX_WEBSERVER_MIN_HEAP
+#define OPENKNX_WEBSERVER_MIN_HEAP 8192
+#endif
+
 #ifdef OPENKNX_WEBSERVER
 
 #include "OpenKNX/Format/JSON/Writer.h"

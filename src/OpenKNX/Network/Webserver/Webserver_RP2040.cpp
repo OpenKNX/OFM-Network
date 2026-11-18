@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <lwip/tcp.h>
 #include <lwip_wrap.h> // LWIPMutex: makes the ethernet IRQ defer
+#include <new>
 #include <string>
 #include <vector>
 
@@ -32,11 +33,13 @@ static_assert(OPENKNX_WEBSERVER_RX_CAP >= 512 && OPENKNX_WEBSERVER_RX_CAP <= 655
 // Below this free heap, or without a free block of OPENKNX_WEBSERVER_MIN_BLOCK, a request gets a fixed 503 without any
 // allocation: built with -fno-exceptions, a failed new ends in abort() and the watchdog restarts the device (measured:
 // new failed at 6936 B free with a stalled MQTT broker and Notify receiver; under full load without a stall 12.9 KB stay free).
-#ifndef OPENKNX_WEBSERVER_MIN_HEAP
-#define OPENKNX_WEBSERVER_MIN_HEAP 8192
-#endif
 #ifndef OPENKNX_WEBSERVER_MIN_BLOCK
 #define OPENKNX_WEBSERVER_MIN_BLOCK 4096
+#endif
+// Freed by the new handler when operator new finds nothing, so that allocation succeeds instead of abort(); the web
+// answers 503 until the loop has taken it again.
+#ifndef OPENKNX_WEBSERVER_RESERVE
+#define OPENKNX_WEBSERVER_RESERVE 2048
 #endif
 
 #ifndef MEM_CRUMB // OGM-Common without the memory diagnostics
@@ -157,7 +160,8 @@ namespace OpenKNX
         // Unacknowledged bytes in the 16 KB lwIP heap, which MQTT, Notify and every received frame share. Two segments per
         // connection, so a browser acknowledges at once; OPENKNX_WEBSERVER_TX_BUDGET caps the payload of all web connections
         // in a slot together, and HTTP leaves one frame of it to the WebSockets (pong, page data). Not counted: the tail of
-        // a response that is closing. A page whose peer vanished holds its share until the 10 s silence rule drops it (with
+        // a response that is closing, the queued header, fixed answers (503/404/101/1013) and the pong - a WebSocket frame
+        // may then wait for the next ACK. A page whose peer vanished holds its share until the 10 s silence rule drops it (with
         // data queued for it) or lwIP gives up on it.
         static constexpr int HTTP_INFLIGHT = 2 * TCP_MSS;
 #ifdef OPENKNX_WEBSERVER_TX_BUDGET
@@ -513,8 +517,72 @@ namespace OpenKNX
             hdr[hLen] = '\0';
         }
 
+        // ── Heap reserve ──────────────────────────────────────────────────────
+        // The handler runs on whichever core's operator new failed: the block changes hands by atomic exchange.
+
+        static void* g_reserve = nullptr;
+        static volatile bool g_reserveUsed = false;
+        static std::new_handler g_prevNewHandler = nullptr;
+        static uint32_t g_reserveCheck = 0;
+
+        /** @brief operator new found nothing: release the reserve and let it retry; without one, what the previous handler does. */
+        static void reserveNewHandler()
+        {
+            void* r = __atomic_exchange_n(&g_reserve, nullptr, __ATOMIC_ACQ_REL);
+            if (r)
+            {
+                free(r);
+                g_reserveUsed = true;
+                return;
+            }
+            if (g_prevNewHandler)
+            {
+                g_prevNewHandler();
+                return;
+            }
+#ifdef __cpp_exceptions
+            throw std::bad_alloc();
+#else
+            abort();
+#endif
+        }
+
+        /** @brief Takes the reserve once and installs the handler in front of the one already set (MemDiag in diagnostic builds). */
+        static void reserveSetup()
+        {
+            static bool installed = false;
+            if (installed) return;
+            installed = true;
+            __atomic_store_n(&g_reserve, malloc(OPENKNX_WEBSERVER_RESERVE), __ATOMIC_RELEASE);
+            g_prevNewHandler = std::set_new_handler(reserveNewHandler);
+        }
+
+        /** @brief Loop only: takes the reserve again once the heap has room for it above OPENKNX_WEBSERVER_MIN_HEAP. */
+        static void reserveRetake()
+        {
+            if (__atomic_load_n(&g_reserve, __ATOMIC_ACQUIRE)) return;
+            const uint32_t now = millis();
+            if (now - g_reserveCheck < 100) return; // getFreeHeap() walks the free list with interrupts off
+            g_reserveCheck = now;
+            if (rp2040.getFreeHeap() < OPENKNX_WEBSERVER_MIN_HEAP + OPENKNX_WEBSERVER_RESERVE) return;
+            void* r = malloc(OPENKNX_WEBSERVER_RESERVE);
+            if (!r) return;
+            void* none = nullptr; // compare-exchange: same pico_atomic lock as the handler's exchange, a plain store is not
+            if (!__atomic_compare_exchange_n(&g_reserve, &none, r, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+            {
+                free(r);
+                return;
+            }
+            if (g_reserveUsed)
+            {
+                g_reserveUsed = false;
+                logWarning("Webserver", "a failed allocation used the heap reserve; reserve taken again");
+            }
+        }
+
         bool Webserver::heapShort()
         {
+            if (!__atomic_load_n(&g_reserve, __ATOMIC_ACQUIRE)) return true; // used, or not taken yet
             // getFreeHeap() walks the free list with interrupts off: the answer is kept 100 ms
             static uint32_t at = 0;
             static bool valid = false, shortNow = false;
@@ -1286,6 +1354,7 @@ namespace OpenKNX
 
         void Webserver::setupRp2040()
         {
+            reserveSetup();
             tcp_pcb* pcb = tcp_new();
             if (!pcb)
             {
@@ -1327,6 +1396,7 @@ namespace OpenKNX
 
         void Webserver::loopPlatform()
         {
+            reserveRetake();
             bool waiting = false; // unlocked peek, as below: the lock only when a waiting connection can get a slot
             for (int i = 0; i < MAX_WAITING && !waiting; i++)
                 waiting = g_waiting[i].pcb != nullptr;
