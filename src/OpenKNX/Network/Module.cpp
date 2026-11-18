@@ -333,6 +333,10 @@ static const char *otaModeStr()
     return "always";
 }
 
+#ifndef MEM_CRUMB // OGM-Common without the memory diagnostics
+    #define MEM_CRUMB(STEP)
+#endif
+
 namespace OpenKNX
 {
     namespace Network
@@ -1884,7 +1888,10 @@ namespace OpenKNX
     #endif
                 return;
             }
-            checkEthHealth(); // runtime W5500 wedge watchdog -> clean recovery
+            {
+                MEM_CRUMB(2)
+                checkEthHealth(); // runtime W5500 wedge watchdog -> clean recovery
+            }
 #elif defined(ARDUINO_ARCH_ESP32) && defined(OPENKNX_ETH_W5500) && defined(KNX_IP_LAN)
             checkEthHealthEsp(); // ESP+W5500 hard-wedge recovery (link-based); native-EMAC (REG1) excluded
 #endif
@@ -1893,7 +1900,10 @@ namespace OpenKNX
             _pingHandler.loop();
 #endif
 #if defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32)
-            OpenKNX::Network::DNS::loop();
+            {
+                MEM_CRUMB(7)
+                OpenKNX::Network::DNS::loop();
+            }
 #endif
 #ifdef OPENKNX_WIFI_SCAN
             if (_wifiScanRunning) loopWifiScan();
@@ -1905,11 +1915,18 @@ namespace OpenKNX
             loopWifiFiles();
 #endif
 #ifdef OPENKNX_WEBCLIENT
-            if (established()) webclient.loop();
+            if (established())
+            {
+                MEM_CRUMB(3)
+                webclient.loop();
+            }
 #endif
 
-            checkLinkStatus();
-            handleOTA();
+            {
+                MEM_CRUMB(4)
+                checkLinkStatus();
+                handleOTA();
+            }
 
 #ifdef OPENKNX_TELEGRAMJSON
             // Independent of the webserver and of established(): the table lives on
@@ -1963,6 +1980,7 @@ namespace OpenKNX
 #if defined(OPENKNX_TELEGRAMJSON) && defined(OPENKNX_WEBMONITOR)
                     groupmonitor.loop();
 #endif
+                    MEM_CRUMB(5)
                     webserver.loop();
                 }
             }
@@ -1970,6 +1988,7 @@ namespace OpenKNX
 #ifdef OPENKNX_MQTT
             if (established())
             {
+                MEM_CRUMB(6)
                 mqtt.setup(configured);
                 mqtt.loop(configured);
             }
@@ -3822,13 +3841,17 @@ namespace OpenKNX
                 asyncTimerIdled = true;
             }
             ethernet_arch_lwip_begin();
-            KNX_NETIF.handlePackets(); // RX
+            {
+                MEM_CRUMB(0) // watchdog record: W5500 RX and the lwIP input callbacks
+                KNX_NETIF.handlePackets(); // RX
+            }
             // lwIP timers are ms-granularity; throttle to ~1 ms so we don't burn TP-hot-path cycles at the kHz loop rate
             static uint32_t lastTimeoutMs = 0;
             uint32_t nowMs = millis();
             if (nowMs != lastTimeoutMs)
             {
                 lastTimeoutMs = nowMs;
+                MEM_CRUMB(1) // watchdog record: lwIP timers and their callbacks
                 sys_check_timeouts();
             }
             ethernet_arch_lwip_end();

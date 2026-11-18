@@ -22,6 +22,10 @@ typedef NetworkClient WiFiClient;
 #include <lwip_wrap.h> // LWIPMutex: makes the ethernet IRQ defer
 #endif
 
+#ifndef MEM_CRUMB // OGM-Common without the memory diagnostics
+    #define MEM_CRUMB(STEP)
+#endif
+
 namespace OpenKNX
 {
     namespace Network
@@ -553,6 +557,7 @@ namespace OpenKNX
 
             err_t Client::lwipConnected(void *arg, struct tcp_pcb *, err_t err)
             {
+                MEM_CRUMB(10)
                 Client *self = static_cast<Client *>(arg);
                 if (self && err == ERR_OK) self->_tcpUp = true;
                 return ERR_OK;
@@ -560,6 +565,7 @@ namespace OpenKNX
 
             err_t Client::lwipRecv(void *arg, struct tcp_pcb *, struct pbuf *p, err_t err)
             {
+                MEM_CRUMB(10)
                 Client *self = static_cast<Client *>(arg);
                 if (!p)
                 {
@@ -580,6 +586,7 @@ namespace OpenKNX
 
             void Client::lwipErr(void *arg, err_t)
             {
+                MEM_CRUMB(10)
                 // The pcb is already freed; loop() sees the missing pcb and reconnects.
                 Client *self = static_cast<Client *>(arg);
                 if (self) self->_pcb = nullptr;

@@ -38,6 +38,10 @@
 #define OPENKNX_WEBSERVER_MIN_BLOCK 4096
 #endif
 
+#ifndef MEM_CRUMB // OGM-Common without the memory diagnostics
+    #define MEM_CRUMB(STEP)
+#endif
+
 namespace OpenKNX
 {
     namespace Network
@@ -931,6 +935,7 @@ namespace OpenKNX
 
         static void onErr(void* arg, err_t /*err*/)
         {
+            MEM_CRUMB(9)
             ConnSlot* s = (ConnSlot*)arg;
             if (!s) return;
             s->pcb = nullptr; // already freed by lwIP -- must not be touched
@@ -939,6 +944,7 @@ namespace OpenKNX
 
         static err_t onSent(void* arg, tcp_pcb* tpcb, u16_t /*len*/)
         {
+            MEM_CRUMB(9)
             ConnSlot* s = (ConnSlot*)arg;
             if (!s || s->pcb != tpcb)
             {
@@ -967,6 +973,7 @@ namespace OpenKNX
 
         static err_t onRecv(void* arg, tcp_pcb* tpcb, pbuf* p, err_t err)
         {
+            MEM_CRUMB(9)
             ConnSlot* s = (ConnSlot*)arg;
             if (!s || s->pcb != tpcb)
             {
@@ -1096,6 +1103,7 @@ namespace OpenKNX
 
         static err_t onPoll(void* arg, tcp_pcb* tpcb)
         {
+            MEM_CRUMB(9)
             ConnSlot* s = (ConnSlot*)arg;
             if (!s || s->pcb != tpcb)
             {
@@ -1174,6 +1182,7 @@ namespace OpenKNX
 
         static err_t onWaitRecv(void* arg, tcp_pcb* pcb, pbuf* p, err_t)
         {
+            MEM_CRUMB(9)
             if (p) return ERR_MEM; // lwIP keeps it and offers it again once the connection has a slot
             ((Waiting*)arg)->pcb = nullptr; // closed by the client while waiting
             detach(pcb);
@@ -1184,11 +1193,13 @@ namespace OpenKNX
 
         static void onWaitErr(void* arg, err_t)
         {
+            MEM_CRUMB(9)
             if (arg) ((Waiting*)arg)->pcb = nullptr; // lwIP has freed the pcb
         }
 
         static err_t onWaitPoll(void* arg, tcp_pcb* pcb)
         {
+            MEM_CRUMB(9)
             Waiting* w = (Waiting*)arg;
             if (++w->polls <= WAIT_POLLS) return ERR_OK;
             w->pcb = nullptr;
@@ -1227,6 +1238,7 @@ namespace OpenKNX
 
         static err_t onAccept(void* arg, tcp_pcb* newpcb, err_t err)
         {
+            MEM_CRUMB(9)
             if (err != ERR_OK || newpcb == nullptr)
             {
 #ifdef OPENKNX_MEM_STAT

@@ -28,6 +28,10 @@ typedef NetworkServer WiFiServer;
 #include <lwip_wrap.h> // LWIPMutex: makes the ethernet IRQ defer
 #endif
 
+#ifndef MEM_CRUMB // OGM-Common without the memory diagnostics
+    #define MEM_CRUMB(STEP)
+#endif
+
 namespace OpenKNX
 {
     namespace Network
@@ -649,6 +653,7 @@ namespace OpenKNX
 
             err_t Broker::lwipAccept(void *arg, struct tcp_pcb *newPcb, err_t err)
             {
+                MEM_CRUMB(10)
                 Broker *self = static_cast<Broker *>(arg);
                 if (!self || err != ERR_OK || !newPcb) return ERR_VAL;
 
@@ -671,6 +676,7 @@ namespace OpenKNX
 
             err_t Broker::lwipRecv(void *arg, struct tcp_pcb *, struct pbuf *p, err_t err)
             {
+                MEM_CRUMB(10)
                 Conn *c = static_cast<Conn *>(arg);
                 if (!p)
                 {
@@ -691,6 +697,7 @@ namespace OpenKNX
 
             void Broker::lwipErr(void *arg, err_t)
             {
+                MEM_CRUMB(10)
                 // The pcb is already freed; loop() closes the slot.
                 Conn *c = static_cast<Conn *>(arg);
                 if (c) c->pcb = nullptr;
