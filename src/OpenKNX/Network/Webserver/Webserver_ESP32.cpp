@@ -641,7 +641,8 @@ namespace OpenKNX
             }
             if (sessions.empty()) return;
 
-            // Hand the socket back to httpd (which closes it), then clear the registry.
+            // Hand the socket back to httpd, then clear the registry. httpd does not close it here: it closes it when the
+            // client closes or sends again, on a socket error, or when lru_purge_enable frees it for a new connection.
             auto reap = [this](WsSession* sess) {
                 try
                 {
