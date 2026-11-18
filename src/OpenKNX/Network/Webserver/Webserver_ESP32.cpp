@@ -10,6 +10,7 @@
 #include <esp_http_server.h>
 #include <memory>
 #include <new> // std::bad_alloc
+#include <cerrno>
 #include <fcntl.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -219,7 +220,9 @@ namespace OpenKNX
                     pong[0] = 0x8A;
                     pong[1] = (uint8_t)payLen;
                     if (payLen) memcpy(pong + 2, payload.data(), (size_t)payLen);
-                    if (wsRawSend(sess->fd, pong, 2 + (size_t)payLen) != (int)(2 + payLen)) // a partial pong desyncs the stream
+                    const int sent = wsRawSend(sess->fd, pong, 2 + (size_t)payLen);
+                    if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) continue; // nothing written: no pong, the session stays
+                    if (sent != (int)(2 + payLen)) // a partial pong desyncs the stream
                     {
                         close = true;
                         break;
