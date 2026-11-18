@@ -227,6 +227,8 @@ namespace OpenKNX
             return close;
         }
 
+        bool Webserver::heapShort() { return false; } // a failed allocation throws bad_alloc here and answers 503
+
         // ── WebSocket upgrade ───────────────────────────────────────────────
 
         static bool doWsUpgrade(httpd_req_t* req, Webserver* wsObj)

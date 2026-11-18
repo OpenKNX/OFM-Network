@@ -28,6 +28,15 @@
 #ifndef OPENKNX_WEBSERVER_RX_CAP
 #define OPENKNX_WEBSERVER_RX_CAP 1024
 #endif
+// Below this free heap, or without a free block of OPENKNX_WEBSERVER_MIN_BLOCK, a request gets a fixed 503 without any
+// allocation: built with -fno-exceptions, a failed new ends in abort() and the watchdog restarts the device (measured:
+// new failed at 6936 B free with a stalled MQTT broker and Notify receiver; under full load without a stall 12.9 KB stay free).
+#ifndef OPENKNX_WEBSERVER_MIN_HEAP
+#define OPENKNX_WEBSERVER_MIN_HEAP 8192
+#endif
+#ifndef OPENKNX_WEBSERVER_MIN_BLOCK
+#define OPENKNX_WEBSERVER_MIN_BLOCK 4096
+#endif
 
 namespace OpenKNX
 {
@@ -499,8 +508,40 @@ namespace OpenKNX
             hdr[hLen] = '\0';
         }
 
+        bool Webserver::heapShort()
+        {
+            // getFreeHeap() walks the free list with interrupts off: the answer is kept 100 ms
+            static uint32_t at = 0;
+            static bool valid = false, shortNow = false;
+            const uint32_t now = millis();
+            if (!valid || now - at >= 100)
+            {
+                valid = true;
+                at = now;
+                shortNow = rp2040.getFreeHeap() < OPENKNX_WEBSERVER_MIN_HEAP;
+                if (!shortNow)
+                {
+                    void* probe = malloc(OPENKNX_WEBSERVER_MIN_BLOCK); // malloc returns NULL, new would abort
+                    shortNow = probe == nullptr;
+                    free(probe);
+                }
+            }
+            return shortNow;
+        }
+
         static void doHttpDispatch(ConnSlot* s)
         {
+            if (Webserver::heapShort()) // a fixed answer, nothing allocated; a WebSocket upgrade gets it too, the page reconnects
+            {
+                static const char resp[] = "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 2\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                tcp_write(s->pcb, resp, sizeof(resp) - 1, TCP_WRITE_FLAG_COPY);
+                tcp_output(s->pcb);
+#ifdef OPENKNX_MEM_STAT
+                OpenKNX::Stat::memDiag.webRefused();
+#endif
+                closeSlot(s);
+                return;
+            }
             if (s->isWs && !s->ws->hasSocket(s->uri))
             {
                 const char resp[] = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";

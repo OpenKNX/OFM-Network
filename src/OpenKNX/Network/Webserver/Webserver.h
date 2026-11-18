@@ -197,6 +197,8 @@ namespace OpenKNX
             void start();
             void loop();
             void loopPlatform(); // Empfang und Transport der jeweiligen Plattform
+            /** @brief RP2040: the heap is below OPENKNX_WEBSERVER_MIN_HEAP; requests get a fixed 503, connects and status wait. */
+            static bool heapShort();
             bool isRunning();
             // Reiht ein statt sofort zu senden -- der Drain in loop() gibt die Records an
             // die Sockets. fd < 0 = Broadcast an alle Clients dieses Endpoints.

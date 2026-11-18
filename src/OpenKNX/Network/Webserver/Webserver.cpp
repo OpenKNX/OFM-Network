@@ -1109,8 +1109,11 @@ namespace OpenKNX
                 publishStatus(true);
             }
 
-            deliverPendingConnects();
-            publishStatus(false);
+            if (!heapShort()) // they build strings: they wait until the heap is back
+            {
+                deliverPendingConnects();
+                publishStatus(false);
+            }
             drainTxQueue();
         }
 
