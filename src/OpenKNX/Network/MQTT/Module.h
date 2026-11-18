@@ -22,6 +22,15 @@
 #ifndef OPENKNX_MQTT_MAX_QUEUE
 #define OPENKNX_MQTT_MAX_QUEUE 32
 #endif
+// Bytes all waiting entries may hold together (0 = no limit): on the RP2040 a broker that stops reading drained the heap
+// until a failed new restarted the device (32 telegrams of about 450 B); ESP32 keeps the old limit of 32 entries only.
+#ifndef OPENKNX_MQTT_MAX_QUEUE_BYTES
+    #ifdef ARDUINO_ARCH_RP2040
+        #define OPENKNX_MQTT_MAX_QUEUE_BYTES 4096
+    #else
+        #define OPENKNX_MQTT_MAX_QUEUE_BYTES 0
+    #endif
+#endif
 
 #ifdef ARDUINO_ARCH_ESP32
 #include <freertos/FreeRTOS.h>
@@ -101,6 +110,7 @@ namespace OpenKNX
                 QueueEntry *_queueHead = nullptr; // dequeued here
                 QueueEntry *_queueTail = nullptr; // enqueued here
                 uint16_t _queueCount = 0;
+                uint32_t _queueBytes = 0;   // sum of the entry sizes, under the queue lock
                 uint32_t _queueDropped = 0; // cap reached or out of memory
 
                 bool enqueue(const char *topic, const void *payload, size_t len,

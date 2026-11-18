@@ -189,7 +189,13 @@ namespace OpenKNX
                     return false;
                 }
 
-                QueueEntry *e = (QueueEntry *)PSRAM_MALLOC(sizeof(QueueEntry) + topicLen + 1 + len);
+                const size_t entrySize = sizeof(QueueEntry) + topicLen + 1 + len;
+                if (OPENKNX_MQTT_MAX_QUEUE_BYTES && _queueCount && _queueBytes + entrySize > OPENKNX_MQTT_MAX_QUEUE_BYTES) // fast path; one entry always fits an empty queue
+                {
+                    _queueDropped++;
+                    return false;
+                }
+                QueueEntry *e = (QueueEntry *)PSRAM_MALLOC(entrySize);
                 if (!e)
                 {
                     _queueDropped++;
@@ -206,7 +212,7 @@ namespace OpenKNX
                 if (len) memcpy(dst + topicLen + 1, payload, len);
 
                 queueLock();
-                if (_queueCount >= OPENKNX_MQTT_MAX_QUEUE) // another producer got there first
+                if (_queueCount >= OPENKNX_MQTT_MAX_QUEUE || (OPENKNX_MQTT_MAX_QUEUE_BYTES && _queueCount && _queueBytes + entrySize > OPENKNX_MQTT_MAX_QUEUE_BYTES)) // re-checked: another producer may have come first
                 {
                     queueUnlock();
                     free(e);
@@ -219,6 +225,7 @@ namespace OpenKNX
                     _queueHead = e;
                 _queueTail = e;
                 _queueCount++;
+                _queueBytes += entrySize;
                 queueUnlock();
 
                 return true;
@@ -231,6 +238,7 @@ namespace OpenKNX
                 QueueEntry *e = _queueHead;
                 _queueHead = _queueTail = nullptr;
                 _queueCount = 0;
+                _queueBytes = 0;
                 queueUnlock();
 
                 while (e)
@@ -282,6 +290,7 @@ namespace OpenKNX
                 _queueHead = e->next;
                 if (!_queueHead) _queueTail = nullptr;
                 _queueCount--;
+                _queueBytes -= sizeof(QueueEntry) + e->topicLen + 1 + e->payloadLen;
                 queueUnlock();
 
                 free(e);
