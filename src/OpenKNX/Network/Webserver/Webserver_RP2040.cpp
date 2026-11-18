@@ -28,6 +28,7 @@
 #ifndef OPENKNX_WEBSERVER_RX_CAP
 #define OPENKNX_WEBSERVER_RX_CAP 1024
 #endif
+static_assert(OPENKNX_WEBSERVER_RX_CAP >= 512 && OPENKNX_WEBSERVER_RX_CAP <= 65535, "rxBuf also holds the per-request part of the page head (Webserver.cpp LAYOUT_TAIL)");
 // Below this free heap, or without a free block of OPENKNX_WEBSERVER_MIN_BLOCK, a request gets a fixed 503 without any
 // allocation: built with -fno-exceptions, a failed new ends in abort() and the watchdog restarts the device (measured:
 // new failed at 6936 B free with a stalled MQTT broker and Notify receiver; under full load without a stall 12.9 KB stay free).
@@ -678,6 +679,9 @@ namespace OpenKNX
             // instance would be long gone by then.
             WebResponse& response = g_response[s->idx];
             response.reset();
+            // The page head's per-request part goes into rxBuf: the handler has used the request by then, and onRecv() leaves
+            // rxBuf alone from CS_HTTP_SEND on; this runs under the lwIP lock, so no receive callback comes in between.
+            response.setScratch(s->rxBuf, sizeof(s->rxBuf));
             s->ws->handleRequest(request, response);
             if (!s->pcb)
             {

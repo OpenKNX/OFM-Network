@@ -148,6 +148,7 @@ namespace OpenKNX
             std::string label;
             std::string uri;
             int8_t priority = 0;
+            uint16_t activeAt = 0; // offset in the prebuilt page head where " active" marks this item
         };
 
         class Webserver
@@ -186,6 +187,7 @@ namespace OpenKNX
             void addLoopRoute(uint8_t method, const std::string& uri, WebRouteHandler handler);
             void addSocket(const std::string& uri, WebSocketHandler onMessage,
                            WebSocketConnectHandler onConnect = nullptr);
+            /** @brief Menu, stylesheets and scripts go into the page frame built once in start(); later calls are logged and ignored. */
             void addMenuItem(const std::string& label, const std::string& uri, int8_t priority = 0);
             void setDefaultPage(const std::string& uri) { _defaultPageUri = uri; }
             void addStylesheet(const char* uri);
@@ -214,10 +216,6 @@ namespace OpenKNX
             size_t txCost(const char* key, size_t len) const;
             bool txFits(const char* key, size_t len) const;
 
-            std::string buildHeader(const std::string& activeUri = "");
-            std::string buildFooter();
-
-            const std::vector<WebMenuItem>& menuItems() const { return _menu; }
 
             static WebRouteHandler Redirect(const std::string& target);
             static WebRouteHandler Static(const char* mimeType, const char* text);
@@ -266,6 +264,9 @@ namespace OpenKNX
           private:
             bool _accessLog = false;
             bool _initialized = false;
+            bool _chromeBuilt = false; // page frame built: menu, stylesheets and scripts are fixed
+            std::string _chromeHead;   // page start up to the knx-dot class; the menu items' activeAt point into it
+            std::string _chromeFoot;   // </main>, scripts, </body></html>
             uint32_t _startRetry = 0;    // last start attempt
             uint32_t _startDelay = 1000; // backoff, doubles per failure up to 10 s
 
@@ -299,6 +300,8 @@ namespace OpenKNX
             const char* _uiOversizeKey = nullptr;
 
             void buildOverviewPage(WebResponse& res);
+            void buildChrome();
+            void applyLayout(WebResponse& res, const std::string& path);
             void setupUiSocket();
             void notifyUiHandlers(const char* key, const char* data, size_t len);
             void publishStatus(bool force);

@@ -153,14 +153,21 @@ namespace OpenKNX
 
         // ── Segmente ─────────────────────────────────────────────────────────
 
-        void WebResponse::setLayoutChrome(std::string header, std::string footer)
+        void WebResponse::setLayoutChrome(const char* head, int headLen, int activeAt, const char* tail, int tailLen,
+                                          const char* foot, int footLen)
         {
-            _layoutHeader = std::move(header);
-            _layoutFooter = std::move(footer);
+            _chromeHead = head;
+            _chromeHeadLen = (uint16_t)headLen;
+            _chromeActiveAt = (activeAt >= 0 && activeAt <= headLen) ? (int16_t)activeAt : (int16_t)-1;
+            _chromeTail = tail;
+            _chromeTailLen = (uint16_t)tailLen;
+            _chromeFoot = foot;
+            _chromeFootLen = (uint16_t)footLen;
         }
 
         void WebResponse::finalizeSegments()
         {
+            static const char active[] = " active";
             _segCount = 0;
             auto add = [this](const void* data, int len) {
                 if (!data || len <= 0 || _segCount >= MAX_SEGMENTS) return;
@@ -169,9 +176,20 @@ namespace OpenKNX
 
             // Ab hier darf der Body nicht mehr geändert werden — die Segmente zeigen
             // direkt hinein, ein weiteres send() würde sie ins Leere laufen lassen.
-            add(_layoutHeader.data(), (int)_layoutHeader.length());
+            if (_chromeHead)
+            {
+                if (_chromeActiveAt >= 0)
+                {
+                    add(_chromeHead, _chromeActiveAt);
+                    add(active, (int)sizeof(active) - 1);
+                    add(_chromeHead + _chromeActiveAt, _chromeHeadLen - _chromeActiveAt);
+                }
+                else
+                    add(_chromeHead, _chromeHeadLen);
+                add(_chromeTail, _chromeTailLen);
+            }
             add(_body, _bodyLength);
-            add(_layoutFooter.data(), (int)_layoutFooter.length());
+            if (_chromeHead) add(_chromeFoot, _chromeFootLen);
         }
 
         int WebResponse::totalLength() const
@@ -213,9 +231,9 @@ namespace OpenKNX
             _streamCleanupFn = nullptr;
             _streamCtx = nullptr;
 
-            // swap with an empty string releases the heap buffer; assigning std::string() keeps it (libstdc++)
-            std::string().swap(_layoutHeader);
-            std::string().swap(_layoutFooter);
+            _chromeHead = _chromeTail = _chromeFoot = nullptr;
+            _chromeHeadLen = _chromeTailLen = _chromeFootLen = 0;
+            _chromeActiveAt = -1;
             _segCount = 0;
         }
 

@@ -60,21 +60,35 @@ namespace OpenKNX
         // base.css/base.js/favicon.svg/logo.svg liegen in web/assets/ und werden
         // dort minifiziert + gzip-komprimiert in webassets.h eingebettet.
 
-        std::string Webserver::buildHeader(const std::string& activeUri)
+        // Per-request part of the page head, after the static part up to "class='prog-dot ".
+        // Socket state, always "connecting" server-side: the page arrives over HTTP
+        // before the socket exists. Without JavaScript it stays that way, correctly.
+        // Formular statt Link — /prog ist bewusst POST-only. base.js fängt den
+        // Submit ab und schickt stattdessen "prog:t"; ohne JS greift der POST.
+        static const char LAYOUT_TAIL[] =
+            "%s'></span>Adresse: <span id='knx-pa'>%d.%d.%d"
+            "</span></div>"
+            "<div class='nav-info'>"
+            "<span id='ws-dot' class='prog-dot dot-off'></span>"
+            "<span id='ws-text'>Verbinde&hellip;</span>"
+            "</div>"
+            "<form id='prog-form' class='prog-status' method='post' action='/prog?mode=%s'>"
+            "<button type='submit' class='prog-status-btn'>"
+            "<span id='prog-dot' class='prog-dot %s'></span><span id='prog-text'>%s</span></button>"
+            "</form>"
+            "</div>"
+            "</nav><main>";
+        // Each %s/%d replaces 2 format bytes; the values add at most 7 (dot) + 1 (address) - 1 (mode) + 5 (prog dot) + 16 (text)
+        static constexpr size_t LAYOUT_TAIL_MAX = sizeof(LAYOUT_TAIL) + 28; // NUL included
+        static_assert(LAYOUT_TAIL_MAX <= 512, "per-request page head exceeds the ESP32 scratch buffer");
+
+        /**
+         * @brief Builds the parts of every page that never change after the start, once, before the server serves.
+         * Only the active menu item, the address, the configured dot and the prog mode are added per request (applyLayout()).
+         */
+        void Webserver::buildChrome()
         {
-            std::string nav = "<div class='menu-container'>";
-            for (auto& item : _menu)
-            {
-                bool active = (item.uri == activeUri);
-                nav += "<a class='menu";
-                if (active) nav += " active";
-                nav += "' href='";
-                nav += item.uri;
-                nav += "'>";
-                nav += item.label;
-                nav += "</a>";
-            }
-            nav += "</div>";
+            if (_chromeBuilt) return;
 
             // The tab title names the DEVICE, not the product: an installer has several OpenKNX pages open
             // and "OpenKNX" on every tab tells them apart from nothing. The hostname is the identity mDNS,
@@ -85,6 +99,7 @@ namespace OpenKNX
             // [A-Za-z0-9-], so this guards a hand-edited knxprod, not a live hole.
             const char *host = openknxNetwork.hostName();
             const std::string title = htmlEscape(host[0] != '\0' ? host : "OpenKNX");
+            const std::string buster = "?v=" + std::to_string(BUILD_TIMESTAMP);
 
             std::string html =
                 "<!DOCTYPE html><html lang='de'><head>"
@@ -94,16 +109,9 @@ namespace OpenKNX
                 // dead on exactly the devices it was written for.
                 "<meta name='viewport' content='width=device-width,initial-scale=1'>"
                 "<title>" + title + "</title>";
-
-            std::string buster = "?v=" + std::to_string(BUILD_TIMESTAMP);
             html += "<link rel='icon' type='image/svg+xml' href='/assets/favicon.svg" + buster + "'>";
-
-            // Add registered stylesheets
             for (const auto& stylesheet : _stylesheets)
-            {
                 html += "<link rel='stylesheet' href='" + stylesheet + buster + "'>";
-            }
-
             html += "</head><body>"
                     "<nav>"
                     "<div class='logo'>"
@@ -112,7 +120,19 @@ namespace OpenKNX
                     "</a>"
                     "</div>";
 
-            html += nav;
+            html += "<div class='menu-container'>";
+            for (auto& item : _menu)
+            {
+                html += "<a class='menu";
+                item.activeAt = (uint16_t)html.size();
+                html += "' href='";
+                html += item.uri;
+                html += "'>";
+                html += item.label;
+                html += "</a>";
+            }
+            html += "</div>";
+
             html += "<div class='nav-wiki'>"
                     "<a href='https://wiki.openknx.de' target='_blank' rel='noopener noreferrer'>"
                     "wiki</a> | "
@@ -125,55 +145,66 @@ namespace OpenKNX
             html += "</div>"
                     "<div class='nav-info'>"
                     "<span id='knx-dot' class='prog-dot ";
-            html += knx.configured() ? "dot-green" : "dot-off";
-            html += "'></span>Adresse: <span id='knx-pa'>";
-            html += openknx.info.humanIndividualAddress();
-            // Formular statt Link — /prog ist bewusst POST-only. base.js fängt den
-            // Submit ab und schickt stattdessen "prog:t"; ohne JS greift der POST.
-            // Socket state, always "connecting" server-side: the page arrives over HTTP
-            // before the socket exists. Without JavaScript it stays that way, correctly.
-            html += "</span></div>"
-                    "<div class='nav-info'>"
-                    "<span id='ws-dot' class='prog-dot dot-off'></span>"
-                    "<span id='ws-text'>Verbinde&hellip;</span>"
-                    "</div>"
-                    "<form id='prog-form' class='prog-status' method='post' action='/prog?mode=";
-            html += knx.progMode() ? "0" : "1";
-            html += "'>"
-                    "<button type='submit' class='prog-status-btn'>"
-                    "<span id='prog-dot' class='prog-dot ";
-            html += knx.progMode() ? "dot-red" : "dot-off";
-            html += "'></span><span id='prog-text'>";
-            html += knx.progMode() ? "Prog-Modus aktiv" : "Prog-Modus inaktiv";
-            html += "</span></button>"
-                    "</form>"
-                    "</div>";
-            html += "</nav><main>";
-            return html;
+            _chromeHead.assign(html.data(), html.size()); // a copy of exact capacity; html grew by doubling
+
+            html = "</main>";
+            for (const auto& script : _scripts)
+                html += "<script src='" + script + buster + "' defer></script>";
+            html += "</body></html>";
+            _chromeFoot.assign(html.data(), html.size());
+
+            // only the frame used them
+            std::vector<std::string>().swap(_stylesheets);
+            std::vector<std::string>().swap(_scripts);
+            _chromeBuilt = true;
         }
 
-        std::string Webserver::buildFooter()
+        /** @brief Frames the body: the static head and foot from buildChrome(), the per-request part in the platform's scratch. */
+        void Webserver::applyLayout(WebResponse& res, const std::string& path)
         {
-            std::string html = "</main>";
+            const std::string& activeUri = res.activeMenuUri().empty() ? path : res.activeMenuUri();
+            int activeAt = -1;
+            for (const auto& item : _menu)
+                if (item.uri == activeUri)
+                {
+                    activeAt = item.activeAt;
+                    break;
+                }
 
-            // Add registered scripts before closing body
-            std::string buster = "?v=" + std::to_string(BUILD_TIMESTAMP);
-            for (const auto& script : _scripts)
+            char* tail = res.scratch();
+            const uint16_t ia = knx.individualAddress();
+            const bool prog = knx.progMode();
+            const int n = tail ? snprintf(tail, res.scratchCap(), LAYOUT_TAIL, knx.configured() ? "dot-green" : "dot-off",
+                                          (ia & 0xF000) >> 12, (ia & 0x0F00) >> 8, ia & 0x00FF, prog ? "0" : "1",
+                                          prog ? "dot-red" : "dot-off", prog ? "Prog-Modus aktiv" : "Prog-Modus inaktiv")
+                               : -1;
+            if (!_chromeBuilt || n < 0 || n >= (int)res.scratchCap())
             {
-                html += "<script src='" + script + buster + "' defer></script>";
+                logError("Webserver", "page frame not available");
+                res.sendOutOfMemory(); // handleRequest() runs finalizeSegments()
+                return;
             }
-
-            html += "</body></html>";
-            return html;
+            res.setLayoutChrome(_chromeHead.data(), (int)_chromeHead.size(), activeAt, tail, n,
+                                _chromeFoot.data(), (int)_chromeFoot.size());
         }
 
         void Webserver::addStylesheet(const char* uri)
         {
+            if (_chromeBuilt)
+            {
+                logError("Webserver", "stylesheet %s after the start: ignored", uri);
+                return;
+            }
             _stylesheets.push_back(uri);
         }
 
         void Webserver::addJavaScript(const char* uri)
         {
+            if (_chromeBuilt)
+            {
+                logError("Webserver", "script %s after the start: ignored", uri);
+                return;
+            }
             _scripts.push_back(uri);
         }
 
@@ -466,6 +497,8 @@ namespace OpenKNX
             if (!_txQueue.setup(OPENKNX_WEBSOCKET_TX_BUFFER, (uint32_t)maxWebsocketPayload()))
                 return;
 
+            buildChrome(); // before the platform start: ESP32 httpd serves from its own task at once
+
 #ifdef ARDUINO_ARCH_ESP32
             setupEsp32();
 #elif defined(ARDUINO_ARCH_RP2040)
@@ -497,6 +530,11 @@ namespace OpenKNX
 
         void Webserver::addMenuItem(const std::string& label, const std::string& uri, int8_t priority)
         {
+            if (_chromeBuilt)
+            {
+                logError("Webserver", "menu item %s after the start: ignored", uri.c_str());
+                return;
+            }
             // The list stays sorted: insert after every item of lower or equal priority, so equal priorities
             // keep registration order -- the order std::stable_sort gave, without its template code.
             size_t pos = _menu.size();
@@ -591,19 +629,16 @@ namespace OpenKNX
                 res.setStatus(404);
                 res.setContentType("text/html");
                 res.setLayout(true);
-                res.send("<h2>404 &ndash; Seite nicht gefunden</h2>"
-                         "<p class='meta'>Die angeforderte Seite existiert nicht.</p>");
+                res.sendStatic("<h2>404 &ndash; Seite nicht gefunden</h2>"
+                               "<p class='meta'>Die angeforderte Seite existiert nicht.</p>");
             }
 
             // Layout anwenden und die Antwort in ihre Sendeblöcke zerlegen. Bewusst hier
             // und nicht im Plattformcode: der kennt danach nur noch res.segments() und
-            // muss weder useLayout() auswerten noch buildHeader()/buildFooter() kennen.
+            // muss weder useLayout() auswerten noch den Seitenrahmen kennen.
             if (!res.isStreaming())
             {
-                if (res.useLayout())
-                    res.setLayoutChrome(
-                        buildHeader(res.activeMenuUri().empty() ? path : res.activeMenuUri()),
-                        buildFooter());
+                if (res.useLayout()) applyLayout(res, path);
                 res.finalizeSegments();
             }
 

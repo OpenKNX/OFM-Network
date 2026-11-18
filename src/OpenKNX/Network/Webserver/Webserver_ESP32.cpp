@@ -468,7 +468,10 @@ namespace OpenKNX
                 request.setBody(bodyData.data(), (size_t)received);
             }
 
+            // httpd is one task and sends the response below before it takes the next request
+            static char layoutTail[512];
             WebResponse response;
+            response.setScratch(layoutTail, sizeof(layoutTail));
             try
             {
                 ws->handleRequest(request, response);

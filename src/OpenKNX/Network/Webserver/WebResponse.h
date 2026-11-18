@@ -12,8 +12,7 @@ namespace OpenKNX
         using WebStreamReadFn = size_t (*)(void* ctx, uint8_t* buf, size_t maxLen);
         using WebStreamCleanupFn = void (*)(void* ctx);
 
-        // Ein zu sendender Block. Nur eine Sicht — der Speicher gehört immer der
-        // WebResponse, deshalb kein Ownership-Flag.
+        // A block to send. A view only: the bytes belong to the response or to the frame given to setLayoutChrome().
         struct ResponseSegment
         {
             const uint8_t* data;
@@ -74,8 +73,20 @@ namespace OpenKNX
             // ── Segmente ─────────────────────────────────────────────────────
             // Befüllt von Webserver::handleRequest(), danach nur noch gelesen.
 
-            void setLayoutChrome(std::string header, std::string footer);
+            /** @brief Frame around the body; head, tail and foot stay owned by the caller until the response is sent.
+             *  activeAt >= 0 inserts " active" at that offset of head (the current menu item). */
+            void setLayoutChrome(const char* head, int headLen, int activeAt, const char* tail, int tailLen,
+                                 const char* foot, int footLen);
             void finalizeSegments();
+
+            /** @brief Platform buffer for the per-request part of the frame; reset() keeps it. */
+            void setScratch(char* buf, uint16_t cap)
+            {
+                _scratch = buf;
+                _scratchCap = cap;
+            }
+            char* scratch() const { return _scratch; }
+            uint16_t scratchCap() const { return _scratchCap; }
 
             const ResponseSegment* segments() const { return _segments; }
             int segmentCount() const { return _segCount; }
@@ -105,10 +116,17 @@ namespace OpenKNX
             WebStreamCleanupFn _streamCleanupFn = nullptr;
             void* _streamCtx = nullptr;
 
-            // Segmente zeigen in _layoutHeader/_body/_layoutFooter, alles dieser Instanz
-            std::string _layoutHeader;
-            std::string _layoutFooter;
-            static constexpr int MAX_SEGMENTS = 3; // Header + Body + Footer
+            // Segments point into the frame of setLayoutChrome() and into _body
+            const char* _chromeHead = nullptr;
+            const char* _chromeTail = nullptr;
+            const char* _chromeFoot = nullptr;
+            uint16_t _chromeHeadLen = 0;
+            uint16_t _chromeTailLen = 0;
+            uint16_t _chromeFootLen = 0;
+            int16_t _chromeActiveAt = -1;
+            char* _scratch = nullptr;
+            uint16_t _scratchCap = 0;
+            static constexpr int MAX_SEGMENTS = 6; // head up to the active item, " active", head rest, tail, body, foot
             ResponseSegment _segments[MAX_SEGMENTS] = {};
             uint8_t _segCount = 0;
         };
