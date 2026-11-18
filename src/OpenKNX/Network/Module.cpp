@@ -2249,6 +2249,13 @@ namespace OpenKNX
 #endif
             else if (cmd == "net reset")
             {
+#if defined(OPENKNX_NET_GW_WATCH) && defined(ARDUINO_ARCH_ESP32) && defined(KNX_IP_LAN)
+                if (s_gwEthBusy) // the watch task still uses the driver that ETH.end() would free
+                {
+                    logErrorP("net reset: refused while the link restart runs");
+                    return true;
+                }
+#endif
                 resetNetwork();
                 return true;
             }
@@ -2266,6 +2273,13 @@ namespace OpenKNX
                     _ethLink.logStatus();
                     return true;
                 } // no arg -> show current mode
+#if defined(OPENKNX_NET_GW_WATCH) && defined(ARDUINO_ARCH_ESP32)
+                if (s_gwEthBusy) // the watch task stops and starts the driver: a second stop/start would fail
+                {
+                    logErrorP("net eth: refused while the link restart runs");
+                    return true;
+                }
+#endif
 
                 std::string speed = arg, dup;
                 size_t sp = arg.find(' ');
