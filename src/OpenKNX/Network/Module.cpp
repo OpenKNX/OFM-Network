@@ -2363,21 +2363,19 @@ namespace OpenKNX
 #ifdef KNX_IP_WIFI
             else if (cmd == "net wifi erase" || cmd == "erase wifi") // "erase wifi": former name, still accepted
             {
+#if defined(OPENKNX_WIFI_AP) && defined(ARDUINO_ARCH_RP2040)
+                const WifiStore empty = {}; // SSID, PSK and the own AP's password in one sector write
+                bool ok = saveWifiStore(empty);
+                _restartTimer = delayTimerInit();
+#else
                 bool ok = saveWifiSettings("", "", true); // triggers the restart timer
-#ifdef OPENKNX_WIFI_AP
+#endif
+#if defined(OPENKNX_WIFI_AP) && defined(ARDUINO_ARCH_ESP32)
                 // the password of the own AP goes as well
-#ifdef ARDUINO_ARCH_RP2040
-                WifiStore store;
-                loadWifiStore(store);
-                memset(store.apPsk, 0, sizeof(store.apPsk));
-                ok = saveWifiStore(store) && ok;
-                wipeSecret(&store, sizeof(store));
-#elif ARDUINO_ARCH_ESP32
                 Preferences preferences;
                 preferences.begin("WIFI", false);
                 preferences.remove("APPSK");
                 preferences.end();
-#endif
 #endif
                 if (ok)
                     logInfoP("Wifi settings erased");
@@ -2793,7 +2791,8 @@ namespace OpenKNX
         {
             EEPROM.begin(sizeof(WifiStore));
             EEPROM.get(0, store);
-            EEPROM.end(); // nothing changed: no flash write
+            wipeSecret(const_cast<uint8_t *>(EEPROM.getConstDataPtr()), EEPROM.length()); // the heap copy goes before delete[]
+            EEPROM.end(); // not dirty: no flash write
             if (store.magic != kWifiStoreMagic)
                 memset(&store, 0, sizeof(store));
             store.ssid[sizeof(store.ssid) - 1] = 0;
@@ -2808,7 +2807,9 @@ namespace OpenKNX
             memset(copy.reserved, 0, sizeof(copy.reserved));
             EEPROM.begin(sizeof(WifiStore));
             EEPROM.put(0, copy);
-            EEPROM.end(); // commit: interrupts off, other core idle, as the knx flash write
+            EEPROM.commit(); // interrupts off, other core idle, as the knx flash write
+            wipeSecret(const_cast<uint8_t *>(EEPROM.getConstDataPtr()), EEPROM.length()); // not dirty again: end() writes nothing
+            EEPROM.end();
             const bool ok = memcmp(_EEPROM_start, &copy, sizeof(copy)) == 0; // commit() does not read back
             wipeSecret(&copy, sizeof(copy));
             return ok;
@@ -2967,12 +2968,9 @@ namespace OpenKNX
             int32_t size = 0;
             for (const char *path : {"/WIFI.TXT", "/WIFIAP.TXT"})
             {
-                File file = LittleFS.open(path, "r");
-                if (file)
-                {
-                    size += (int32_t)file.size(); // an empty file is never taken
-                    file.close();
-                }
+                FSStat st;
+                if (LittleFS.stat(path, &st) && !st.isDir)
+                    size += (int32_t)st.size; // an empty file is never taken
             }
             if (!size || size != _wifiFileSize)
             {
