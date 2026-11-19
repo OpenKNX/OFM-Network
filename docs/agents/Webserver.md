@@ -69,8 +69,9 @@ openknxNetwork.webserver.addJavaScript("/assets/custom.js");
 ```
 
 **Behavior:**
-- `addStylesheet()` → registers URI, inserted in `<head>` (via `buildHeader()`)
-- `addJavaScript()` → registers URI, inserted before `</body>` (via `buildFooter()`)
+- `addStylesheet()` → registers URI, inserted in `<head>` of the page frame built once in `start()` (`buildChrome()`)
+- `addJavaScript()` → registers URI, inserted before `</body>` of that frame
+- Both, and `addMenuItem()`, must run before `start()`; later calls are logged as an error and ignored
 - **Cache buster**: automatic query parameter `YYYYMMDDHHII` (e.g. `?202605231435`) from build time
 - **Defer attribute**: JavaScript tags receive `defer` for non-blocking execution
 - `base.css` and `base.js` ([`Build.md`](Build.md)) are registered via these functions during `setup()`. **base.js must stay
@@ -78,16 +79,18 @@ openknxNetwork.webserver.addJavaScript("/assets/custom.js");
   `groupmonitor.js`) uses it. Scripts load with `defer`, which preserves document order.
 
 **Implementation:**
-- `Webserver._stylesheets` → `std::vector<std::string>` iterated in `buildHeader`
-- `Webserver._scripts` → `std::vector<std::string>` iterated in `buildFooter`
+- `Webserver._stylesheets`, `Webserver._scripts` → `std::vector<std::string>`, read once by `buildChrome()` and released
 
 ## Response Assembly (Segments)
 
 The platform transport code knows nothing about layout. `Webserver::handleRequest()` routes the request and then, unless the response is streaming, applies the layout and flattens everything into a segment list on the `WebResponse`:
 
-- `setLayoutChrome()` moves the `buildHeader()`/`buildFooter()` strings into the response (no copy)
-- `finalizeSegments()` builds `ResponseSegment[]` = header + body + footer (max 3, empty parts skipped)
-- Segments are plain `{data, len}` views — **the memory always belongs to the `WebResponse`**, so no ownership flag and nothing to free per segment
+- `setLayoutChrome()` takes pointers and lengths into the frame built once in `start()`; the active menu item is a static
+  " active" segment at the item's offset (`activeAt`); address, configured dot and prog mode are written with snprintf into
+  a scratch buffer (RP2040: the slot's `rxBuf`, ESP32: one static 512 B buffer)
+- `finalizeSegments()` builds `ResponseSegment[]` = frame head up to the item, " active", rest of the frame head, the
+  per-request tail, body, footer (max 6, empty parts skipped)
+- Segments are plain `{data, len}` views into the frame, the scratch buffer or the body; nothing is freed per segment
 
 Platform code then only iterates `response.segments()`:
 
@@ -98,7 +101,7 @@ Nothing is copied to assemble a page — no merged header+body+footer buffer on 
 
 ## Layout Convention: `.container`
 
-`buildHeader()` emits only `<nav>` + `<main>` — no wrapping `<div class='container'>`.
+The page frame emits only `<nav>` + `<main>` — no wrapping `<div class='container'>`.
 Each page decides independently whether to use the container div.
 
 - **With container** (`max-width: 960px`): wrap page content in `<div class='container'>...</div>`

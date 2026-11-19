@@ -272,12 +272,13 @@ contribute one without a single line of code being added here.
 **Register once, from your own module's `setup()`.** Not from `loop()`, and *not* gated on
 `webserver.isRunning()`.
 
-`_routes`, `_menu`, `_stylesheets` and `_scripts` are plain vectors that are only ever appended to and
-are never cleared. `Webserver::setup()` only registers its own entries; the listening port is opened
-separately by `start()`, once every module has registered. The route list is walked when a **request
-arrives**, and the asset lists when a **page is rendered**. Registration is therefore fully decoupled
-from the server lifecycle: entries added long before the network is even up are in place the moment the
-server answers its first request.
+`_routes` is only appended to, `_menu` is kept sorted by priority (registration order among equal priorities); neither is ever cleared.
+`Webserver::setup()` only registers its own entries; the listening port is opened separately by
+`start()`, once every module has registered. The route list is walked when a **request arrives**.
+Menu, stylesheets and scripts go into the page frame that `start()` builds once, before the server
+answers its first request; `addMenuItem()`, `addStylesheet()` and `addJavaScript()` after that are
+logged as an error and ignored. Entries added long before the network is even up are in place the
+moment the server answers its first request.
 
 This also means you must not re-register on a link loss. `setup()` is guarded by `_initialized` and
 there is no teardown path, so it runs exactly once per boot and your entries simply stay — registering
@@ -541,7 +542,8 @@ so a module with its own `addSocket()` endpoint benefits without doing anything.
 
 ## Layout Convention: `.container`
 
-`buildHeader()` emits only `<nav>` + `<main>` — **no** wrapping `<div class='container'>`.
+The page frame (`buildChrome()` once at start, plus the per-request part in `applyLayout()`) emits only
+`<nav>` + `<main>` — **no** wrapping `<div class='container'>`.
 Each page decides independently whether to use the container div.
 
 ### Page with bounded width (default case)
@@ -610,7 +612,8 @@ copies what it sends into its own buffers (`TCP_WRITE_FLAG_COPY`), on RP2040 pie
 flight per connection, so a large page never occupies the whole lwIP heap at once.
 
 **Note on `setLayout(true)`:** header, body and footer are **not** concatenated into one buffer. `Webserver::handleRequest()`
-builds a segment list (`ResponseSegment[]`, max 3: header/body/footer) on the `WebResponse`; the platform sends each
+builds a segment list (`ResponseSegment[]`, max 6: frame head up to the active menu item, " active", rest of the frame head,
+the per-request end of the header, body, footer) on the `WebResponse`; the platform sends each
 segment directly — one `httpd_resp_send_chunk()` (or `tcp_write()`) per segment, no merge allocation on either platform,
 regardless of whether layout is active.
 
@@ -683,6 +686,6 @@ Name, value and DPT come from an optional tab-separated file `/openknx_ga.tsv` o
 Browse, download, upload and delete files on the device's storage. Directory and file names are HTML- and JS-escaped in the listing; `..` in a path is rejected outright (`sanitizePath()`).
 
 - **Chunked upload:** the browser slices the file and sends **one POST per chunk**, each with an `offset` query parameter — the device never has to hold a whole file in RAM. `offset=0` on an existing file is refused with `409` so an upload cannot silently overwrite. After every chunk the resulting file size is compared against `offset + length`: LittleFS only writes on `close()` and `write()` always reports the buffer size, so this is the one reliable way to detect a full filesystem (→ `413`, partial file removed).
-- **Listing is streamed, not collected:** the directory is walked twice (directories pass, files pass) and rows are appended straight to the HTML. Nothing is buffered in a container — 250 entries in a `std::vector<std::string>` would cost ~10 KB heap, which RP2040 cannot spare next to lwIP and the connection slots. Listings are capped at 250 entries per pass, with a note in the table when the cap is hit.
+- **Listing in pages:** `from=N` shows at most `OPENKNX_FILEMANAGER_PAGE` entries (RP2040 25, ESP32 100) starting at N, directories first, with "Zurück", "Einträge a–b von n" and "Weiter". Each page opens the directory again and skips N entries; no cursor is kept across requests. The page is written into one block of fixed size (`BoundedText`, halved down to 4 KB when the heap has no larger one); a row that does not fit ends the page early and "Weiter" goes on there; a single row larger than an empty page is shown as "Name zu lang" and skipped. `from` past the end of a non-empty directory answers 302 to the last page; `from` of 500 or more counts as 0. Capped at 250 entries per pass. On `fs=sd` the listing reads the directory straight off the card (`sd::fileStore.forEach`), without a snapshot on the heap.
 - **Downloads stream** via `WebResponse::sendStream()`; on ESP32 this runs synchronously in the httpd task (see the note under Platform Support).
 - **A missing drive or file answers `404`** on every route. `400` is reserved for a malformed path, `409`/`413` for an upload that would overwrite or does not fit, `500` only for an operation that actually failed (write error, non-empty directory). A directory that does not exist is not an error — it renders as an empty listing.
