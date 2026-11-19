@@ -4,8 +4,14 @@
 #include "OpenKNX/Network/Module.h"
 #include "OpenKNX/Charset.hpp"
 #include "OpenKNX/Network/Webserver/Webserver.h"
+#include "OpenKNX/Network/Webserver/BoundedText.h"
+#include <cstdlib>
+#include <cstring>
 #include "webassets.h" // generiert von OGM-Common/scripts/pio/prepare.py aus web/assets/
 #include <LittleFS.h>
+#ifdef ARDUINO_ARCH_ESP32
+#include <sys/stat.h>
+#endif
 #include <string>
 #ifdef OPENKNX_SDCARD
 #include "SdFileStore.h"
@@ -29,13 +35,16 @@ namespace OpenKNX
             return mounted;
         }
 
-        std::string FileManager::sanitizePath(const std::string& raw)
+        std::string FileManager::sanitizePath(const std::string& raw, bool utf8Fs)
         {
             if (raw.empty()) return "";
 
-            // Browser sends UTF-8, filesystem is ISO-8859-15; '?' fallback -> '_'.
+            // Browser sends UTF-8; LittleFS names are ISO-8859-15 ('?' fallback -> '_'), SdFat with UTF-8 names keeps them.
             std::string path;
-            OpenKNX::Charset::decodeUtf8(path, raw.data(), raw.size());
+            if (utf8Fs)
+                path = raw;
+            else
+                OpenKNX::Charset::decodeUtf8(path, raw.data(), raw.size());
             for (char& c : path)
                 if (c == '?') c = '_';
 
@@ -43,56 +52,24 @@ namespace OpenKNX
             return (path[0] == '/') ? path : ("/" + path);
         }
 
-        std::string FileManager::urlEncode(const std::string& s)
+        // SD names are UTF-8 when SdFat is built with UTF-8 long names; LittleFS and efc keep ISO-8859-15
+        static bool utf8Names(int d)
         {
-            std::string result;
-            result.reserve(s.size());
-            for (unsigned char c : s)
-            {
-                if (c == '/' || c == '.' || c == '-' || c == '_' || std::isalnum(c))
-                    result += (char)c;
-                else
-                {
-                    char buf[4];
-                    snprintf(buf, sizeof(buf), "%%%02X", c);
-                    result += buf;
-                }
-            }
-            return result;
+#if defined(USE_UTF8_LONG_NAMES) && USE_UTF8_LONG_NAMES
+            return d == 1; // DSD
+#else
+            (void)d;
+            return false;
+#endif
         }
 
-        static std::string jsStr(const std::string& s)
+        // a file system name for display, links and scripts (UTF-8)
+        static void nameToUtf8(int d, std::string& out, const char* p, size_t n)
         {
-            std::string r;
-            r.reserve(s.size());
-            for (char c : s)
-            {
-                if (c == '\'') r += "\\'";
-                else if (c == '\\')
-                    r += "\\\\";
-                else
-                    r += c;
-            }
-            return r;
-        }
-
-        // Wie jsStr(), aber zusätzlich für die Verwendung als Inhalt eines <script>-Blocks:
-        // '<' wird JS-escaped, damit ein "</script>" im Wert (z.B. aus dir) den umgebenden
-        // <script>-Tag nicht vorzeitig beendet. Der Browser dekodiert HTML-Entities in
-        // Script-Rohtext nicht, htmlEscape() greift hier also nicht — das '<' muss auf
-        // JS-Ebene neutralisiert werden.
-        static std::string jsStrScriptBody(const std::string& s)
-        {
-            std::string r = jsStr(s);
-            std::string out;
-            out.reserve(r.size());
-            for (char c : r)
-            {
-                if (c == '<') out += "\\x3C";
-                else
-                    out += c;
-            }
-            return out;
+            if (utf8Names(d))
+                out.assign(p, n);
+            else
+                OpenKNX::Charset::encodeUtf8(out, p, n);
         }
 
         static std::string absPath(const std::string& dir, const std::string& entryName)
@@ -107,6 +84,7 @@ namespace OpenKNX
             DSD = 1,
             DEFC = 2
         };
+        static_assert(DSD == 1, "utf8Names() compares with the value of DSD");
 
         static int drvParse(WebRequest& req)
         {
@@ -342,68 +320,93 @@ namespace OpenKNX
         }
 
         static const size_t FM_MAX_ENTRIES = 250;
+        static constexpr uint64_t FM_SIZE_UNKNOWN = UINT64_MAX; // ESP32 LittleFS walk: the size is read for a shown row only
 
         // Callback statt Ergebnisliste: das Listing wird direkt ins HTML gestreamt.
         // Ein Container mit 250 Einträgen wären ~10 KB Heap plus Realloc-Peak —
         // auf RP2040 neben lwIP und den Webserver-Slots zu viel. Dafür wird das
         // Verzeichnis zweimal durchlaufen (Ordner-Pass, Datei-Pass).
+        // fn gets the entry's name without its directory.
         // Rückgabe: true, wenn bei FM_MAX_ENTRIES abgebrochen wurde.
         template <typename Fn>
         static bool drvForEach(int d, const std::string& dir, Fn fn)
         {
             size_t seen = 0;
+            auto base = [](const char* p) {
+                const char* sl = strrchr(p, '/');
+                return sl ? sl + 1 : p;
+            };
             if (d == DINT)
             {
+                // No entry is opened: openNextFile() opens and stats each one, about 25 ms per entry on an ESP32 (measured).
+#ifdef ARDUINO_ARCH_ESP32
                 File root = LittleFS.open(dir.c_str(), "r");
                 if (!root) return false;
-                for (File e = root.openNextFile(); e; e = root.openNextFile())
+                bool isDir = false;
+                for (String p = root.getNextFileName(&isDir); p.length() || !p.c_str(); p = root.getNextFileName(&isDir))
                 {
-                    if (seen++ >= FM_MAX_ENTRIES)
+                    if (!p.c_str() || seen++ >= FM_MAX_ENTRIES) // no memory for the name: the list ends here, marked as cut
                     {
-                        e.close();
                         root.close();
                         return true;
                     }
-                    std::string p = absPath(dir, e.name());
-                    fn(p.substr(p.rfind('/') + 1), (uint32_t)e.size(), e.isDirectory());
-                    e.close();
+                    const char* nm = base(p.c_str());
+                    if (!*nm) // the name did not fit into the String: cut, not an empty row
+                    {
+                        root.close();
+                        return true;
+                    }
+                    fn(nm, isDir ? 0 : FM_SIZE_UNKNOWN, isDir); // readdir has no size: emit reads it for a shown row
                 }
                 root.close();
                 return false;
+#else
+                FSStat st;
+                if (!LittleFS.stat(dir.c_str(), &st) || !st.isDir) return false; // openDir() of a file lists its prefix matches
+                Dir dd = LittleFS.openDir(dir.c_str());
+                while (dd.next())
+                {
+                    if (seen++ >= FM_MAX_ENTRIES) return true;
+                    const String nm = dd.fileName();
+                    if (!nm.c_str()) return true; // the name got no memory: the list ends here, marked as cut
+                    fn(base(nm.c_str()), dd.isDirectory() ? 0 : (uint64_t)dd.fileSize(), dd.isDirectory());
+                }
+                return false;
+#endif
             }
-#ifdef OPENKNX_SDCARD
+#if defined(OPENKNX_SDCARD) || defined(OPENKNX_EXTFLASH)
+            // sd/efc: one pass with its own handle, no snapshot on the heap; the store cursor of a running FTC listing stays untouched
+            struct Walk
+            {
+                Fn* fn;
+                size_t seen;
+                bool cut;
+            } w{&fn, seen, false};
+            bool (*cb)(void*, const char*, bool, uint64_t) = [](void* c, const char* n, bool isDir, uint64_t sz) -> bool {
+                Walk* w = static_cast<Walk*>(c);
+                if (w->seen++ >= FM_MAX_ENTRIES)
+                {
+                    w->cut = true;
+                    return false;
+                }
+                const char* sl = strrchr(n, '/');
+                (*w->fn)(sl ? sl + 1 : n, sz, isDir);
+                return true;
+            };
+    #ifdef OPENKNX_SDCARD
             if (d == DSD)
             {
-                if (!sd::fileStore.dirOpen(dir.c_str())) return false;
-                struct DirClose { ~DirClose() { sd::fileStore.dirClose(); } } dirClose; // also when fn() throws
-                char nm[64];
-                uint32_t sz = 0;
-                for (uint8_t t; (t = sd::fileStore.dirNext(nm, sizeof(nm), &sz)) != 0;)
-                {
-                    if (seen++ >= FM_MAX_ENTRIES)
-                        return true;
-                    std::string p = absPath(dir, nm);
-                    fn(p.substr(p.rfind('/') + 1), sz, t == 2);
-                }
-                return false;
+                sd::fileStore.forEach(dir.c_str(), cb, &w, &w.cut); // also cut: the card went away during the listing
+                return w.cut;
             }
-#endif
-#ifdef OPENKNX_EXTFLASH
+    #endif
+    #ifdef OPENKNX_EXTFLASH
             if (d == DEFC)
             {
-                if (!efc::fileStore.dirOpen(dir.c_str())) return false;
-                struct DirClose { ~DirClose() { efc::fileStore.dirClose(); } } dirClose; // also when fn() throws
-                char nm[64];
-                uint32_t sz = 0;
-                for (uint8_t t; (t = efc::fileStore.dirNext(nm, sizeof(nm), &sz)) != 0;)
-                {
-                    if (seen++ >= FM_MAX_ENTRIES)
-                        return true;
-                    std::string p = absPath(dir, nm);
-                    fn(p.substr(p.rfind('/') + 1), sz, t == 2);
-                }
-                return false;
+                efc::fileStore.forEach(dir.c_str(), cb, &w);
+                return w.cut;
             }
+    #endif
 #endif
             return false;
         }
@@ -508,6 +511,103 @@ namespace OpenKNX
 
         // ── Verzeichnis-Listing ──────────────────────────────────────
 
+        // Entries per page and the largest page buffer. A row that no longer fits ends the page early; "Weiter" goes on from it.
+#ifndef OPENKNX_FILEMANAGER_PAGE
+    #ifdef ARDUINO_ARCH_RP2040
+        #define OPENKNX_FILEMANAGER_PAGE 25
+    #else
+        #define OPENKNX_FILEMANAGER_PAGE 100
+    #endif
+#endif
+#ifndef OPENKNX_FILEMANAGER_BUF
+    #ifdef ARDUINO_ARCH_RP2040
+        #define OPENKNX_FILEMANAGER_BUF 8192
+    #else
+        #define OPENKNX_FILEMANAGER_BUF 32768
+    #endif
+#endif
+
+        // Unter der GB-Grenze wird auf 32 Bit gerechnet — die u64-Division
+        // zieht sonst auf RP2040 unnötig Laufzeit-Hilfsroutinen ins Flash.
+        static void fmtBytes(char* buf, size_t len, uint64_t b)
+        {
+            if (b >= 1024ULL * 1024 * 1024)
+                snprintf(buf, len, "%.1f GB", (double)b / 1073741824.0);
+            else if (b >= 1024 * 1024)
+                snprintf(buf, len, "%.1f MB", (uint32_t)b / 1048576.0f);
+            else if (b >= 1024)
+                snprintf(buf, len, "%.1f KB", (uint32_t)b / 1024.0f);
+            else
+                snprintf(buf, len, "%lu B", (unsigned long)b);
+        }
+
+        // htmlEscape() straight into the page
+        static void addHtml(BoundedText& t, const std::string& s)
+        {
+            for (char c : s)
+            {
+                switch (c)
+                {
+                    case '<': t += "&lt;"; break;
+                    case '>': t += "&gt;"; break;
+                    case '&': t += "&amp;"; break;
+                    case '"': t += "&quot;"; break;
+                    case '\'': t += "&#39;"; break;
+                    default: t += c; break;
+                }
+            }
+        }
+
+        // an HTML-escaped JS string (\' and \\ escaped) straight into the page
+        static void addJsHtml(BoundedText& t, const std::string& s)
+        {
+            for (char c : s)
+            {
+                switch (c)
+                {
+                    case '\'': t += "\\&#39;"; break;
+                    case '\\': t += "\\\\"; break;
+                    case '<': t += "&lt;"; break;
+                    case '>': t += "&gt;"; break;
+                    case '&': t += "&amp;"; break;
+                    case '"': t += "&quot;"; break;
+                    default: t += c; break;
+                }
+            }
+        }
+
+        // URL-encoded straight into the page
+        static void addUrl(BoundedText& t, const std::string& s)
+        {
+            for (unsigned char c : s)
+            {
+                if (c == '/' || c == '.' || c == '-' || c == '_' || std::isalnum(c))
+                    t += (char)c;
+                else
+                    t.addf("%%%02X", c);
+            }
+        }
+
+        // A JS string inside a <script> block: \' and \\ escaped, '<' as \x3C so no "</script>" in the value ends the block
+        static void addJsScript(BoundedText& t, const std::string& s)
+        {
+            for (char c : s)
+            {
+                if (c == '\'' || c == '\\') t += '\\';
+                if (c == '<') t += "\\x3C";
+                else t += c;
+            }
+        }
+
+        // Length of the directory after the rows: twice in a link (addUrl), once in the script (addJsScript)
+        static size_t tailDirLen(const std::string& s)
+        {
+            size_t n = 0;
+            for (unsigned char c : s)
+                n += 2 * ((c == '/' || c == '.' || c == '-' || c == '_' || std::isalnum(c)) ? 1 : 3) + (c == '<' ? 4 : (c == '\'' || c == '\\') ? 2 : 1);
+            return n;
+        }
+
         void FileManager::handleList(WebRequest& req, WebResponse& res)
         {
             int d = drvParse(req);
@@ -519,37 +619,37 @@ namespace OpenKNX
             }
 
             const char* fs = drvId(d);
-            std::string q = std::string("fs=") + fs;
-            std::string dir = sanitizePath(req.getQueryParam("dir"));
+            std::string dir = sanitizePath(req.getQueryParam("dir"), utf8Names(d));
             if (dir.empty()) dir = "/";
+            size_t from = 0;
+            {
+                const std::string f = req.getQueryParam("from");
+                char* end = nullptr;
+                const unsigned long v = strtoul(f.c_str(), &end, 10);
+                if (!f.empty() && end != f.c_str() && *end == '\0' && v < FM_MAX_ENTRIES * 2) from = (size_t)v;
+            }
 
-            std::string html;
-            html.reserve(2048);
-
-            // Unter der GB-Grenze wird auf 32 Bit gerechnet — die u64-Division
-            // zieht sonst auf RP2040 unnötig Laufzeit-Hilfsroutinen ins Flash.
-            auto fmtBytes = [](uint64_t b) -> std::string {
-                char buf[24];
-                if (b >= 1024ULL * 1024 * 1024)
-                    snprintf(buf, sizeof(buf), "%.1f GB", (double)b / 1073741824.0);
-                else if (b >= 1024 * 1024)
-                    snprintf(buf, sizeof(buf), "%.1f MB", (uint32_t)b / 1048576.0f);
-                else if (b >= 1024)
-                    snprintf(buf, sizeof(buf), "%.1f KB", (uint32_t)b / 1024.0f);
-                else
-                    snprintf(buf, sizeof(buf), "%lu B", (unsigned long)b);
-                return buf;
-            };
+            // a smaller block when the heap has no large one: the page then ends earlier and "Weiter" goes on
+            BoundedText html(OPENKNX_FILEMANAGER_BUF, 4096);
+            if (html.failed())
+            {
+                res.sendOutOfMemory();
+                return;
+            }
+            char num[24];
 
             // dir stays ISO-8859-15 for drvForEach below; dirUtf8 for display/links/JS.
             std::string dirUtf8;
-            OpenKNX::Charset::encodeUtf8(dirUtf8, dir.data(), dir.size());
+            nameToUtf8(d, dirUtf8, dir.data(), dir.size());
+            // What follows the rows: at most 1.5 KB of text (literals, numbers, sizes) plus the directory in two links and
+            // the script, and room for the placeholder row of a name too long for the page.
+            const size_t tailRoom = 1664 + tailDirLen(dirUtf8);
 
             html += "<div class='container'><h1>Dateiverwaltung";
             if (dir != "/")
             {
                 html += " &ndash; ";
-                html += htmlEscape(dirUtf8);
+                addHtml(html, dirUtf8);
             }
             html += "</h1>";
 
@@ -592,63 +692,149 @@ namespace OpenKNX
                 std::string parent = dir.substr(0, dir.rfind('/'));
                 if (parent.empty()) parent = "/";
                 std::string parentUtf8;
-                OpenKNX::Charset::encodeUtf8(parentUtf8, parent.data(), parent.size());
-                html += "<tr><td colspan='3'><a href='/filemanager?";
-                html += q;
+                nameToUtf8(d, parentUtf8, parent.data(), parent.size());
+                html += "<tr><td colspan='3'><a href='/filemanager?fs=";
+                html += fs;
                 html += "&dir=";
-                html += urlEncode(parentUtf8);
+                addUrl(html, parentUtf8);
                 html += "'>..</a></td></tr>";
             }
+            if (html.cut() || html.room() < tailRoom)
+            {
+                logError("Webserver", "file list: no room for the page");
+                res.sendOutOfMemory();
+                return;
+            }
 
-            bool hasEntries = false;
+            // Every request walks the directory again and skips the first `from` entries, folders before files; no
+            // cursor is kept across requests.
+            size_t idx = 0;   // entries walked, folders then files
+            size_t shown = 0; // rows on this page
+            bool full = false;
             bool wantDirs = true;
 
-            auto emit = [&](const std::string& name, uint32_t size, bool isDir) {
+            auto emit = [&](const char* name, uint64_t size, bool isDir) { // 64 bit: exFAT files above 4 GiB
                 if (isDir != wantDirs) return;
-                hasEntries = true;
+                const size_t i = idx++;
+                if (i < from || full) return;
+                if (shown >= OPENKNX_FILEMANAGER_PAGE)
+                {
+                    full = true;
+                    return;
+                }
+#ifdef ARDUINO_ARCH_ESP32
+                if (!isDir && size == FM_SIZE_UNKNOWN)
+                {
+                    std::string raw = dir;
+                    if (raw.empty() || raw.back() != '/') raw += '/';
+                    raw += name;
+                    std::string full = LittleFS.mountpoint() ? LittleFS.mountpoint() : "";
+                    full += raw;
+                    struct stat st;
+                    size = ::stat(full.c_str(), &st) == 0 ? (uint64_t)st.st_size : 0; // stat only, no FILE and no file cache
+
+                }
+#endif
+                const size_t mark = html.size();
                 // name is ISO-8859-15 (filesystem); convert for display/links.
                 std::string nameUtf8;
-                OpenKNX::Charset::encodeUtf8(nameUtf8, name.data(), name.size());
+                nameToUtf8(d, nameUtf8, name, strlen(name));
                 std::string path = absPath(dirUtf8, nameUtf8);
                 if (isDir)
                 {
-                    html += "<tr><td><a href='/filemanager?";
-                    html += q;
+                    html += "<tr><td><a href='/filemanager?fs=";
+                    html += fs;
                     html += "&dir=";
-                    html += urlEncode(path);
+                    addUrl(html, path);
                     html += "'>";
-                    html += htmlEscape(nameUtf8);
+                    addHtml(html, nameUtf8);
                     html += "/</a></td><td class='right'></td><td class='right'>";
                     html += "<a href='#' onclick=\"delDir('";
-                    html += htmlEscape(jsStr(path));
+                    addJsHtml(html, path);
                     html += "'); return false;\">L&ouml;schen</a>";
                     html += "</td></tr>";
+                }
+                else
+                {
+                    html += "<tr><td>";
+                    addHtml(html, nameUtf8);
+                    html += "</td><td class='right'>";
+                    fmtBytes(num, sizeof(num), size);
+                    html += num;
+                    html += "</td><td class='right'><a href='/filemanager/download?fs=";
+                    html += fs;
+                    html += "&path=";
+                    addUrl(html, path);
+                    html += "'>Download</a> | <a href='#' onclick=\"delFile('";
+                    addJsHtml(html, path);
+                    html += "'); return false;\">L&ouml;schen</a>";
+                    html += "</td></tr>";
+                }
+                if (!html.cut() && html.room() >= tailRoom)
+                {
+                    shown++;
                     return;
                 }
-                html += "<tr><td>";
-                html += htmlEscape(nameUtf8);
-                html += "</td><td class='right'>";
-                html += fmtBytes(size);
-                html += "</td><td class='right'><a href='/filemanager/download?";
-                html += q;
-                html += "&path=";
-                html += urlEncode(path);
-                html += "'>Download</a> | <a href='#' onclick=\"delFile('";
-                html += htmlEscape(jsStr(path));
-                html += "'); return false;\">L&ouml;schen</a>";
-                html += "</td></tr>";
+                html.rollback(mark);
+                if (shown == 0)
+                {
+                    // a single row larger than the page: named, skipped, so "Weiter" still moves on
+                    html += "<tr><td colspan='3'><em>Name zu lang f&uuml;r die Anzeige</em></td></tr>";
+                    shown = 1;
+                }
+                full = true;
             };
 
             bool truncated = drvForEach(d, dir, emit);
             wantDirs = false;
             truncated |= drvForEach(d, dir, emit);
+            const size_t total = idx;
 
-            if (!hasEntries)
+            if (total > 0 && from >= total)
+            {
+                // past the end, e.g. after deleting the last entry of the last page: to the last page
+                html.rollback(0); // the block carries the target instead of the page
+                html.addf("/filemanager?fs=%s&dir=", fs);
+                addUrl(html, dirUtf8);
+                html.addf("&from=%u", (unsigned)((total - 1) / OPENKNX_FILEMANAGER_PAGE * OPENKNX_FILEMANAGER_PAGE));
+                res.setStatus(302);
+                res.setHeader("Location", html.c_str());
+                res.sendStatic("");
+                return;
+            }
+
+            if (total == 0 && !truncated)
                 html += "<tr><td colspan='3'><em>Leer</em></td></tr>";
             if (truncated)
-                html += "<tr><td colspan='3'><em>Liste gek&uuml;rzt (max 250 Eintr&auml;ge)</em></td></tr>";
+                html += "<tr><td colspan='3'><em>Liste gek&uuml;rzt: h&ouml;chstens 250 Eintr&auml;ge</em></td></tr>";
 
             html += "</tbody></table>";
+
+            const size_t next = from + shown;
+            if (total > 0 && (from > 0 || next < total))
+            {
+                html += "<div class='fm-pages'>";
+                if (from > 0)
+                {
+                    html += "<a href='/filemanager?fs=";
+                    html += fs;
+                    html += "&dir=";
+                    addUrl(html, dirUtf8);
+                    html.addf("&from=%u'>Zur&uuml;ck</a>",
+                              (unsigned)(from > OPENKNX_FILEMANAGER_PAGE ? from - OPENKNX_FILEMANAGER_PAGE : 0));
+                }
+                html.addf("<span>Eintr&auml;ge %u&ndash;%u von %u</span>", (unsigned)(from + 1), (unsigned)next,
+                          (unsigned)total);
+                if (next < total)
+                {
+                    html += "<a href='/filemanager?fs=";
+                    html += fs;
+                    html += "&dir=";
+                    addUrl(html, dirUtf8);
+                    html.addf("&from=%u'>Weiter</a>", (unsigned)next);
+                }
+                html += "</div>";
+            }
 
             html += "<h2>Ordner anlegen</h2>";
             html += "<div class='fm-row'>"
@@ -674,9 +860,11 @@ namespace OpenKNX
                 if (total > 0)
                 {
                     html += "<p class='fm-storage'>Speicher: <strong>";
-                    html += fmtBytes(freeBytes);
+                    fmtBytes(num, sizeof(num), freeBytes);
+                    html += num;
                     html += "</strong> frei von ";
-                    html += fmtBytes(total);
+                    fmtBytes(num, sizeof(num), total);
+                    html += num;
                     html += "</p>";
                 }
             }
@@ -693,14 +881,22 @@ namespace OpenKNX
                     "<div class='fm-upload-status'><span id='st'></span></div>";
 
             html += "<script>const currentDir='";
-            html += jsStrScriptBody(dirUtf8);
+            addJsScript(html, dirUtf8);
             html += "';const currentFs='";
             html += fs;
             html += "';</script></div>";
 
+            if (html.cut())
+            {
+                logError("Webserver", "file list: page buffer too small");
+                res.sendOutOfMemory();
+                return;
+            }
             res.setLayout(true);
             res.setActiveMenu("/filemanager");
-            res.send(html.c_str());
+            int len = 0;
+            uint8_t* body = html.take(len);
+            res.sendOwned(body, len);
         }
 
         // ── Download (Streaming) ─────────────────────────────────────
@@ -708,7 +904,7 @@ namespace OpenKNX
         void FileManager::handleDownload(WebRequest& req, WebResponse& res)
         {
             int d = drvParse(req);
-            std::string path = sanitizePath(req.getQueryParam("path"));
+            std::string path = sanitizePath(req.getQueryParam("path"), utf8Names(d));
             if (path.empty())
             {
                 res.setStatus(400);
@@ -767,7 +963,7 @@ namespace OpenKNX
         void FileManager::handleUpload(WebRequest& req, WebResponse& res)
         {
             int d = drvParse(req);
-            std::string path = sanitizePath(req.getQueryParam("path"));
+            std::string path = sanitizePath(req.getQueryParam("path"), utf8Names(d));
             if (path.empty() || req.bodyLength() == 0)
             {
                 res.setStatus(400);
@@ -824,7 +1020,7 @@ namespace OpenKNX
         void FileManager::handleDelete(WebRequest& req, WebResponse& res)
         {
             int d = drvParse(req);
-            std::string path = sanitizePath(req.getQueryParam("path"));
+            std::string path = sanitizePath(req.getQueryParam("path"), utf8Names(d));
             if (path.empty())
             {
                 res.setStatus(400);
@@ -886,7 +1082,7 @@ namespace OpenKNX
             // request-line buffer of the RP2040 server (128 B) and the request dies as 414.
             std::string url;
             if (req.body() && req.bodyLength()) url.assign((const char*)req.body(), req.bodyLength());
-            std::string name = sanitizePath(req.getQueryParam("path"));
+            std::string name = sanitizePath(req.getQueryParam("path"), utf8Names(d));
             if (url.size() > FETCH_URL_MAX)
             {
                 res.setStatus(400);
@@ -935,7 +1131,7 @@ namespace OpenKNX
         void FileManager::handleMkdir(WebRequest& req, WebResponse& res)
         {
             int d = drvParse(req);
-            std::string path = sanitizePath(req.getQueryParam("path"));
+            std::string path = sanitizePath(req.getQueryParam("path"), utf8Names(d));
             if (path.empty())
             {
                 res.setStatus(400);

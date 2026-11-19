@@ -44,8 +44,7 @@ namespace OpenKNX
             bool _initialized = false;
 
             bool ensureFs();
-            static std::string sanitizePath(const std::string& raw);
-            static std::string urlEncode(const std::string& s);
+            static std::string sanitizePath(const std::string& raw, bool utf8Fs = false);
         };
 
     } // namespace Network

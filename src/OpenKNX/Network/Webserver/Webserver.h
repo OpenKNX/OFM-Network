@@ -77,7 +77,7 @@ namespace OpenKNX
         // Escaped for HTML text content and attributes. Everything the pages put THERE that did not come
         // from the firmware goes through this: file and directory names (the upload handler takes them
         // unchecked) and the hostname (ETS parameter NET_HostName). NOT for a <script> block: a browser
-        // does not decode entities in script raw text, so a value inside one needs jsStrScriptBody()
+        // does not decode entities in script raw text, so a value inside one needs addJsScript()
         // (FileManager.cpp) instead -- routing that through here would re-open the </script> break-out.
         // One definition for both pages: OPENKNX_WEBFS implies OPENKNX_WEBSERVER, because
         // FileManager::setup() registers itself on openknxNetwork.webserver.

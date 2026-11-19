@@ -25,6 +25,7 @@
 }
 
 .fm-storage { margin: 0 0 6px; }
+.fm-pages { display: flex; gap: 12px; align-items: center; margin: 8px 0; }
 .fm-file-hidden { display: none !important; }
 
 .fm-file-ctrl {
