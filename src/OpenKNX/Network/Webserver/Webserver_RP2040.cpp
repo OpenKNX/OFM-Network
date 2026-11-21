@@ -8,6 +8,7 @@
 #include "OpenKNX/Network/Webserver/Webserver.h"
 #include "OpenKNX/Network/Webserver/HeapAdmission.h"
 #include <algorithm>
+#include <climits>
 #include <lwip/tcp.h>
 #include <lwip_wrap.h> // LWIPMutex: makes the ethernet IRQ defer
 #include <string>
@@ -266,12 +267,13 @@ namespace OpenKNX
             tcp_output(s->pcb);
         }
 
-        // Loop context only: file readers touch the filesystem. A few chunks per tick,
-        // so a large download does not stretch the loop.
+        // Loop context only: file readers touch the filesystem. Files get a few chunks per
+        // tick so a large download does not stretch the loop; HTML from RAM fills the window.
         static void tcpSendStream(ConnSlot* s)
         {
             uint8_t buf[512];
-            for (int i = 0; i < 4 && flushPending(s) && s->streamSent < s->streamTotal; i++)
+            const int maxChunks = g_response[s->idx].isHtmlStream() ? INT_MAX : 4;
+            for (int i = 0; i < maxChunks && flushPending(s) && s->streamSent < s->streamTotal; i++)
             {
                 int room = txRoom(s->pcb);
                 if (room <= 0) break;
@@ -487,6 +489,12 @@ namespace OpenKNX
         {
             if (!rpHeapFits(0))
             {
+                static uint32_t lastWarning = 0;
+                if (!lastWarning || millis() - lastWarning >= 5000)
+                {
+                    lastWarning = millis();
+                    logError("Webserver", "%s - 503, low memory (free %d B)", s->uri, rp2040.getFreeHeap());
+                }
                 rejectRequest(s, MEMORY_UNAVAILABLE, sizeof(MEMORY_UNAVAILABLE) - 1);
                 return;
             }
@@ -641,6 +649,8 @@ namespace OpenKNX
                                     response.streamTotal());
                 appendResponseHeaders(hdr, sizeof(hdr), hLen, response);
 
+                // Sized for a parked chunk too: tcpSendStream() must not allocate after ERR_MEM.
+                g_pending[s->idx].reserve(sizeof(hdr));
                 g_pending[s->idx].assign(hdr, (size_t)hLen);
                 s->pendOff = 0;
                 s->streamTotal = response.streamTotal();

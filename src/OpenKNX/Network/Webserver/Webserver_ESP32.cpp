@@ -28,7 +28,7 @@
 
 // RX-Obergrenze pro Verbindung; grössere Frames trennen die Verbindung.
 #ifndef OPENKNX_WEBSOCKET_RX_CAP
-#define OPENKNX_WEBSOCKET_RX_CAP 2048
+#define OPENKNX_WEBSOCKET_RX_CAP 1024
 #endif
 
 namespace OpenKNX
@@ -310,6 +310,7 @@ namespace OpenKNX
         {
             if (req->content_len > OPENKNX_WEBSERVER_MAX_BODY)
             {
+                logWarning("Webserver", "%s - 413, body %u B", req->uri, (unsigned)req->content_len);
                 httpd_resp_set_status(req, "413 Content Too Large");
                 httpd_resp_set_type(req, "text/plain");
                 httpd_resp_sendstr(req, "Content Too Large");
@@ -317,8 +318,14 @@ namespace OpenKNX
             }
             const size_t freeBytes = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
             const size_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-            if (!webHeapFits(freeBytes, largestBlock, req->content_len,
-                             OPENKNX_WEBSERVER_MIN_FREE_HEAP, OPENKNX_WEBSERVER_MIN_HEAP_BLOCK))
+#ifdef OPENKNX_PSRAM
+            // ps_malloc takes the body from PSRAM only; internal RAM just keeps its reserve.
+            const bool fits = webHeapFits(freeBytes, largestBlock, 0, OPENKNX_WEBSERVER_MIN_FREE_HEAP, OPENKNX_WEBSERVER_MIN_HEAP_BLOCK) &&
+                              req->content_len <= heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+            const bool fits = webHeapFits(freeBytes, largestBlock, req->content_len, OPENKNX_WEBSERVER_MIN_FREE_HEAP, OPENKNX_WEBSERVER_MIN_HEAP_BLOCK);
+#endif
+            if (!fits)
             {
                 // Avoid the allocating logger while handling heap exhaustion.
                 static uint32_t lastWarning = 0;
@@ -565,7 +572,7 @@ namespace OpenKNX
             std::array<WsSession*, OPENKNX_WEBSERVER_MAX_CONN> sessions{};
             {
                 WsStateGuard guard(this);
-                std::copy(g_wsSessions.begin(), g_wsSessions.end(), sessions.begin());
+                std::copy_n(g_wsSessions.begin(), std::min(g_wsSessions.size(), sessions.size()), sessions.begin());
             }
 
             // Hand the socket back to httpd (which closes it), then clear the registry.

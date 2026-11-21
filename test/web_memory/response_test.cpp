@@ -31,7 +31,7 @@ int main()
         html += "suffix";
         response.setLayout(true);
         response.setLayoutChrome("<header>", "<footer>");
-        assert(response.statusCode() == 200 && response.isStreaming());
+        assert(response.statusCode() == 200 && response.isStreaming() && response.isHtmlStream());
         assert(response.streamTotal() == body.size() + 28);
         assert(readResponse(response, step) == "<header>prefix" + body + "suffix<footer>");
         response.cleanupStream();
@@ -73,13 +73,19 @@ int main()
         html += body;
         html += "still unavailable";
         response.setLayout(true);
-        assert(response.statusCode() == 503 && !response.isStreaming() && !response.useLayout());
+        response.setStatus(404); // a handler finishing its page must not undo the 503
+        response.setContentType("text/html");
+        assert(response.statusCode() == 503 && !response.isStreaming() && !response.isHtmlStream() && !response.useLayout());
+        assert(std::string(response.contentType()).rfind("text/plain", 0) == 0);
         response.finalizeSegments();
         assert(response.totalLength() > 0);
         assert(std::string(response.body()).find("insufficient memory") != std::string::npos);
         failAt = static_cast<size_t>(-1);
         response.reset();
         assert(response.statusCode() == 200);
+        response.setStatus(404);
+        assert(response.statusCode() == 404);
+        response.setStatus(200);
         HtmlWriter retry(response);
         retry += "recovered";
         assert(readResponse(response, 17) == "recovered");
@@ -98,6 +104,7 @@ int main()
     WebResponse file;
     file.sendStream(0, [](void*, uint8_t*, size_t) { return size_t(0); },
         [](void* context) { ++*static_cast<unsigned*>(context); }, &cleaned);
+    assert(file.isStreaming() && !file.isHtmlStream()); // RP paces file reads
     void* context = nullptr;
     auto cleanup = file.releaseStream(context);
     file.reset();
@@ -126,6 +133,7 @@ int main()
         assert(aborted.readStreamChunk(buffer, sizeof(buffer)) == sizeof(buffer));
         void* context = nullptr;
         auto cleanup = aborted.releaseStream(context);
+        assert(!aborted.isHtmlStream());
         aborted.reset();
         cleanup(context);
         aborted.cleanupStream();

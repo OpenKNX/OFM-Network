@@ -74,9 +74,9 @@ namespace OpenKNX
         void WebResponse::allocationFailed()
         {
             clearBody();
-            _allocationFailed = true;
             _statusCode = 503;
             setContentType("text/plain");
+            _allocationFailed = true; // after setContentType(), which it locks
             _useLayout = false;
             _layoutHeader = std::string();
             _layoutFooter = std::string();
@@ -136,6 +136,11 @@ namespace OpenKNX
             return *this;
         }
 
+        bool WebResponse::isHtmlStream() const
+        {
+            return _streaming && _streamReadFn == readHtml;
+        }
+
         WebResponse::WebResponse()
         {
             _headers.push_back({"Cache-Control", "no-store"});
@@ -143,12 +148,12 @@ namespace OpenKNX
 
         void WebResponse::setStatus(uint16_t code)
         {
-            _statusCode = code;
+            if (!_allocationFailed) _statusCode = code;
         }
 
         void WebResponse::setContentType(const char* mimeType)
         {
-            if (!mimeType) return;
+            if (!mimeType || _allocationFailed) return;
             strncpy(_contentType, mimeType, sizeof(_contentType) - 1);
             _contentType[sizeof(_contentType) - 1] = '\0';
             if (strncmp(_contentType, "text/", 5) == 0 && strstr(_contentType, "charset") == nullptr)

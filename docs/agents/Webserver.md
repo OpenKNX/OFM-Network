@@ -88,7 +88,8 @@ response-owned, checked 512-byte chunks. The overview uses it on both platform
 paths. `setLayout(true)` also works on streams: `readStreamChunk()` emits
 header, body, then footer. Consumed HTML chunks are freed immediately; remaining
 chunks are cleaned up on completion or abort. Allocation failure discards partial
-output, uses a static HTTP 503 body and suppresses layout generation. The full
+output, uses a static HTTP 503 body and suppresses layout generation; later
+`setStatus()`/`setContentType()`/`setLayout()` calls are ignored until `reset()`. The full
 body is buffered initially; the chunk size is not a total page-size limit.
 `WebResponse` owns stream cleanup; RP calls `releaseStream(ctx)` before reset to
 transfer it to the deferred cleanup queue, keeping file close out of interrupts.

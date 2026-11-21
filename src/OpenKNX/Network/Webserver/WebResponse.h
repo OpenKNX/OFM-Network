@@ -71,6 +71,8 @@ namespace OpenKNX
             WebStreamReadFn streamReadFn() const { return _streamReadFn; }
             WebStreamCleanupFn streamCleanupFn() const { return _streamCleanupFn; }
             void* streamCtx() const { return _streamCtx; }
+            // HtmlWriter body: RAM only, so a transport may drain it without pacing.
+            bool isHtmlStream() const;
             size_t readStreamChunk(uint8_t* buf, size_t maxLen);
             void cleanupStream();
             // Transfers cleanup to the RP transport before resetting from an IRQ.
