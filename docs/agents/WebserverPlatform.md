@@ -5,6 +5,16 @@ Verwandt: [`Webserver.md`](Webserver.md), [`WsTxQueue.md`](WsTxQueue.md), [`Webc
 
 ## RP2040 Architecture (lwIP `NO_SYS=1`)
 
+- HTTP dispatch checks the internal free heap reserve before routing, including
+  WS upgrades. Request body allocation checks preserve that reserve; RP2350 PSRAM
+  body capacity is checked separately. Failures attempt static HTTP 503 with
+  `Retry-After: 5` and close. No largest-block API is assumed on arduino-pico.
+- Generated HTML uses the same checked 512-byte `HtmlWriter` chunks as ESP32.
+  `tcpSendStream()` calls the slot response's `readStreamChunk()`, so the HTTP
+  `Content-Length` includes layout header/body/footer and every byte is emitted.
+  On release, `releaseStream(ctx)` transfers cleanup before `reset()`; deferred
+  cleanup owns both file contexts and any unconsumed HTML chunks exactly once.
+
 Critical characteristic: lwIP runs single-threaded. Callbacks (`onAccept`, `onRecv`, `onSent`, `onPoll`, `onErr`) must **not block** and must not perform long operations.
 
 **Two contexts, one rule.** With `PIN_ETH_INT` (every W5500 board in OGM-HardwareConfig) the callbacks run in the W5500 interrupt and preempt `loop()`. They keep to bookkeeping, header/frame parsing and RAM-only sending; everything that touches the filesystem runs in `loopPlatform()`. Concretely:
@@ -50,6 +60,18 @@ State is fully held in `ConnSlot` — no global parser state.
 **Ping/keepalive:** `onPoll` sends a WS ping (opcode 0x09) every ~60 s. If the browser does not respond, lwIP's retransmit timeout detects the dead socket and fires `onErr`.
 
 ## ESP32 Architecture
+
+- HTTP admission checks internal free heap and the largest free block before
+  constructing a page; configurable reserves are documented in README.Webserver.md.
+  Pressure returns HTTP 503/Retry-After and closes the connection.
+- Request bodies and TX WebSocket frames use checked allocations. Allocation
+  pressure on TX is `WouldBlock`, including socket ENOMEM/ENOBUFS; it must not
+  become an uncaught `std::bad_alloc`.
+- A WS session owns a fixed RX buffer (`OPENKNX_WEBSOCKET_RX_CAP + 14` bytes,
+  including frame overhead), allocated with checked `new` before upgrading.
+  Complete frames are unmasked in place after each receive; no payload copy or
+  growing receive vector is allocated. The loop snapshot is a bounded stack
+  array and the session registry reserves the connection limit at startup.
 
 - `httpd` runs in its own FreeRTOS task
 - **WebSockets use no per-connection task.** On upgrade the socket is detached from httpd via `httpd_req_async_handler_begin()` so httpd stops polling it; it is then serviced non-blocking from `Webserver::loop()` (driven by the main loop, just like RP2040). The earlier `httpd_sess_set_recv_override` endless-loop monopolized the single httpd task and limited the device to one working WebSocket (a second tab couldn't connect); the task-per-session variant fixed concurrency but cost ~4.3 KB RAM per connection — both are gone.

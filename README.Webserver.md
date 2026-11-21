@@ -478,6 +478,40 @@ No C++ flag required — controlled purely via CSS.
 
 ## WebRequest / WebResponse
 
+Generated pages on ESP32, RP2040 and RP2350 can use `HtmlWriter html(response);`
+and append with `html += text`. The writer stores the body in checked 512-byte
+chunks instead of growing a contiguous `std::string` and copying the whole page.
+Set content type and `setLayout(true)` as usual; do not call `send()` afterward.
+Both transports send layout header, body and footer through a 512-byte buffer
+and free body chunks as they are consumed. The overview uses this path on all
+three platforms. The complete body is initially buffered; this reduces large
+contiguous allocations and avoids the body copy, but does not bound total page
+size. Layout header/footer and other handlers may still allocate strings.
+
+An allocation failure discards partial body output and returns a static HTTP
+503 response without allocating a second error body. The response owns its
+stream cleanup. `cleanupStream()`, replacement, reset and destruction clean it
+up once. The RP transport first transfers cleanup with `releaseStream(ctx)`
+before resetting the response, and invokes it later from the main loop; file
+close never runs in the Ethernet interrupt, including after a disconnect.
+
+Both platforms check `OPENKNX_WEBSERVER_MIN_FREE_HEAP` (default 8192) before
+building a response. RP also checks the reserve before allocating a request
+body; with RP2350 PSRAM it checks body space there separately while preserving
+the internal heap reserve. ESP32 additionally checks its largest internal heap
+block against `OPENKNX_WEBSERVER_MIN_HEAP_BLOCK` (default 2048) and the request
+body size. This block-size flag is ESP32-only: arduino-pico exposes total free
+heap, without a corresponding largest-block API. Actual body allocations are
+checked on both platforms, including PSRAM allocations.
+
+Admission failures send HTTP 503 with `Retry-After: 5` and close the connection
+(RP sends this on a best-effort basis if lwIP can still queue it). ESP32 reports
+free/largest heap sizes through the ROM logger. These checks complement checked
+body allocations; they cannot reserve memory against concurrent allocations
+or make every remaining `std::string` allocation failure-safe. RP WebSockets
+retain their fixed buffers and lwIP backpressure handling; ESP32 uses checked
+TX allocations and a fixed, checked RX allocation per session.
+
 ```cpp
 class WebRequest {
     std::string uri;
@@ -515,8 +549,9 @@ flight per connection, so a large page never occupies the whole lwIP heap at onc
 
 **Note on `setLayout(true)`:** header, body and footer are **not** concatenated into one buffer. `Webserver::handleRequest()`
 builds a segment list (`ResponseSegment[]`, max 3: header/body/footer) on the `WebResponse`; the platform sends each
-segment directly — one `httpd_resp_send_chunk()` (or `tcp_write()`) per segment, no merge allocation on either platform,
-regardless of whether layout is active.
+segment directly — one `httpd_resp_send_chunk()` (or `tcp_write()`) per segment,
+without a merge allocation. `HtmlWriter` responses on both platforms use the chunked stream
+path described above rather than the fixed three-segment body representation.
 
 ---
 

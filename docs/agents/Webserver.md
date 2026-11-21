@@ -83,7 +83,17 @@ openknxNetwork.webserver.addJavaScript("/assets/custom.js");
 
 ## Response Assembly (Segments)
 
-The platform transport code knows nothing about layout. `Webserver::handleRequest()` routes the request and then, unless the response is streaming, applies the layout and flattens everything into a segment list on the `WebResponse`:
+**Generated HTML on ESP32 and RP2040/RP2350:** `HtmlWriter` appends to
+response-owned, checked 512-byte chunks. The overview uses it on both platform
+paths. `setLayout(true)` also works on streams: `readStreamChunk()` emits
+header, body, then footer. Consumed HTML chunks are freed immediately; remaining
+chunks are cleaned up on completion or abort. Allocation failure discards partial
+output, uses a static HTTP 503 body and suppresses layout generation. The full
+body is buffered initially; the chunk size is not a total page-size limit.
+`WebResponse` owns stream cleanup; RP calls `releaseStream(ctx)` before reset to
+transfer it to the deferred cleanup queue, keeping file close out of interrupts.
+
+The platform transport code knows nothing about layout. `Webserver::handleRequest()` routes the request and applies the layout on the `WebResponse`. Non-streaming responses are flattened into a segment list; streaming responses emit the layout through `readStreamChunk()`:
 
 - `setLayoutChrome()` moves the `buildHeader()`/`buildFooter()` strings into the response (no copy)
 - `finalizeSegments()` builds `ResponseSegment[]` = header + body + footer (max 3, empty parts skipped)
