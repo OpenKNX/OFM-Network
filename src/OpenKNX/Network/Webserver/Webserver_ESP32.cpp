@@ -5,6 +5,7 @@
 #include "OpenKNX/Network/Module.h"
 #include "OpenKNX/Network/Webserver/Webserver.h"
 #include "OpenKNX/Network/Webserver/HeapAdmission.h"
+#include "OpenKNX/Network/Webserver/WebSocketRxBuffer.h"
 #include <algorithm>
 #include <array>
 #include <arpa/inet.h>
@@ -26,9 +27,9 @@
 #define ESP32_WEB_CTRL_PORT 9080
 #endif
 
-// RX-Obergrenze pro Verbindung; grössere Frames trennen die Verbindung.
+// Maximum incoming payload per frame.
 #ifndef OPENKNX_WEBSOCKET_RX_CAP
-#define OPENKNX_WEBSOCKET_RX_CAP 1024
+#define OPENKNX_WEBSOCKET_RX_CAP 2048
 #endif
 
 namespace OpenKNX
@@ -130,8 +131,7 @@ namespace OpenKNX
             int fd;
             std::string uri;
             httpd_req_t* async;       // async handle — keeps the socket out of httpd's poll set
-            std::array<uint8_t, OPENKNX_WEBSOCKET_RX_CAP + 14> rx;
-            size_t rxSize = 0;
+            WebSocketRxBuffer<OPENKNX_WEBSOCKET_RX_CAP> rx;
             bool markedDead = false; // siehe markSessionDead()
         };
 
@@ -155,15 +155,17 @@ namespace OpenKNX
             }
         }
 
-        // Verarbeitet alle vollständigen Frames in sess->rx; ein angefangenes bleibt für
-        // den nächsten Tick liegen. true = Verbindung schliessen. Ruft nie recv().
+        // Dispatch complete frames, leaving an incomplete frame for the next receive.
+        // Returns true if the connection must close.
         static bool wsParseFrames(WsSession* sess)
         {
-            auto& rx = sess->rx;
+            auto& buffer = sess->rx;
+            auto* rx = buffer.data();
             size_t off = 0;
+            size_t required = 0;
             bool close = false;
 
-            while (sess->rxSize - off >= 2)
+            while (buffer.size() - off >= 2)
             {
                 uint8_t b0 = rx[off];
                 uint8_t b1 = rx[off + 1];
@@ -174,20 +176,19 @@ namespace OpenKNX
 
                 if (payLen == 126)
                 {
-                    if (sess->rxSize - off < 4) break;
+                    if (buffer.size() - off < 4) break;
                     payLen = ((uint16_t)rx[off + 2] << 8) | rx[off + 3];
                     hdrLen = 4;
                 }
                 else if (payLen == 127)
                 {
-                    if (sess->rxSize - off < 10) break;
+                    if (buffer.size() - off < 10) break;
                     payLen = 0;
                     for (int i = 0; i < 8; ++i)
                         payLen = (payLen << 8) | rx[off + 2 + i];
                     hdrLen = 10;
                 }
 
-                // A frame larger than the bounded RX buffer can never complete → drop client.
                 if (payLen > OPENKNX_WEBSOCKET_RX_CAP)
                 {
                     close = true;
@@ -195,8 +196,12 @@ namespace OpenKNX
                 }
 
                 size_t maskLen = masked ? 4 : 0;
-                uint64_t need = (uint64_t)hdrLen + maskLen + payLen;
-                if ((uint64_t)(sess->rxSize - off) < need) break; // frame incomplete → wait for more
+                const size_t need = hdrLen + maskLen + static_cast<size_t>(payLen);
+                if (buffer.size() - off < need)
+                {
+                    required = need;
+                    break;
+                }
 
                 uint8_t mask[4] = {};
                 if (masked)
@@ -226,16 +231,13 @@ namespace OpenKNX
                 if (op == 0x01 || op == 0x02) // text / binary
                 {
                     bool isBinary = (op == 0x02);
-                    sess->ws->notifySocketMessage(sess->uri.c_str(), sess->fd, rx.data() + dataOff, (int)payLen, isBinary);
+                    sess->ws->notifySocketMessage(sess->uri.c_str(), sess->fd, rx + dataOff, (int)payLen, isBinary);
                 }
             }
 
-            if (off > 0)
-            {
-                sess->rxSize -= off;
-                memmove(rx.data(), rx.data() + off, sess->rxSize);
-            }
-            return close;
+            buffer.consume(off);
+            // Wait until the current storage fills before allocating for a validated frame.
+            return close || (buffer.room() == 0 && !buffer.growForFrame(required));
         }
 
         // ── WebSocket upgrade ───────────────────────────────────────────────
@@ -587,7 +589,6 @@ namespace OpenKNX
                 delete sess;
             };
 
-            uint8_t tmp[512];
             for (WsSession* sess : sessions)
             {
                 if (!sess) break;
@@ -604,13 +605,12 @@ namespace OpenKNX
                 // Drain whatever is available right now — fully non-blocking.
                 for (;;)
                 {
-                    const size_t room = sess->rx.size() - sess->rxSize;
+                    const size_t room = sess->rx.room();
                     if (!room) { dead = true; break; }
-                    int n = recv(sess->fd, tmp, std::min(sizeof(tmp), room), MSG_DONTWAIT);
+                    int n = recv(sess->fd, sess->rx.tail(), std::min<size_t>(512, room), MSG_DONTWAIT);
                     if (n > 0)
                     {
-                        memcpy(sess->rx.data() + sess->rxSize, tmp, n);
-                        sess->rxSize += n;
+                        sess->rx.commit(n);
                         if (wsParseFrames(sess))
                         {
                             dead = true;

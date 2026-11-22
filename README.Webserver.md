@@ -17,7 +17,7 @@ OPENKNX_WEBCONSOLE          – /console page (streams over the shared UI socket
 OPENKNX_WEBCONSOLE_BUFFER   – Total size of the log ring buffer in bytes (default: 4096)
 OPENKNX_WEBSERVER_MAX_CONN  – total webserver connection slots, shared between HTTP and WebSocket (ESP32 7; RP2040 3, or 6 when the project sets -D__LWIP_MEMMULT=2). A visitor takes two slots, so 3 carries one visitor and 6 carries three
 OPENKNX_WEBSOCKET_TX_BUFFER – Send queue: one ring for all clients, in bytes (default 4096, rounded down to a power of two)
-OPENKNX_WEBSOCKET_RX_CAP    – ESP32 only: per-WS receive buffer in bytes, allocated for the session's lifetime (default 1024 like RP2040, overflow → disconnect)
+OPENKNX_WEBSOCKET_RX_CAP    – ESP32 only: maximum incoming frame payload in bytes (default 2048, overflow → disconnect)
 OPENKNX_WEBSERVER_RX_CAP    – RP2040 only: per-slot receive buffer in bytes, used for HTTP headers and WS payloads alike (default 1024; headers over it → HTTP 431, WS payloads over it → connection dropped, same as ESP32). Max 65535; below ~1 KB a normal browser request no longer fits.
 OPENKNX_WEBMONITOR        – /groupmonitor page, live KNX telegram stream over the shared UI socket (TP only, MASK_VERSION == 0x07B0)
 OPENKNX_WEBFS               – /filemanager page and its routes (browse, download, upload, delete, mkdir)
@@ -515,7 +515,8 @@ logger (both at most once per 5 s). These checks complement checked
 body allocations; they cannot reserve memory against concurrent allocations
 or make every remaining `std::string` allocation failure-safe. RP WebSockets
 retain their fixed buffers and lwIP backpressure handling; ESP32 uses checked
-TX allocations and a fixed, checked RX allocation per session.
+TX allocations. The ESP32 receive buffer holds up to 256 payload bytes inline
+and allocates overflow only while processing a larger frame.
 
 ```cpp
 class WebRequest {

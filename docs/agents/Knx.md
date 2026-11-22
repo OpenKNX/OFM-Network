@@ -31,7 +31,7 @@ OPENKNX_MQTT_BROKER_MAX_SUBS – Max subscriptions per broker client (default 16
 OPENKNX_WEBSOCKET_TX_BUFFER  – WS send queue, one ring for all clients (default 4096)
 OPENKNX_WEBSERVER_MAX_CONN   – Webserver slots, HTTP + WS share them (ESP32 7, RP2040 3, or 6 with -D__LWIP_MEMMULT=2)
 OPENKNX_WEBSERVER_RX_CAP     – RP2040: static buffer per connection slot, HTTP headers *and* WS payloads (default 1024)
-OPENKNX_WEBSOCKET_RX_CAP     – ESP32: fixed buffer per WS session, allocated on upgrade, WS only (httpd buffers HTTP itself) (default 1024)
+OPENKNX_WEBSOCKET_RX_CAP     – ESP32: maximum incoming frame payload per WebSocket (default 2048)
 ```
 
 The `OPENKNX_WEB*` feature flags and what each one pulls in: [`Webserver.md`](Webserver.md). The
