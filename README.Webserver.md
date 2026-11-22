@@ -483,8 +483,9 @@ and append with `html += text`. The writer stores the body in checked 512-byte
 chunks instead of growing a contiguous `std::string` and copying the whole page.
 Set content type and `setLayout(true)` as usual; do not call `send()` afterward.
 Both transports send layout header, body and footer through a 512-byte buffer
-and free body chunks as they are consumed. The overview uses this path on all
-three platforms. The complete body is initially buffered; this reduces large
+and free body chunks as they are consumed. The overview serves static HTML and
+uses a one-time JSON request for device details plus the existing WebSocket
+`status` event for live readings. An `HtmlWriter` body is initially buffered, which reduces large
 contiguous allocations and avoids the body copy, but does not bound total page
 size. Layout header/footer and other handlers may still allocate strings.
 

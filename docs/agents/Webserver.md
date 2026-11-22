@@ -83,9 +83,12 @@ openknxNetwork.webserver.addJavaScript("/assets/custom.js");
 
 ## Response Assembly (Segments)
 
+The overview uses `sendStatic()` for its HTML body. It fetches device details once
+from `/overview/details` and updates live readings from the UI socket's `status`
+event. The common header and footer still use the normal layout path.
+
 **Generated HTML on ESP32 and RP2040/RP2350:** `HtmlWriter` appends to
-response-owned, checked 512-byte chunks. The overview uses it on both platform
-paths. `setLayout(true)` also works on streams: `readStreamChunk()` emits
+response-owned, checked 512-byte chunks. `setLayout(true)` also works on streams: `readStreamChunk()` emits
 header, body, then footer. Consumed HTML chunks are freed immediately; remaining
 chunks are cleaned up on completion or abort. Allocation failure discards partial
 output, uses a static HTTP 503 body and suppresses layout generation; later
