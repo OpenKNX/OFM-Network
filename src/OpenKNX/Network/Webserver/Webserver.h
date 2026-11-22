@@ -43,9 +43,7 @@
 // pool -- a client without a cursor would loop reconnecting in silence.
 #define WS_MAX_CLIENTS OPENKNX_WEBSERVER_MAX_CONN
 
-// Sendequeue: ein Ring für alle Clients (Senderichtung). Nicht zu verwechseln mit
-// OPENKNX_WEBSOCKET_RX_CAP, das den Empfangs-Sammelpuffer je Verbindung begrenzt.
-// Dimensionierend ist der Schwall pro Tick, nicht die Dauerlast.
+// One shared transmit ring sized for bursts between loop ticks.
 #ifndef OPENKNX_WEBSOCKET_TX_BUFFER
 #define OPENKNX_WEBSOCKET_TX_BUFFER 4096
 #endif
@@ -248,7 +246,6 @@ namespace OpenKNX
             // same message every tick.
             const char* _uiOversizeKey = nullptr;
 
-            void buildOverviewPage(WebResponse& res);
             void setupUiSocket();
             void notifyUiHandlers(const char* key, const char* data, size_t len);
             void publishStatus(bool force);

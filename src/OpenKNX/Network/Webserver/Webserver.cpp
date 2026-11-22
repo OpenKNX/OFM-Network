@@ -148,7 +148,7 @@ namespace OpenKNX
         }
 
 #ifdef OPENKNX_WEBSERVER
-        void Webserver::buildOverviewPage(WebResponse& res)
+        static void sendOverviewPage(WebRequest&, WebResponse& res)
         {
             static constexpr char overview[] = R"HTML(
 <div class="container" id="ov-page">
@@ -206,7 +206,7 @@ namespace OpenKNX
             res.sendStatic(overview);
         }
 
-        static void sendOverviewDetails(WebResponse& res)
+        static void sendOverviewDetails(WebRequest&, WebResponse& res)
         {
             OpenKNX::Format::JSON::Writer json;
             json.beginObject();
@@ -341,12 +341,8 @@ namespace OpenKNX
             addStylesheet("/assets/base.css");
             addJavaScript("/assets/base.js");
 
-            addRoute(WEB_GET, "/", [this](WebRequest&, WebResponse& res) {
-                buildOverviewPage(res);
-            });
-            addRoute(WEB_GET, "/overview/details", [](WebRequest&, WebResponse& res) {
-                sendOverviewDetails(res);
-            });
+            addRoute(WEB_GET, "/", sendOverviewPage);
+            addRoute(WEB_GET, "/overview/details", sendOverviewDetails);
 
             setupUiSocket();
 

@@ -95,10 +95,7 @@ namespace OpenKNX
             return out;
         }
 
-        // Escaped für HTML-Textinhalt/Attribute. dir/displayName kommen aus dem
-        // Query-String bzw. aus Dateinamen, die der Upload-Handler ungeprüft annimmt —
-        // ohne dies bricht z.B. ein Verzeichnis- oder Dateiname mit '<' aus dem
-        // umgebenden Markup bzw. aus dem <script>-Block in buildOverviewPage aus.
+        // Escape query values and filenames before inserting them into HTML text or attributes.
         static std::string htmlEscape(const std::string& s)
         {
             std::string r;
