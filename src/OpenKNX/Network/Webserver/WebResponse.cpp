@@ -9,59 +9,6 @@ namespace OpenKNX
     namespace Network
     {
 
-        namespace
-        {
-            struct HtmlChunk
-            {
-                HtmlChunk* next;
-                size_t used;
-                uint8_t data[512];
-            };
-
-            struct HtmlBody
-            {
-                HtmlChunk* first;
-                HtmlChunk* last;
-                HtmlChunk* reading;
-                size_t offset;
-            };
-
-            void freeHtml(void* context)
-            {
-                auto* body = static_cast<HtmlBody*>(context);
-                while (body->first)
-                {
-                    auto* next = body->first->next;
-                    free(body->first);
-                    body->first = next;
-                }
-                free(body);
-            }
-
-            size_t readHtml(void* context, uint8_t* buffer, size_t length)
-            {
-                auto* body = static_cast<HtmlBody*>(context);
-                size_t copied = 0;
-                while (body->reading && copied < length)
-                {
-                    auto* chunk = body->reading;
-                    const size_t count = std::min(length - copied, chunk->used - body->offset);
-                    memcpy(buffer + copied, chunk->data + body->offset, count);
-                    copied += count;
-                    body->offset += count;
-                    if (body->offset == chunk->used)
-                    {
-                        body->reading = chunk->next;
-                        body->first = chunk->next;
-                        if (body->last == chunk) body->last = nullptr;
-                        free(chunk);
-                        body->offset = 0;
-                    }
-                }
-                return copied;
-            }
-        }
-
         void WebResponse::clearBody()
         {
             if (_bodyOwned) free(_body);
@@ -84,61 +31,6 @@ namespace OpenKNX
             static const char message[] = "Temporarily unavailable: insufficient memory";
             _body = reinterpret_cast<uint8_t*>(const_cast<char*>(message));
             _bodyLength = sizeof(message) - 1;
-        }
-
-        void WebResponse::beginHtml()
-        {
-            clearBody();
-            _allocationFailed = false;
-            auto* body = static_cast<HtmlBody*>(PSRAM_MALLOC(sizeof(HtmlBody)));
-            if (!body)
-            {
-                allocationFailed();
-                return;
-            }
-            *body = {};
-            sendStream(0, readHtml, freeHtml, body);
-        }
-
-        bool WebResponse::appendHtml(const char* text, size_t length)
-        {
-            if (_allocationFailed || !_streaming || _streamReadFn != readHtml) return false;
-            auto* body = static_cast<HtmlBody*>(_streamCtx);
-            while (length)
-            {
-                if (!body->last || body->last->used == sizeof(HtmlChunk::data))
-                {
-                    auto* chunk = static_cast<HtmlChunk*>(PSRAM_MALLOC(sizeof(HtmlChunk)));
-                    if (!chunk)
-                    {
-                        allocationFailed();
-                        return false;
-                    }
-                    chunk->next = nullptr;
-                    chunk->used = 0;
-                    if (body->last) body->last->next = chunk;
-                    else body->first = body->reading = chunk;
-                    body->last = chunk;
-                }
-                const size_t count = std::min(length, sizeof(HtmlChunk::data) - body->last->used);
-                memcpy(body->last->data + body->last->used, text, count);
-                body->last->used += count;
-                _streamTotal += count;
-                text += count;
-                length -= count;
-            }
-            return true;
-        }
-
-        HtmlWriter& HtmlWriter::operator+=(const char* text)
-        {
-            if (text) _response.appendHtml(text, strlen(text));
-            return *this;
-        }
-
-        bool WebResponse::isHtmlStream() const
-        {
-            return _streaming && _streamReadFn == readHtml;
         }
 
         WebResponse::WebResponse()

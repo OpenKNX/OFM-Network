@@ -8,7 +8,6 @@
 #include "OpenKNX/Network/Webserver/Webserver.h"
 #include "OpenKNX/Network/Webserver/HeapAdmission.h"
 #include <algorithm>
-#include <climits>
 #include <lwip/tcp.h>
 #include <lwip_wrap.h> // LWIPMutex: makes the ethernet IRQ defer
 #include <string>
@@ -267,13 +266,11 @@ namespace OpenKNX
             tcp_output(s->pcb);
         }
 
-        // Loop context only: file readers touch the filesystem. Files get a few chunks per
-        // tick so a large download does not stretch the loop; HTML from RAM fills the window.
+        // Limit each loop pass so file reads cannot stall the rest of the device.
         static void tcpSendStream(ConnSlot* s)
         {
             uint8_t buf[512];
-            const int maxChunks = g_response[s->idx].isHtmlStream() ? INT_MAX : 4;
-            for (int i = 0; i < maxChunks && flushPending(s) && s->streamSent < s->streamTotal; i++)
+            for (int i = 0; i < 4 && flushPending(s) && s->streamSent < s->streamTotal; i++)
             {
                 int room = txRoom(s->pcb);
                 if (room <= 0) break;

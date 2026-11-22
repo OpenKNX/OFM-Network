@@ -478,16 +478,10 @@ No C++ flag required — controlled purely via CSS.
 
 ## WebRequest / WebResponse
 
-Generated pages on ESP32, RP2040 and RP2350 can use `HtmlWriter html(response);`
-and append with `html += text`. The writer stores the body in checked 512-byte
-chunks instead of growing a contiguous `std::string` and copying the whole page.
-Set content type and `setLayout(true)` as usual; do not call `send()` afterward.
-Both transports send layout header, body and footer through a 512-byte buffer
-and free body chunks as they are consumed. The overview serves static HTML and
-uses a one-time JSON request for device details plus the existing WebSocket
-`status` event for live readings. An `HtmlWriter` body is initially buffered, which reduces large
-contiguous allocations and avoids the body copy, but does not bound total page
-size. Layout header/footer and other handlers may still allocate strings.
+The overview serves static HTML with `sendStatic()`, fetches device details
+once as JSON and uses the WebSocket `status` event for live readings. Routes
+that supply a stream via `sendStream()` can also use `setLayout(true)`.
+The transport reads the layout header, body and footer in chunks.
 
 An allocation failure discards partial body output and returns a static HTTP
 503 response without allocating a second error body. Status and content type
@@ -556,8 +550,8 @@ flight per connection, so a large page never occupies the whole lwIP heap at onc
 **Note on `setLayout(true)`:** header, body and footer are **not** concatenated into one buffer. `Webserver::handleRequest()`
 builds a segment list (`ResponseSegment[]`, max 3: header/body/footer) on the `WebResponse`; the platform sends each
 segment directly — one `httpd_resp_send_chunk()` (or `tcp_write()`) per segment,
-without a merge allocation. `HtmlWriter` responses on both platforms use the chunked stream
-path described above rather than the fixed three-segment body representation.
+without a merge allocation. For streaming responses, `readStreamChunk()`
+emits the header, streamed body and footer in order.
 
 ---
 

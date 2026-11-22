@@ -40,10 +40,6 @@ namespace OpenKNX
             void sendStatic(const char* text);
             void sendStatic(const uint8_t* data, int length);
 
-            // Checked, chunk-backed HTML assembly; no page-sized string or copy.
-            void beginHtml();
-            bool appendHtml(const char* text, size_t length);
-
             // Generiertes Web-Asset (webassets.h), gzip, ohne Content-Negotiation.
             void sendAsset(const char* mimeType, const uint8_t* data, size_t length);
 
@@ -71,8 +67,6 @@ namespace OpenKNX
             WebStreamReadFn streamReadFn() const { return _streamReadFn; }
             WebStreamCleanupFn streamCleanupFn() const { return _streamCleanupFn; }
             void* streamCtx() const { return _streamCtx; }
-            // HtmlWriter body: RAM only, so a transport may drain it without pacing.
-            bool isHtmlStream() const;
             size_t readStreamChunk(uint8_t* buf, size_t maxLen);
             void cleanupStream();
             // Transfers cleanup to the RP transport before resetting from an IRQ.
@@ -122,16 +116,6 @@ namespace OpenKNX
             static constexpr int MAX_SEGMENTS = 3; // Header + Body + Footer
             ResponseSegment _segments[MAX_SEGMENTS] = {};
             uint8_t _segCount = 0;
-        };
-
-        class HtmlWriter
-        {
-            WebResponse& _response;
-
-          public:
-            explicit HtmlWriter(WebResponse& response) : _response(response) { _response.beginHtml(); }
-            HtmlWriter& operator+=(const char* text);
-            HtmlWriter& operator+=(const std::string& text) { _response.appendHtml(text.data(), text.size()); return *this; }
         };
 
     } // namespace Network

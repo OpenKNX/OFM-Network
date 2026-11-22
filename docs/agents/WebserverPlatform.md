@@ -11,16 +11,13 @@ Verwandt: [`Webserver.md`](Webserver.md), [`WsTxQueue.md`](WsTxQueue.md), [`Webc
   `Retry-After: 5` and close. No largest-block API is assumed on arduino-pico.
   The dispatch rejection logs one error line per 5 s with the free heap; the
   body-size rejection runs in `onRecv()` (IRQ) and stays silent.
-- Generated HTML uses the same checked 512-byte `HtmlWriter` chunks as ESP32.
-  `tcpSendStream()` calls the slot response's `readStreamChunk()`, so the HTTP
-  `Content-Length` includes layout header/body/footer and every byte is emitted.
-  On release, `releaseStream(ctx)` transfers cleanup before `reset()`; deferred
-  cleanup owns both file contexts and any unconsumed HTML chunks exactly once.
-- Streams are refilled from `loopPlatform()` only, never from `onSent()`. File
-  streams get at most 4 chunks per pass so LittleFS reads do not stretch the
-  loop; `isHtmlStream()` bodies come from RAM and fill the TCP window
-  (`txRoom()`) in one pass, as segment responses do. `g_pending` is reserved to
-  512 B with the stream header, so parking a chunk after `ERR_MEM` never allocates.
+- `tcpSendStream()` calls the slot response's `readStreamChunk()`. The
+  HTTP `Content-Length` includes the layout header and footer when enabled.
+  `releaseStream(ctx)` transfers cleanup before `reset()`, so the loop can
+  run it outside the network interrupt.
+- `loopPlatform()` reads at most four stream chunks per pass to limit the
+  time spent reading files. `g_pending` is reserved to 512 B with the stream
+  header to retain a chunk if TCP returns `ERR_MEM`.
 
 Critical characteristic: lwIP runs single-threaded. Callbacks (`onAccept`, `onRecv`, `onSent`, `onPoll`, `onErr`) must **not block** and must not perform long operations.
 

@@ -2,6 +2,8 @@
 #include "OpenKNX/Network/Webserver/HeapAdmission.h"
 #include "OpenKNX/Helper.h"
 #include <cassert>
+#include <cstring>
+#include <string_view>
 #include <iostream>
 #include <string>
 
@@ -16,35 +18,56 @@ static std::string readResponse(WebResponse& response, size_t step)
     return result;
 }
 
+struct StreamState
+{
+    std::string_view remaining;
+    unsigned cleaned = 0;
+};
+
+static size_t readStream(void* context, uint8_t* buffer, size_t length)
+{
+    auto& stream = *static_cast<StreamState*>(context);
+    const size_t count = std::min(length, stream.remaining.size());
+    if (count)
+    {
+        std::memcpy(buffer, stream.remaining.data(), count);
+        stream.remaining.remove_prefix(count);
+    }
+    return count;
+}
+
+static void cleanupStream(void* context)
+{
+    ++static_cast<StreamState*>(context)->cleaned;
+}
+
 int main()
 {
-    // A fragmented heap cannot provide the old 4/8-KiB growing page string.
-    // Real response assembly must still work with allocations limited to 1 KiB.
+    // Stream large and empty bodies with layout under a small allocation limit.
     blockLimit = 1024;
     const std::string body(12000, 'x');
     for (size_t step : {size_t(1), size_t(17), size_t(512), size_t(513)})
     {
+        StreamState stream{body};
         WebResponse response;
-        HtmlWriter html(response);
-        html += "prefix";
-        html += body;
-        html += "suffix";
         response.setLayout(true);
+        response.sendStream(body.size(), readStream, cleanupStream, &stream);
         response.setLayoutChrome("<header>", "<footer>");
-        assert(response.statusCode() == 200 && response.isStreaming() && response.isHtmlStream());
-        assert(response.streamTotal() == body.size() + 28);
-        assert(readResponse(response, step) == "<header>prefix" + body + "suffix<footer>");
+        assert(response.statusCode() == 200 && response.isStreaming());
+        assert(response.streamTotal() == body.size() + 16);
+        assert(readResponse(response, step) == "<header>" + body + "<footer>");
         response.cleanupStream();
         response.cleanupStream();
+        assert(stream.cleaned == 1);
     }
-    assert(largestAllocation <= 1024);
+    assert(largestAllocation <= blockLimit);
 
-    // RP stops at Content-Length rather than asking for an extra EOF read.
+    // RP stops at Content-Length.
     for (const std::string& text : {std::string(), std::string(512, 'a'), std::string(513, 'b')})
     {
+        StreamState stream{text};
         WebResponse response;
-        HtmlWriter html(response);
-        html += text;
+        response.sendStream(text.size(), readStream, cleanupStream, &stream);
         response.setLayoutChrome("<h>", "<f>");
         const size_t total = response.streamTotal();
         std::string sent;
@@ -56,47 +79,23 @@ int main()
             sent.append(reinterpret_cast<char*>(buffer), count);
         }
         assert(sent == "<h>" + text + "<f>");
-        void* context = nullptr;
-        auto cleanup = response.releaseStream(context);
-        response.reset();
-        cleanup(context);
     }
 
-    // Fail context creation and each subsequent chunk allocation. Partial HTML
-    // must be discarded, never returned with HTTP 200 or decorated with layout.
-    for (size_t failure = 0; failure < 1 + (body.size() + 511) / 512; ++failure)
-    {
-        allocationCount = 0;
-        failAt = failure;
-        WebResponse response;
-        HtmlWriter html(response);
-        html += body;
-        html += "still unavailable";
-        response.setLayout(true);
-        response.setStatus(404); // a handler finishing its page must not undo the 503
-        response.setContentType("text/html");
-        assert(response.statusCode() == 503 && !response.isStreaming() && !response.isHtmlStream() && !response.useLayout());
-        assert(std::string(response.contentType()).rfind("text/plain", 0) == 0);
-        response.finalizeSegments();
-        assert(response.totalLength() > 0);
-        assert(std::string(response.body()).find("insufficient memory") != std::string::npos);
-        failAt = static_cast<size_t>(-1);
-        response.reset();
-        assert(response.statusCode() == 200);
-        response.setStatus(404);
-        assert(response.statusCode() == 404);
-        response.setStatus(200);
-        HtmlWriter retry(response);
-        retry += "recovered";
-        assert(readResponse(response, 17) == "recovered");
-    }
-
-    // A normal copied body must report an allocation failure as 503, too.
+    // Copied bodies report allocation failure without allocating a second body.
     WebResponse failure;
-    failAt = 0; allocationCount = 0;
+    failAt = 0;
+    allocationCount = 0;
+    failure.setLayout(true);
     failure.send("copy");
-    assert(failure.statusCode() == 503 && failure.bodyLength() > 0);
+    failure.setLayout(true);
+    failure.setStatus(404);
+    failure.setContentType("text/html");
+    assert(failure.statusCode() == 503 && failure.bodyLength() > 0 && !failure.useLayout());
+    assert(std::string(failure.contentType()).rfind("text/plain", 0) == 0);
     failAt = static_cast<size_t>(-1);
+    failure.reset();
+    failure.send("recovered");
+    assert(failure.statusCode() == 200 && std::string(failure.body()) == "recovered");
 
     // Keep RP2040's deferred file cleanup contract: reset must not close a file
     // from a network interrupt after its callback was parked for the loop task.
@@ -104,7 +103,7 @@ int main()
     WebResponse file;
     file.sendStream(0, [](void*, uint8_t*, size_t) { return size_t(0); },
         [](void* context) { ++*static_cast<unsigned*>(context); }, &cleaned);
-    assert(file.isStreaming() && !file.isHtmlStream()); // RP paces file reads
+    assert(file.isStreaming());
     void* context = nullptr;
     auto cleanup = file.releaseStream(context);
     file.reset();
@@ -126,17 +125,18 @@ int main()
     // Disconnect after consuming only part of a chunk; ownership moves to the
     // deferred queue, so reset and later cleanup cannot free it twice.
     {
+        StreamState stream{body};
         WebResponse aborted;
-        HtmlWriter html(aborted);
-        html += body;
+        aborted.sendStream(body.size(), readStream, cleanupStream, &stream);
         uint8_t buffer[17];
         assert(aborted.readStreamChunk(buffer, sizeof(buffer)) == sizeof(buffer));
         void* context = nullptr;
         auto cleanup = aborted.releaseStream(context);
-        assert(!aborted.isHtmlStream());
+        assert(!aborted.isStreaming());
         aborted.reset();
         cleanup(context);
         aborted.cleanupStream();
+        assert(stream.cleaned == 1);
     }
 
     assert(webHeapReserveFits(8192, 0, 8192));

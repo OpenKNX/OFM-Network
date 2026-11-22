@@ -87,13 +87,10 @@ The overview uses `sendStatic()` for its HTML body. It fetches device details on
 from `/overview/details` and updates live readings from the UI socket's `status`
 event. The common header and footer still use the normal layout path.
 
-**Generated HTML on ESP32 and RP2040/RP2350:** `HtmlWriter` appends to
-response-owned, checked 512-byte chunks. `setLayout(true)` also works on streams: `readStreamChunk()` emits
-header, body, then footer. Consumed HTML chunks are freed immediately; remaining
-chunks are cleaned up on completion or abort. Allocation failure discards partial
-output, uses a static HTTP 503 body and suppresses layout generation; later
-`setStatus()`/`setContentType()`/`setLayout()` calls are ignored until `reset()`. The full
-body is buffered initially; the chunk size is not a total page-size limit.
+With `setLayout(true)` on a streamed response, `readStreamChunk()` emits the
+header, body and footer in order. A failed body allocation returns a static
+HTTP 503 and suppresses layout. Later `setStatus()`, `setContentType()` and
+`setLayout()` calls are ignored until `reset()`.
 `WebResponse` owns stream cleanup; RP calls `releaseStream(ctx)` before reset to
 transfer it to the deferred cleanup queue, keeping file close out of interrupts.
 
