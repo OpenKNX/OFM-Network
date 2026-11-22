@@ -4,10 +4,15 @@
 #include "OpenKNX.h"
 #include "OpenKNX/Network/Module.h"
 #include "OpenKNX/Network/Webserver/Webserver.h"
+#include "OpenKNX/Network/Webserver/HeapAdmission.h"
+#include "OpenKNX/Network/Webserver/WebSocketRxBuffer.h"
 #include <algorithm>
+#include <array>
 #include <arpa/inet.h>
 #include <cstdint>
 #include <esp_http_server.h>
+#include <esp_heap_caps.h>
+#include <esp_rom_sys.h>
 #include <fcntl.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -15,12 +20,14 @@
 #include <mbedtls/sha1.h>
 #include <sys/socket.h>
 #include <vector>
+#include <memory>
+#include <new>
 
 #ifndef ESP32_WEB_CTRL_PORT
 #define ESP32_WEB_CTRL_PORT 9080
 #endif
 
-// RX-Obergrenze pro Verbindung; grössere Frames trennen die Verbindung.
+// Maximum incoming payload per frame.
 #ifndef OPENKNX_WEBSOCKET_RX_CAP
 #define OPENKNX_WEBSOCKET_RX_CAP 2048
 #endif
@@ -97,19 +104,22 @@ namespace OpenKNX
             {
                 hdr[hLen++] = 127;
                 for (int i = 7; i >= 0; --i)
-                    hdr[hLen++] = (uint8_t)((len >> (8 * i)) & 0xFF);
+                    hdr[hLen++] = (uint8_t)(((uint64_t)len >> (8 * i)) & 0xFF);
             }
 
             // One combined buffer → single send() call → atomically complete or not sent.
-            std::vector<uint8_t> frame(hLen + len);
-            memcpy(frame.data(), hdr, hLen);
-            if (len > 0) memcpy(frame.data() + hLen, data, len);
+            if (len > SIZE_MAX - hLen) return WsSendResult::Failed;
+            std::unique_ptr<uint8_t, decltype(&free)> frame(
+                static_cast<uint8_t*>(PSRAM_MALLOC(hLen + len)), free);
+            if (!frame) return WsSendResult::WouldBlock;
+            memcpy(frame.get(), hdr, hLen);
+            if (len > 0) memcpy(frame.get() + hLen, data, len);
 
-            int r = wsRawSend(fd, frame.data(), frame.size());
+            int r = wsRawSend(fd, frame.get(), hLen + len);
             if (r < 0)
-                return (errno == EAGAIN || errno == EWOULDBLOCK) ? WsSendResult::WouldBlock
+                return (errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOMEM || errno == ENOBUFS) ? WsSendResult::WouldBlock
                                                                  : WsSendResult::Failed;
-            if (r != (int)frame.size()) return WsSendResult::Failed; // Teil-Write
+            if (r != (int)(hLen + len)) return WsSendResult::Failed; // Teil-Write
             return WsSendResult::Ok;
         }
 
@@ -121,7 +131,7 @@ namespace OpenKNX
             int fd;
             std::string uri;
             httpd_req_t* async;       // async handle — keeps the socket out of httpd's poll set
-            std::vector<uint8_t> rx;  // RX accumulation buffer (partial frames span loop ticks)
+            WebSocketRxBuffer<OPENKNX_WEBSOCKET_RX_CAP> rx;
             bool markedDead = false; // siehe markSessionDead()
         };
 
@@ -145,15 +155,17 @@ namespace OpenKNX
             }
         }
 
-        // Verarbeitet alle vollständigen Frames in sess->rx; ein angefangenes bleibt für
-        // den nächsten Tick liegen. true = Verbindung schliessen. Ruft nie recv().
+        // Dispatch complete frames, leaving an incomplete frame for the next receive.
+        // Returns true if the connection must close.
         static bool wsParseFrames(WsSession* sess)
         {
-            std::vector<uint8_t>& rx = sess->rx;
+            auto& buffer = sess->rx;
+            auto* rx = buffer.data();
             size_t off = 0;
+            size_t required = 0;
             bool close = false;
 
-            while (rx.size() - off >= 2)
+            while (buffer.size() - off >= 2)
             {
                 uint8_t b0 = rx[off];
                 uint8_t b1 = rx[off + 1];
@@ -164,20 +176,19 @@ namespace OpenKNX
 
                 if (payLen == 126)
                 {
-                    if (rx.size() - off < 4) break;
+                    if (buffer.size() - off < 4) break;
                     payLen = ((uint16_t)rx[off + 2] << 8) | rx[off + 3];
                     hdrLen = 4;
                 }
                 else if (payLen == 127)
                 {
-                    if (rx.size() - off < 10) break;
+                    if (buffer.size() - off < 10) break;
                     payLen = 0;
                     for (int i = 0; i < 8; ++i)
                         payLen = (payLen << 8) | rx[off + 2 + i];
                     hdrLen = 10;
                 }
 
-                // A frame larger than the bounded RX buffer can never complete → drop client.
                 if (payLen > OPENKNX_WEBSOCKET_RX_CAP)
                 {
                     close = true;
@@ -185,17 +196,20 @@ namespace OpenKNX
                 }
 
                 size_t maskLen = masked ? 4 : 0;
-                uint64_t need = (uint64_t)hdrLen + maskLen + payLen;
-                if ((uint64_t)(rx.size() - off) < need) break; // frame incomplete → wait for more
+                const size_t need = hdrLen + maskLen + static_cast<size_t>(payLen);
+                if (buffer.size() - off < need)
+                {
+                    required = need;
+                    break;
+                }
 
                 uint8_t mask[4] = {};
                 if (masked)
                     for (int i = 0; i < 4; ++i) mask[i] = rx[off + hdrLen + i];
 
                 size_t dataOff = off + hdrLen + maskLen;
-                std::vector<uint8_t> payload((size_t)payLen);
                 for (size_t i = 0; i < (size_t)payLen; ++i)
-                    payload[i] = masked ? (rx[dataOff + i] ^ mask[i % 4]) : rx[dataOff + i];
+                    if (masked) rx[dataOff + i] ^= mask[i % 4];
 
                 off = dataOff + (size_t)payLen; // frame consumed
 
@@ -217,12 +231,13 @@ namespace OpenKNX
                 if (op == 0x01 || op == 0x02) // text / binary
                 {
                     bool isBinary = (op == 0x02);
-                    sess->ws->notifySocketMessage(sess->uri.c_str(), sess->fd, payload.data(), (int)payLen, isBinary);
+                    sess->ws->notifySocketMessage(sess->uri.c_str(), sess->fd, rx + dataOff, (int)payLen, isBinary);
                 }
             }
 
-            if (off > 0) rx.erase(rx.begin(), rx.begin() + off);
-            return close;
+            buffer.consume(off);
+            // Wait until the current storage fills before allocating for a validated frame.
+            return close || (buffer.room() == 0 && !buffer.growForFrame(required));
         }
 
         // ── WebSocket upgrade ───────────────────────────────────────────────
@@ -239,6 +254,8 @@ namespace OpenKNX
 
             int fd = httpd_req_to_sockfd(req);
             std::string uri = req->uri;
+            auto sess = std::unique_ptr<WsSession>(new (std::nothrow) WsSession{wsObj, fd, uri, nullptr, {}});
+            if (!sess) return false;
 
             // Zuerst aus httpds Poll-Set lösen, sonst hält httpd die WS-Bytes für einen
             // neuen HTTP-Request. Vor dem 101, damit ein Fehler hier noch eine normale
@@ -254,7 +271,11 @@ namespace OpenKNX
                                 "Connection: Upgrade\r\n"
                                 "Sec-WebSocket-Accept: %s\r\n\r\n",
                                 accept);
-            send(fd, resp, rLen, MSG_NOSIGNAL);
+            if (send(fd, resp, rLen, MSG_NOSIGNAL) != rLen)
+            {
+                httpd_req_async_handler_complete(async);
+                return false;
+            }
 
             // TCP keepalive — detect silently dead peers within ~9 s
             int ka = 1, kaIdle = 3, kaIntvl = 2, kaCnt = 3;
@@ -267,10 +288,10 @@ namespace OpenKNX
             int fl = fcntl(fd, F_GETFL, 0);
             if (fl >= 0) fcntl(fd, F_SETFL, fl | O_NONBLOCK);
 
-            WsSession* sess = new WsSession{wsObj, fd, uri, async, {}};
+            sess->async = async;
             {
                 WsStateGuard guard(wsObj);
-                g_wsSessions.push_back(sess);
+                g_wsSessions.push_back(sess.release());
             }
 
             wsObj->notifySocketConnect(uri.c_str(), fd, true);
@@ -289,6 +310,40 @@ namespace OpenKNX
 
         static esp_err_t platformHttpHandler(httpd_req_t* req)
         {
+            if (req->content_len > OPENKNX_WEBSERVER_MAX_BODY)
+            {
+                logWarning("Webserver", "%s - 413, body %u B", req->uri, (unsigned)req->content_len);
+                httpd_resp_set_status(req, "413 Content Too Large");
+                httpd_resp_set_type(req, "text/plain");
+                httpd_resp_sendstr(req, "Content Too Large");
+                return ESP_FAIL;
+            }
+            const size_t freeBytes = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            const size_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+#ifdef OPENKNX_PSRAM
+            // ps_malloc takes the body from PSRAM only; internal RAM just keeps its reserve.
+            const bool fits = webHeapFits(freeBytes, largestBlock, 0, OPENKNX_WEBSERVER_MIN_FREE_HEAP, OPENKNX_WEBSERVER_MIN_HEAP_BLOCK) &&
+                              req->content_len <= heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+            const bool fits = webHeapFits(freeBytes, largestBlock, req->content_len, OPENKNX_WEBSERVER_MIN_FREE_HEAP, OPENKNX_WEBSERVER_MIN_HEAP_BLOCK);
+#endif
+            if (!fits)
+            {
+                // Avoid the allocating logger while handling heap exhaustion.
+                static uint32_t lastWarning = 0;
+                if (!lastWarning || millis() - lastWarning >= 5000)
+                {
+                    lastWarning = millis();
+                    esp_rom_printf("Webserver: low memory (free=%u, largest=%u, body=%u); HTTP 503\n",
+                                   (unsigned)freeBytes, (unsigned)largestBlock, (unsigned)req->content_len);
+                }
+                httpd_resp_set_status(req, "503 Service Unavailable");
+                httpd_resp_set_type(req, "text/plain");
+                httpd_resp_set_hdr(req, "Retry-After", "5");
+                httpd_resp_set_hdr(req, "Connection", "close");
+                httpd_resp_sendstr(req, "Temporarily unavailable: insufficient memory");
+                return ESP_FAIL;
+            }
             Webserver* ws = (Webserver*)req->user_ctx;
             std::string uri = req->uri;
 
@@ -354,6 +409,7 @@ namespace OpenKNX
                     if (doWsUpgrade(req, ws))
                         return ESP_OK;
                     logError("Webserver", "WS upgrade failed: %s", uri.c_str());
+                    return ESP_FAIL;
                 }
             }
 
@@ -363,27 +419,20 @@ namespace OpenKNX
             request.setRemoteAddr(remoteIpAddr);
             request.setRemotePort(remotePort);
 
-            // Body lesen (POST/PUT) – bis OPENKNX_WEBSERVER_MAX_BODY
-            if (req->content_len > OPENKNX_WEBSERVER_MAX_BODY)
-            {
-                // sonst käme der Request mit leerem Body bei handleRequest() an
-                WebResponse response413;
-                response413.setStatus(413);
-                ws->logRequest(request, response413);
-                httpd_resp_set_status(req, "413 Content Too Large");
-                httpd_resp_set_type(req, "text/plain");
-                httpd_resp_sendstr(req, "Content Too Large");
-                return ESP_OK;
-            }
-
-            std::vector<uint8_t, PsramAllocator<uint8_t>> bodyData;
+            std::unique_ptr<uint8_t, decltype(&free)> bodyData(nullptr, free);
             if (req->content_len > 0)
             {
-                bodyData.resize(req->content_len);
+                bodyData.reset(static_cast<uint8_t*>(PSRAM_MALLOC(req->content_len)));
+                if (!bodyData)
+                {
+                    httpd_resp_set_status(req, "503 Service Unavailable");
+                    httpd_resp_sendstr(req, "Request body allocation failed");
+                    return ESP_FAIL;
+                }
                 int remaining = (int)req->content_len, received = 0;
                 while (remaining > 0)
                 {
-                    int r = httpd_req_recv(req, (char*)bodyData.data() + received, remaining);
+                    int r = httpd_req_recv(req, (char*)bodyData.get() + received, remaining);
                     if (r <= 0) break;
                     received += r;
                     remaining -= r;
@@ -396,7 +445,7 @@ namespace OpenKNX
                     httpd_resp_sendstr(req, "Incomplete body");
                     return ESP_OK;
                 }
-                request.setBody(bodyData.data(), (size_t)received);
+                request.setBody(bodyData.get(), (size_t)received);
             }
 
             WebResponse response;
@@ -438,10 +487,15 @@ namespace OpenKNX
                 // Streaming-Download: Transfer-Encoding: chunked (kein Content-Length nötig)
                 uint8_t buf[512];
                 size_t got;
+                esp_err_t result = ESP_OK;
                 while ((got = response.readStreamChunk(buf, sizeof(buf))) > 0)
-                    httpd_resp_send_chunk(req, (char*)buf, (ssize_t)got);
-                httpd_resp_send_chunk(req, nullptr, 0);
+                {
+                    result = httpd_resp_send_chunk(req, (char*)buf, (ssize_t)got);
+                    if (result != ESP_OK) break;
+                }
+                if (result == ESP_OK) result = httpd_resp_send_chunk(req, nullptr, 0);
                 response.cleanupStream();
+                return result;
             }
             else if (response.segmentCount() <= 1)
             {
@@ -470,6 +524,7 @@ namespace OpenKNX
             // Shared-state mutexes (created once, before any WS can be upgraded)
             if (_wsLock == nullptr) _wsLock = xSemaphoreCreateRecursiveMutex();
             if (g_wsTxMutex == nullptr) g_wsTxMutex = xSemaphoreCreateMutex();
+            g_wsSessions.reserve(OPENKNX_WEBSERVER_MAX_CONN);
 
             // WS-Sockets werden per Async-Handler aus httpd gelöst und aus
             // Webserver::loop() bedient — kein Task pro Verbindung
@@ -516,12 +571,11 @@ namespace OpenKNX
             if (!_server) return;
 
             // Nur diese Schleife löscht Sessions, der Snapshot bleibt also gültig
-            std::vector<WsSession*> sessions;
+            std::array<WsSession*, OPENKNX_WEBSERVER_MAX_CONN> sessions{};
             {
                 WsStateGuard guard(this);
-                sessions = g_wsSessions;
+                std::copy_n(g_wsSessions.begin(), std::min(g_wsSessions.size(), sessions.size()), sessions.begin());
             }
-            if (sessions.empty()) return;
 
             // Hand the socket back to httpd (which closes it), then clear the registry.
             auto reap = [this](WsSession* sess) {
@@ -535,9 +589,9 @@ namespace OpenKNX
                 delete sess;
             };
 
-            uint8_t tmp[512];
             for (WsSession* sess : sessions)
             {
+                if (!sess) break;
                 // Check before receiving: dropClient() already reported onConnect(false),
                 // so parsing on would run a buffered command for a torn-down client.
                 if (sess->markedDead)
@@ -551,11 +605,13 @@ namespace OpenKNX
                 // Drain whatever is available right now — fully non-blocking.
                 for (;;)
                 {
-                    int n = recv(sess->fd, tmp, sizeof(tmp), MSG_DONTWAIT);
+                    const size_t room = sess->rx.room();
+                    if (!room) { dead = true; break; }
+                    int n = recv(sess->fd, sess->rx.tail(), std::min<size_t>(512, room), MSG_DONTWAIT);
                     if (n > 0)
                     {
-                        sess->rx.insert(sess->rx.end(), tmp, tmp + n);
-                        if (sess->rx.size() > OPENKNX_WEBSOCKET_RX_CAP)
+                        sess->rx.commit(n);
+                        if (wsParseFrames(sess))
                         {
                             dead = true;
                             break;
@@ -573,7 +629,6 @@ namespace OpenKNX
                     break;
                 }
 
-                if (!dead && wsParseFrames(sess)) dead = true;
 
                 if (dead) reap(sess);
             }

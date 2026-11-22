@@ -2,6 +2,11 @@
 
 ## upcoming releases
 
+* change: the overview serves static HTML, loads device details once as JSON and uses the existing WebSocket status for live readings.
+
+* fix (ESP32, RP2040/RP2350): body allocation failures return HTTP 503, request admission checks preserve a heap reserve, and streams can include the layout on both platforms. RP defers stream cleanup to the main loop. ESP32 WebSocket allocations are checked.
+* fix (ESP32): keep a small inline WebSocket receive buffer and allocate overflow only for a larger frame. The default maximum payload remains 2048 bytes.
+
 * change: adapted to the renamed TP-UART API of the KNX stack (`registerReceivedFrame` → `registerFrameCallback`, `isMonitoring` → `isBusMonitor`). This module now builds only against a stack that has the new names; the MQTT telegram publisher, the group monitor and the busmonitor state are affected
 * feature: the HTTP client no longer limits the URL path — a path (with query) over 255 characters used to be cut off silently, and the request head was capped at 512 (RP2040) / 768 (ESP32) bytes. Request line and headers are now built to their actual size. `http://host?x=1` is parsed as `/?x=1` instead of taking the query for part of the host name, and a port above 65535 is rejected instead of wrapping around. The host name stays limited to 63 characters. The API is unchanged, but note: request headers that used to be dropped silently once the head outgrew its buffer are now all sent, and on RP2040 `OPENKNX_WEBCLIENT_BUF_SIZE` sizes only the receive buffer (the per-slot TX buffer is gone)
 

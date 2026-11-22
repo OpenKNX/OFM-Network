@@ -148,171 +148,139 @@ namespace OpenKNX
         }
 
 #ifdef OPENKNX_WEBSERVER
-        void Webserver::buildOverviewPage(WebResponse& res)
+        static void sendOverviewPage(WebRequest&, WebResponse& res)
         {
-            char buf[64];
-            std::string page = "<div class='container'><h1>Übersicht</h1>";
+            static constexpr char overview[] = R"HTML(
+<div class="container" id="ov-page">
+  <h1>Übersicht</h1>
+  <noscript><p>Die Geräteübersicht benötigt JavaScript.</p></noscript>
+  <p id="ov-details-error" role="status" hidden>Gerätedaten konnten nicht geladen werden.</p>
+  <h2>Gerät</h2>
+  <table class="attribute-table"><tbody>
+    <tr id="ov-id-row" hidden><td>ID</td><td id="ov-id"></td></tr>
+    <tr id="ov-name-row" hidden><td>Name</td><td id="ov-name"></td></tr>
+    <tr><td>Seriennummer</td><td id="ov-serial">–</td></tr>
+  </tbody></table>
+  <h2>Firmware</h2>
+  <table class="attribute-table"><tbody>
+    <tr><td>Name</td><td id="ov-firmware">–</td></tr>
+    <tr><td>Version</td><td id="ov-version">–</td></tr>
+    <tr><td>Nummer</td><td id="ov-number">–</td></tr>
+    <tr><td>KNX-Typ</td><td id="ov-mask-type">–</td></tr>
+    <tr><td>CPU-Modus</td><td><span id="ov-core">–</span><span id="ov-temperature" hidden> (<span id="ov-cpu"></span> °C)</span></td></tr>
+  </tbody></table>
+  <h2>Applikation</h2>
+  <table class="attribute-table"><tbody>
+    <tr><td>KNX-Adresse</td><td><span id="ov-pa">–</span> <span id="ov-cfg"></span></td></tr>
+    <tr id="ov-appVersion-row" hidden><td>Version</td><td id="ov-appVersion"></td></tr>
+    <tr id="ov-appNumber-row" hidden><td>Nummer</td><td id="ov-appNumber"></td></tr>
+  </tbody></table>
+  <h2>Laufzeit</h2>
+  <table class="attribute-table"><tbody>
+    <tr><td>Uptime</td><td id="ov-up">–</td></tr>
+    <tr><td>Freier Speicher</td><td><span id="ov-mem">–</span> KiB<span id="ov-memory-minimum" hidden> (min. <span id="ov-memMin"></span> KiB)</span></td></tr>
+    <tr><td>Watchdog</td><td id="ov-watchdog">–</td></tr>
+  </tbody></table>
+  <h2>Netzwerk</h2>
+  <table class="attribute-table"><tbody>
+    <tr><td>Hostname</td><td id="ov-hostname">–</td></tr>
+    <tr><td>MAC</td><td id="ov-mac">–</td></tr>
+    <tr><td>IP-Adresse</td><td id="ov-ip">–</td></tr>
+    <tr><td>Subnetz</td><td id="ov-mask">–</td></tr>
+    <tr><td>Gateway</td><td id="ov-gw">–</td></tr>
+    <tr><td>DNS</td><td id="ov-dns">–</td></tr>
+  </tbody></table>
+  <h2>Versionen</h2>
+  <table class="attribute-table">
+    <tbody>
+      <tr><td>This Firmware</td><td id="ov-this-version">–</td></tr>
+    </tbody>
+    <tbody id="ov-modules"></tbody>
+    <tbody>
+      <tr><td>Buildtime</td><td id="ov-build">–</td></tr>
+    </tbody>
+  </table>
+</div>
+)HTML";
+            res.setLayout(true);
+            res.sendStatic(overview);
+        }
 
-            // Appends straight into page instead of building+copying a separate string per row.
-            // id nur für die Felder, die der Status live nachzieht.
-            auto row = [&page](const char* label, const std::string& val, const char* id = nullptr) {
-                page += "<tr><td>";
-                page += label;
-                page += "</td><td";
-                if (id)
-                {
-                    page += " id='";
-                    page += id;
-                    page += "'";
-                }
-                page += ">";
-                page += val;
-                page += "</td></tr>";
-            };
-
-            // ── Gerät ──────────────────────────────────────────────────────────
-            page += "<h2>Gerät</h2><table class='attribute-table'><tbody>";
+        static void sendOverviewDetails(WebRequest&, WebResponse& res)
+        {
+            OpenKNX::Format::JSON::Writer json;
+            json.beginObject();
 #ifdef DEVICE_ID
-            row("ID", DEVICE_ID);
+            json.field("id", DEVICE_ID);
 #endif
 #ifdef DEVICE_NAME
-            row("Name", DEVICE_NAME);
+            json.field("name", DEVICE_NAME);
 #elif defined(HARDWARE_NAME)
-            row("Name", HARDWARE_NAME);
+            json.field("name", HARDWARE_NAME);
 #endif
-            row("Seriennummer", openknx.info.humanSerialNumber());
-            page += "</tbody></table>";
-
-            // ── Firmware ───────────────────────────────────────────────────────
-            page += "<h2>Firmware</h2><table class='attribute-table'><tbody>";
-            row("Name", openknx.info.firmwareName());
-            row("Version", openknx.info.humanFirmwareVersion(true));
-            row("Nummer", openknx.info.humanFirmwareNumber());
+            json.field("serial", openknx.info.humanSerialNumber());
+            json.field("firmware", openknx.info.firmwareName());
+            json.field("version", openknx.info.humanFirmwareVersion(true));
+            json.field("number", openknx.info.humanFirmwareNumber());
+            char buf[32];
 #if MASK_VERSION == 0x07B0
-            row("KNX-Typ", "TP (07B0)");
+            json.field("mask-type", "TP (07B0)");
 #elif MASK_VERSION == 0x57B0
-            row("KNX-Typ", "IP (57B0)");
+            json.field("mask-type", "IP (57B0)");
 #elif MASK_VERSION == 0x091A
-            row("KNX-Typ", "Router (091A)");
+            json.field("mask-type", "Router (091A)");
 #else
             snprintf(buf, sizeof(buf), "%04X", MASK_VERSION);
-            row("KNX-Typ", buf);
+            json.field("mask-type", buf);
 #endif
-            {
 #ifdef OPENKNX_DUALCORE
-                const char* cpuMode = openknx.usesDualCore() ? "Dual-Core" : "Single-Core";
+            json.field("core", openknx.usesDualCore() ? "Dual-Core" : "Single-Core");
 #else
-                const char* cpuMode = "Single-Core";
+            json.field("core", "Single-Core");
 #endif
-                float temp = openknx.hardware.cpuTemperature();
-                if (temp > 0.0f)
-                {
-                    // Nur die Zahl bekommt eine id -- der Kernmodus davor ändert sich nie.
-                    // Whole degrees like the status JSON, else the first update jumps.
-                    snprintf(buf, sizeof(buf), "%s (<span id='ov-cpu'>%d</span> °C)", cpuMode, (int)temp);
-                    row("CPU-Modus", buf);
-                }
-                else
-                    row("CPU-Modus", cpuMode);
-            }
-            page += "</tbody></table>";
-
-            // ── Applikation ────────────────────────────────────────────────────
-            page += "<h2>Applikation</h2><table class='attribute-table'><tbody>";
-            {
-                std::string addr = "<span id='ov-pa'>";
-                addr += openknx.info.humanIndividualAddress();
-                addr += knx.configured()
-                            ? "</span> <span id='ov-cfg' class='green'>(Konfiguriert)</span>"
-                            : "</span> <span id='ov-cfg' class='gray'>(Nicht konfiguriert)</span>";
-                row("KNX-Adresse", addr);
-            }
             if (openknx.info.applicationNumber() > 0)
             {
-                row("Version", openknx.info.humanApplicationVersion());
-                row("Nummer", openknx.info.humanApplicationNumber());
+                json.field("appVersion", openknx.info.humanApplicationVersion());
+                json.field("appNumber", openknx.info.humanApplicationNumber());
             }
-            page += "</tbody></table>";
-
-            // ── Laufzeit ───────────────────────────────────────────────────────
-            page += "<h2>Laufzeit</h2><table class='attribute-table'><tbody>";
-            {
-                uint32_t s = uptime();
-                uint32_t d = s / 86400;
-                s %= 86400;
-                uint32_t h = s / 3600;
-                s %= 3600;
-                uint32_t m = s / 60;
-                s %= 60;
-                snprintf(buf, sizeof(buf), "%ud %02u:%02u:%02u", d, h, m, s);
-                // Danach zählt der Browser selbst weiter -- dafür muss nichts gesendet werden.
-                row("Uptime", buf, "ov-up");
-            }
-            {
-                uint32_t fm = (uint32_t)(freeMemory() / 1024);
-                float fmMin = openknx.common.freeMemoryMin() / 1024.0f;
-                snprintf(buf, sizeof(buf), "<span id='ov-mem'>%u</span> KiB (min. %.3f KiB)", fm, fmMin);
-                row("Freier Speicher", buf);
-            }
+            json.field("memMin", openknx.common.freeMemoryMin() / 1024.0f);
 #ifdef OPENKNX_WATCHDOG
             if (openknx.watchdog.active())
-            {
                 snprintf(buf, sizeof(buf), "Running (%is)", (int)openknx.watchdog.maxPeriod());
-                row("Watchdog", buf);
-            }
             else
-                row("Watchdog", "Disabled");
+                snprintf(buf, sizeof(buf), "Disabled");
+            json.field("watchdog", buf);
 #else
-            row("Watchdog", "Unsupported");
+            json.field("watchdog", "Unsupported");
 #endif
-            page += "</tbody></table>";
+            uint8_t mac[6] = {};
+            openknxNetwork.macAddress(mac);
+            snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+            json.field("mac", buf);
+            json.field("hostname", openknxNetwork.hostName());
+            json.field("build", BUILD_DATETIME);
 
-            // ── Netzwerk ───────────────────────────────────────────────────────
-            {
-                uint8_t mac[6] = {};
-                openknxNetwork.macAddress(mac);
-                char macStr[18];
-                snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
-                         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-                bool net = openknxNetwork.established();
-
-                page += "<h2>Netzwerk</h2><table class='attribute-table'><tbody>";
-                row("Hostname", openknxNetwork.hostName());
-                row("MAC", macStr);
-                row("IP-Adresse", net ? openknxNetwork.localIP().toString().c_str()
-                                              : "–", "ov-ip");
-                row("Subnetz", net ? openknxNetwork.subnetMask().toString().c_str()
-                                           : "–", "ov-mask");
-                row("Gateway", net ? openknxNetwork.gatewayIP().toString().c_str()
-                                           : "–", "ov-gw");
-                row("DNS", net ? openknxNetwork.nameServerIP().toString().c_str()
-                                       : "–", "ov-dns");
-                page += "</tbody></table>";
-            }
-
-            // ── Versionen ──────────────────────────────────────────────────────
-            page += "<h2>Versionen</h2><table class='attribute-table'><tbody>";
-            row("This Firmware", openknx.info.humanFirmwareVersion(true));
+            auto module = [&json](const char* name, const std::string& version) {
+                json.beginArray().value(name).value(version).endArray();
+            };
+            json.key("modules").beginArray();
 #ifdef KNX_Version
-            row("KNX", KNX_Version);
+            module("KNX", KNX_Version);
 #endif
 #ifdef MODULE_Common_Version
-            row(openknx.common.logPrefix().c_str(), MODULE_Common_Version);
+            module(openknx.common.logPrefix().c_str(), MODULE_Common_Version);
 #endif
             for (uint8_t i = 0; i < openknx.modules.count; i++)
             {
-                if (openknx.modules.list[i]->version().empty()) continue;
-                row(openknx.modules.list[i]->name().c_str(),
-                            openknx.modules.list[i]->version());
+                const auto version = openknx.modules.list[i]->version();
+                if (!version.empty())
+                    module(openknx.modules.list[i]->name().c_str(), version);
             }
-            page += "<tr><td colspan='2' style='padding-top:1em'></td></tr>";
-            row("Buildtime", BUILD_DATETIME);
-            page += "</tbody></table>";
+            json.endArray().endObject();
 
-            page += "</div>";
-            res.setContentType("text/html");
-            res.setLayout(true);
-            res.send(page.c_str());
+            res.setContentType("application/json");
+            res.send(json.c_str());
         }
 #endif // OPENKNX_WEBSERVER
 
@@ -373,9 +341,8 @@ namespace OpenKNX
             addStylesheet("/assets/base.css");
             addJavaScript("/assets/base.js");
 
-            addRoute(WEB_GET, "/", [this](WebRequest&, WebResponse& res) {
-                buildOverviewPage(res);
-            });
+            addRoute(WEB_GET, "/", sendOverviewPage);
+            addRoute(WEB_GET, "/overview/details", sendOverviewDetails);
 
             setupUiSocket();
 
@@ -520,15 +487,13 @@ namespace OpenKNX
                          "<p class='meta'>Die angeforderte Seite existiert nicht.</p>");
             }
 
-            // Layout anwenden und die Antwort in ihre Sendeblöcke zerlegen. Bewusst hier
-            // und nicht im Plattformcode: der kennt danach nur noch res.segments() und
-            // muss weder useLayout() auswerten noch buildHeader()/buildFooter() kennen.
+            // Keep layout assembly here; transports consume segments or readStreamChunk().
+            if (res.useLayout())
+                res.setLayoutChrome(
+                    buildHeader(res.activeMenuUri().empty() ? path : res.activeMenuUri()),
+                    buildFooter());
             if (!res.isStreaming())
             {
-                if (res.useLayout())
-                    res.setLayoutChrome(
-                        buildHeader(res.activeMenuUri().empty() ? path : res.activeMenuUri()),
-                        buildFooter());
                 res.finalizeSegments();
             }
 

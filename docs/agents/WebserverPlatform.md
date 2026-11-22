@@ -5,6 +5,20 @@ Verwandt: [`Webserver.md`](Webserver.md), [`WsTxQueue.md`](WsTxQueue.md), [`Webc
 
 ## RP2040 Architecture (lwIP `NO_SYS=1`)
 
+- HTTP dispatch checks the internal free heap reserve before routing, including
+  WS upgrades. Request body allocation checks preserve that reserve; RP2350 PSRAM
+  body capacity is checked separately. Failures attempt static HTTP 503 with
+  `Retry-After: 5` and close. No largest-block API is assumed on arduino-pico.
+  The dispatch rejection logs one error line per 5 s with the free heap; the
+  body-size rejection runs in `onRecv()` (IRQ) and stays silent.
+- `tcpSendStream()` calls the slot response's `readStreamChunk()`. The
+  HTTP `Content-Length` includes the layout header and footer when enabled.
+  `releaseStream(ctx)` transfers cleanup before `reset()`, so the loop can
+  run it outside the network interrupt.
+- `loopPlatform()` reads at most four stream chunks per pass to limit the
+  time spent reading files. `g_pending` is reserved to 512 B with the stream
+  header to retain a chunk if TCP returns `ERR_MEM`.
+
 Critical characteristic: lwIP runs single-threaded. Callbacks (`onAccept`, `onRecv`, `onSent`, `onPoll`, `onErr`) must **not block** and must not perform long operations.
 
 **Two contexts, one rule.** With `PIN_ETH_INT` (every W5500 board in OGM-HardwareConfig) the callbacks run in the W5500 interrupt and preempt `loop()`. They keep to bookkeeping, header/frame parsing and RAM-only sending; everything that touches the filesystem runs in `loopPlatform()`. Concretely:
@@ -51,9 +65,24 @@ State is fully held in `ConnSlot` — no global parser state.
 
 ## ESP32 Architecture
 
+- HTTP admission checks internal free heap and the largest free block before
+  constructing a page; configurable reserves are documented in README.Webserver.md.
+  With PSRAM the request body is checked against the largest PSRAM block, not
+  internal RAM: `ps_malloc()` allocates from PSRAM only.
+  Pressure returns HTTP 503/Retry-After and closes the connection.
+- Request bodies and TX WebSocket frames use checked allocations. Allocation
+  pressure on TX is `WouldBlock`, including socket ENOMEM/ENOBUFS; it must not
+  become an uncaught `std::bad_alloc`.
+- A WS session receives up to 256 payload bytes plus frame overhead inline.
+  After that storage fills for a valid larger frame, it allocates the space
+  required by the frame up to `OPENKNX_WEBSOCKET_RX_CAP` (default 2048 bytes).
+  Allocation failure closes the session. The parser unmasks payloads in place
+  and releases the overflow when the remaining bytes fit inline. The loop snapshot is a bounded stack
+  array and the session registry reserves the connection limit at startup.
+
 - `httpd` runs in its own FreeRTOS task
 - **WebSockets use no per-connection task.** On upgrade the socket is detached from httpd via `httpd_req_async_handler_begin()` so httpd stops polling it; it is then serviced non-blocking from `Webserver::loop()` (driven by the main loop, just like RP2040). The earlier `httpd_sess_set_recv_override` endless-loop monopolized the single httpd task and limited the device to one working WebSocket (a second tab couldn't connect); the task-per-session variant fixed concurrency but cost ~4.3 KB RAM per connection — both are gone.
-- `Webserver::loop()` per session: `recv(MSG_DONTWAIT)` drains available bytes into the session's `rx` buffer, then `wsParseFrames()` dispatches every complete frame (partial frames wait for the next tick). On EOF/error/oversize → cleanup: `notifySocketConnect(false)` → `httpd_req_async_handler_complete()` (httpd closes the socket) → remove from registry → free.
+- `Webserver::loop()` per session: `recv(MSG_DONTWAIT)` reads directly into the session's RX buffer. After each successful read, `wsParseFrames()` dispatches complete frames and retains any partial frame for the next read. On EOF/error/oversize → cleanup: `notifySocketConnect(false)` → `httpd_req_async_handler_complete()` (httpd closes the socket) → remove from registry → free.
 - `onMessage` runs in the loop task; for the console it only buffers the command into `_pendingCmd`, which `Webconsole::loop()` then runs via `processCommand()`.
 - Concurrency bounded by `OPENKNX_WEBSERVER_MAX_CONN` (default 7), shared with HTTP; there is no WebSocket-specific cap. `config.lru_purge_enable = true` frees idle HTTP keep-alives so new connections find a socket slot — a live WebSocket is safe from it, because its async handler stays open (see `httpd_req_async_handler_complete()`).
 - Shared state (`_socketClients` + the WS session registry) guarded by a recursive mutex (`Webserver::wsStateLock/Unlock`), reachable from both `Webserver_ESP32.cpp` and the platform-agnostic `Webserver.cpp` (`hasClients`, `ui.hasClients()`, `notifySocketConnect`, the queue drain). `wsSendText()`/`wsRawSend()` use `MSG_DONTWAIT` and are serialized by a TX mutex so frames from different tasks never interleave.

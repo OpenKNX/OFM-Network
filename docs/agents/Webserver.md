@@ -83,7 +83,18 @@ openknxNetwork.webserver.addJavaScript("/assets/custom.js");
 
 ## Response Assembly (Segments)
 
-The platform transport code knows nothing about layout. `Webserver::handleRequest()` routes the request and then, unless the response is streaming, applies the layout and flattens everything into a segment list on the `WebResponse`:
+The overview uses `sendStatic()` for its HTML body. It fetches device details once
+from `/overview/details` and updates live readings from the UI socket's `status`
+event. The common header and footer still use the normal layout path.
+
+With `setLayout(true)` on a streamed response, `readStreamChunk()` emits the
+header, body and footer in order. A failed body allocation returns a static
+HTTP 503 and suppresses layout. Later `setStatus()`, `setContentType()` and
+`setLayout()` calls are ignored until `reset()`.
+`WebResponse` owns stream cleanup; RP calls `releaseStream(ctx)` before reset to
+transfer it to the deferred cleanup queue, keeping file close out of interrupts.
+
+The platform transport code knows nothing about layout. `Webserver::handleRequest()` routes the request and applies the layout on the `WebResponse`. Non-streaming responses are flattened into a segment list; streaming responses emit the layout through `readStreamChunk()`:
 
 - `setLayoutChrome()` moves the `buildHeader()`/`buildFooter()` strings into the response (no copy)
 - `finalizeSegments()` builds `ResponseSegment[]` = header + body + footer (max 3, empty parts skipped)

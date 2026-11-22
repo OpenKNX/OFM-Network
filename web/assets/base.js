@@ -165,14 +165,47 @@
     // Uptime kommt nur beim Verbinden mit und läuft danach im Browser weiter --
     // sonst müsste sekündlich etwas gesendet werden, nur damit sie sich bewegt.
     let uptime = null;
+    function renderUptime() {
+        const d = Math.floor(uptime / 86400), r = uptime % 86400;
+        text('ov-up', d + 'd ' + p2(Math.floor(r / 3600)) + ':' +
+                      p2(Math.floor((r % 3600) / 60)) + ':' + p2(r % 60));
+    }
     if ($('ov-up')) {
         setInterval(function () {
             if (uptime === null) return;
             uptime++;
-            const d = Math.floor(uptime / 86400), r = uptime % 86400;
-            text('ov-up', d + 'd ' + p2(Math.floor(r / 3600)) + ':' +
-                          p2(Math.floor((r % 3600) / 60)) + ':' + p2(r % 60));
+            renderUptime();
         }, 1000);
+    }
+
+    if ($('ov-page')) {
+        fetch('/overview/details').then(function (response) {
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            return response.json();
+        }).then(function (details) {
+            ['serial', 'firmware', 'version', 'number', 'mask-type', 'core',
+             'watchdog', 'hostname', 'mac', 'build'].forEach(function (key) {
+                text('ov-' + key, details[key]);
+            });
+            ['id', 'name', 'appVersion', 'appNumber'].forEach(function (key) {
+                if (details[key] === undefined) return;
+                text('ov-' + key, details[key]);
+                $('ov-' + key + '-row').hidden = false;
+            });
+            text('ov-this-version', details.version);
+            if (typeof details.memMin === 'number') {
+                text('ov-memMin', details.memMin.toFixed(3));
+                $('ov-memory-minimum').hidden = false;
+            }
+            const rows = $('ov-modules');
+            details.modules.forEach(function (entry) {
+                const row = rows.insertRow();
+                row.insertCell().textContent = entry[0];
+                row.insertCell().textContent = entry[1];
+            });
+        }).catch(function () {
+            $('ov-details-error').hidden = false;
+        });
     }
 
     // Connection indicator in the navigation -- present on every page.
@@ -206,11 +239,18 @@
             cfg.className = s.cfg ? 'green' : 'gray';
         }
         text('ov-mem', s.mem);
-        text('ov-cpu', s.cpu);
+        const temperature = $('ov-temperature');
+        if (temperature && s.cpu !== undefined) {
+            temperature.hidden = !(s.cpu > 0);
+            text('ov-cpu', s.cpu);
+        }
         ['ip', 'mask', 'gw', 'dns'].forEach(function (k) {
             text('ov-' + k, s.net ? s[k] : '–');
         });
-        if (s.up !== undefined) uptime = s.up;
+        if (s.up !== undefined) {
+            uptime = s.up;
+            renderUptime();
+        }
     });
 
     // Ohne JS bleibt der POST-Fallback; mit JS spart der Socket den Roundtrip.

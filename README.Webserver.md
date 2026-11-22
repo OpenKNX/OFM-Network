@@ -17,7 +17,7 @@ OPENKNX_WEBCONSOLE          – /console page (streams over the shared UI socket
 OPENKNX_WEBCONSOLE_BUFFER   – Total size of the log ring buffer in bytes (default: 4096)
 OPENKNX_WEBSERVER_MAX_CONN  – total webserver connection slots, shared between HTTP and WebSocket (ESP32 7; RP2040 3, or 6 when the project sets -D__LWIP_MEMMULT=2). A visitor takes two slots, so 3 carries one visitor and 6 carries three
 OPENKNX_WEBSOCKET_TX_BUFFER – Send queue: one ring for all clients, in bytes (default 4096, rounded down to a power of two)
-OPENKNX_WEBSOCKET_RX_CAP    – ESP32 only: per-WS accumulation buffer in bytes (default 2048, overflow → disconnect)
+OPENKNX_WEBSOCKET_RX_CAP    – ESP32 only: maximum incoming frame payload in bytes (default 2048, overflow → disconnect)
 OPENKNX_WEBSERVER_RX_CAP    – RP2040 only: per-slot receive buffer in bytes, used for HTTP headers and WS payloads alike (default 1024; headers over it → HTTP 431, WS payloads over it → connection dropped, same as ESP32). Max 65535; below ~1 KB a normal browser request no longer fits.
 OPENKNX_WEBMONITOR        – /groupmonitor page, live KNX telegram stream over the shared UI socket (TP only, MASK_VERSION == 0x07B0)
 OPENKNX_WEBFS               – /filemanager page and its routes (browse, download, upload, delete, mkdir)
@@ -478,6 +478,40 @@ No C++ flag required — controlled purely via CSS.
 
 ## WebRequest / WebResponse
 
+The overview serves static HTML with `sendStatic()`, fetches device details
+once as JSON and uses the WebSocket `status` event for live readings. Routes
+that supply a stream via `sendStream()` can also use `setLayout(true)`.
+The transport reads the layout header, body and footer in chunks.
+
+An allocation failure discards partial body output and returns a static HTTP
+503 response without allocating a second error body. Status and content type
+set afterwards are ignored until `reset()`, so a handler that finishes its page
+cannot turn the 503 back into a 200 or 404. The response owns its
+stream cleanup. `cleanupStream()`, replacement, reset and destruction clean it
+up once. The RP transport first transfers cleanup with `releaseStream(ctx)`
+before resetting the response, and invokes it later from the main loop; file
+close never runs in the Ethernet interrupt, including after a disconnect.
+
+Both platforms check `OPENKNX_WEBSERVER_MIN_FREE_HEAP` (default 8192) before
+building a response. RP also checks the reserve before allocating a request
+body; with RP2350 PSRAM it checks body space there separately while preserving
+the internal heap reserve. ESP32 additionally checks its largest internal heap
+block against `OPENKNX_WEBSERVER_MIN_HEAP_BLOCK` (default 2048) and the request
+body size; with PSRAM the body is checked against the largest PSRAM block
+instead, since `ps_malloc()` has no fallback to internal RAM. This block-size flag is ESP32-only: arduino-pico exposes total free
+heap, without a corresponding largest-block API. Actual body allocations are
+checked on both platforms, including PSRAM allocations.
+
+Admission failures send HTTP 503 with `Retry-After: 5` and close the connection
+(RP sends this on a best-effort basis if lwIP can still queue it). ESP32 reports
+free/largest heap sizes through the ROM logger, RP the free heap through the
+logger (both at most once per 5 s). These checks complement checked
+body allocations; they cannot reserve memory against concurrent allocations
+or make every remaining `std::string` allocation failure-safe. RP WebSockets
+retain their fixed buffers and lwIP backpressure handling; ESP32 uses checked
+TX allocations. The ESP32 receive buffer holds up to 256 payload bytes inline
+and allocates overflow only while processing a larger frame.
+
 ```cpp
 class WebRequest {
     std::string uri;
@@ -515,8 +549,9 @@ flight per connection, so a large page never occupies the whole lwIP heap at onc
 
 **Note on `setLayout(true)`:** header, body and footer are **not** concatenated into one buffer. `Webserver::handleRequest()`
 builds a segment list (`ResponseSegment[]`, max 3: header/body/footer) on the `WebResponse`; the platform sends each
-segment directly — one `httpd_resp_send_chunk()` (or `tcp_write()`) per segment, no merge allocation on either platform,
-regardless of whether layout is active.
+segment directly — one `httpd_resp_send_chunk()` (or `tcp_write()`) per segment,
+without a merge allocation. For streaming responses, `readStreamChunk()`
+emits the header, streamed body and footer in order.
 
 ---
 

@@ -7,7 +7,15 @@ Verwandt: [`Webserver.md`](Webserver.md), [`Style.md`](Style.md)
 
 No standalone `platformio.ini` — the module is included as a library in parent OpenKNX device projects. `platformio.network.ini` is empty (template for projects).
 
-For testing: integrate into an OpenKNX device project that references this module.
+For firmware testing: integrate into an OpenKNX device project that references this module.
+
+The native response test exercises fragmentation, allocation failure, stream layout
+and cleanup ownership (including RP deferred cleanup) without Arduino:
+
+```sh
+c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -g -Itest/web_memory/stubs -Isrc test/web_memory/response_test.cpp src/OpenKNX/Network/Webserver/WebResponse.cpp -o /tmp/ofm-network-response-test
+/tmp/ofm-network-response-test
+```
 
 ## Web Assets (`web/assets/`, generated `webassets.h`)
 

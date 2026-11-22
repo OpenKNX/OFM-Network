@@ -2,11 +2,36 @@
 #include "OpenKNX/Helper.h" // PSRAM_MALLOC
 #include <cstring>
 #include <cstdlib>
+#include <algorithm>
 
 namespace OpenKNX
 {
     namespace Network
     {
+
+        void WebResponse::clearBody()
+        {
+            if (_bodyOwned) free(_body);
+            _body = nullptr;
+            _bodyLength = 0;
+            cleanupStream();
+            _segCount = 0;
+        }
+
+        void WebResponse::allocationFailed()
+        {
+            clearBody();
+            _statusCode = 503;
+            setContentType("text/plain");
+            _allocationFailed = true; // after setContentType(), which it locks
+            _useLayout = false;
+            _layoutHeader = std::string();
+            _layoutFooter = std::string();
+            _bodyOwned = false;
+            static const char message[] = "Temporarily unavailable: insufficient memory";
+            _body = reinterpret_cast<uint8_t*>(const_cast<char*>(message));
+            _bodyLength = sizeof(message) - 1;
+        }
 
         WebResponse::WebResponse()
         {
@@ -15,12 +40,12 @@ namespace OpenKNX
 
         void WebResponse::setStatus(uint16_t code)
         {
-            _statusCode = code;
+            if (!_allocationFailed) _statusCode = code;
         }
 
         void WebResponse::setContentType(const char* mimeType)
         {
-            if (!mimeType) return;
+            if (!mimeType || _allocationFailed) return;
             strncpy(_contentType, mimeType, sizeof(_contentType) - 1);
             _contentType[sizeof(_contentType) - 1] = '\0';
             if (strncmp(_contentType, "text/", 5) == 0 && strstr(_contentType, "charset") == nullptr)
@@ -46,7 +71,7 @@ namespace OpenKNX
 
         void WebResponse::send(const char* text)
         {
-            if (_bodyOwned) free(_body); // PSRAM_MALLOC
+            clearBody();
             _bodyOwned = true;
             if (text == nullptr)
             {
@@ -56,13 +81,17 @@ namespace OpenKNX
             }
             _bodyLength = strlen(text);
             _body = (uint8_t*)PSRAM_MALLOC(_bodyLength + 1);
-            if (_body == nullptr) { _bodyLength = 0; return; }
+            if (_body == nullptr)
+            {
+                allocationFailed();
+                return;
+            }
             memcpy(_body, text, _bodyLength + 1);
         }
 
         void WebResponse::send(const uint8_t* data, int length)
         {
-            if (_bodyOwned) free(_body); // PSRAM_MALLOC
+            clearBody();
             _bodyOwned = true;
             if (data == nullptr || length == 0)
             {
@@ -72,13 +101,17 @@ namespace OpenKNX
             }
             _bodyLength = length;
             _body = (uint8_t*)PSRAM_MALLOC(length);
-            if (_body == nullptr) { _bodyLength = 0; return; }
+            if (_body == nullptr)
+            {
+                allocationFailed();
+                return;
+            }
             memcpy(_body, data, length);
         }
 
         void WebResponse::sendStatic(const char* text)
         {
-            if (_bodyOwned) free(_body); // PSRAM_MALLOC
+            clearBody();
             _bodyOwned = false;
             _body = reinterpret_cast<uint8_t*>(const_cast<char*>(text));
             _bodyLength = text ? (int)strlen(text) : 0;
@@ -86,7 +119,7 @@ namespace OpenKNX
 
         void WebResponse::sendStatic(const uint8_t* data, int length)
         {
-            if (_bodyOwned) free(_body); // PSRAM_MALLOC
+            clearBody();
             _bodyOwned = false;
             _body = const_cast<uint8_t*>(data);
             _bodyLength = length;
@@ -109,14 +142,13 @@ namespace OpenKNX
 
         WebResponse::~WebResponse()
         {
-            if (_bodyOwned) free(_body); // PSRAM_MALLOC
-            // _streamCtx wird NICHT hier freigegeben – Ownership liegt bei der Plattform
+            clearBody();
         }
 
         void WebResponse::sendStream(size_t totalLength,
                                      WebStreamReadFn readFn, WebStreamCleanupFn cleanupFn, void* ctx)
         {
-            if (_bodyOwned) free(_body); // PSRAM_MALLOC
+            clearBody();
             _body = nullptr;
             _bodyLength = 0;
             _bodyOwned = false;
@@ -125,22 +157,51 @@ namespace OpenKNX
             _streamReadFn = readFn;
             _streamCleanupFn = cleanupFn;
             _streamCtx = ctx;
+            _streamHeaderSent = _streamFooterSent = 0;
+            _streamBodyDone = false;
         }
 
         size_t WebResponse::readStreamChunk(uint8_t* buf, size_t maxLen)
         {
-            if (!_streamReadFn || !_streamCtx) return 0;
-            return _streamReadFn(_streamCtx, buf, maxLen);
+            if (!_streaming || !buf || !maxLen) return 0;
+            if (_streamHeaderSent < _layoutHeader.size())
+            {
+                const size_t count = std::min(maxLen, _layoutHeader.size() - _streamHeaderSent);
+                memcpy(buf, _layoutHeader.data() + _streamHeaderSent, count);
+                _streamHeaderSent += count;
+                return count;
+            }
+            if (!_streamBodyDone)
+            {
+                const size_t count = _streamReadFn && _streamCtx ? _streamReadFn(_streamCtx, buf, maxLen) : 0;
+                if (count) return count;
+                _streamBodyDone = true;
+            }
+            const size_t count = std::min(maxLen, _layoutFooter.size() - _streamFooterSent);
+            memcpy(buf, _layoutFooter.data() + _streamFooterSent, count);
+            _streamFooterSent += count;
+            return count;
+        }
+
+        WebStreamCleanupFn WebResponse::releaseStream(void*& ctx)
+        {
+            auto cleanup = _streamCleanupFn;
+            ctx = _streamCtx;
+            _streaming = false;
+            _streamTotal = 0;
+            _streamCtx = nullptr;
+            _streamReadFn = nullptr;
+            _streamCleanupFn = nullptr;
+            _streamHeaderSent = _streamFooterSent = 0;
+            _streamBodyDone = false;
+            return cleanup;
         }
 
         void WebResponse::cleanupStream()
         {
-            if (_streamCleanupFn && _streamCtx)
-                _streamCleanupFn(_streamCtx);
-            _streaming = false;
-            _streamCtx = nullptr;
-            _streamReadFn = nullptr;
-            _streamCleanupFn = nullptr;
+            void* ctx = nullptr;
+            auto cleanup = releaseStream(ctx);
+            if (cleanup && ctx) cleanup(ctx);
         }
 
         // ── Segmente ─────────────────────────────────────────────────────────
@@ -176,7 +237,7 @@ namespace OpenKNX
 
         void WebResponse::reset()
         {
-            if (_bodyOwned) free(_body); // PSRAM_MALLOC
+            clearBody();
             _body = nullptr;
             _bodyLength = 0;
             _bodyOwned = true;
@@ -185,6 +246,7 @@ namespace OpenKNX
             strncpy(_contentType, "text/html; charset=utf-8", sizeof(_contentType) - 1);
             _contentType[sizeof(_contentType) - 1] = '\0';
             _useLayout = false;
+            _allocationFailed = false;
             _activeMenuUri.clear();
 
             _headers.clear();
@@ -197,6 +259,8 @@ namespace OpenKNX
             _streamCtx = nullptr;
 
             // Zuweisung statt clear(): gibt den Heap-Puffer wirklich frei
+            _streamHeaderSent = _streamFooterSent = 0;
+            _streamBodyDone = false;
             _layoutHeader = std::string();
             _layoutFooter = std::string();
             _segCount = 0;

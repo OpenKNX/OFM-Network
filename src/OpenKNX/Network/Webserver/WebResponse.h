@@ -32,7 +32,7 @@ namespace OpenKNX
             void setStatus(uint16_t code);
             void setContentType(const char* mimeType);
             void setHeader(const char* name, const char* value);
-            void setLayout(bool useLayout) { _useLayout = useLayout; }
+            void setLayout(bool useLayout) { _useLayout = useLayout && !_allocationFailed; }
             void setActiveMenu(const std::string& uri) { _activeMenuUri = uri; }
 
             void send(const char* text);
@@ -46,7 +46,7 @@ namespace OpenKNX
             // 301-Redirect auf target, leerer Body.
             void sendRedirect(const std::string& target);
 
-            // Streaming-Response: Plattform ruft readFn wiederholt auf; cleanupFn nach EOF/Fehler
+            // Owns ctx until cleanup, replacement, reset, destruction or releaseStream().
             void sendStream(size_t totalLength,
                             WebStreamReadFn readFn, WebStreamCleanupFn cleanupFn, void* ctx);
 
@@ -63,12 +63,14 @@ namespace OpenKNX
 
             // Streaming-Accessoren für Plattform-Code
             bool isStreaming() const { return _streaming; }
-            size_t streamTotal() const { return _streamTotal; }
+            size_t streamTotal() const { return _streamTotal + _layoutHeader.size() + _layoutFooter.size(); }
             WebStreamReadFn streamReadFn() const { return _streamReadFn; }
             WebStreamCleanupFn streamCleanupFn() const { return _streamCleanupFn; }
             void* streamCtx() const { return _streamCtx; }
             size_t readStreamChunk(uint8_t* buf, size_t maxLen);
             void cleanupStream();
+            // Transfers cleanup to the RP transport before resetting from an IRQ.
+            WebStreamCleanupFn releaseStream(void*& ctx);
 
             // ── Segmente ─────────────────────────────────────────────────────
             // Befüllt von Webserver::handleRequest(), danach nur noch gelesen.
@@ -91,6 +93,7 @@ namespace OpenKNX
             int _bodyLength = 0;
             bool _bodyOwned = true;
             bool _useLayout = false;
+            bool _allocationFailed = false;
             std::string _activeMenuUri;
             std::vector<std::pair<std::string, std::string>> _headers;
 
@@ -100,6 +103,12 @@ namespace OpenKNX
             WebStreamReadFn _streamReadFn = nullptr;
             WebStreamCleanupFn _streamCleanupFn = nullptr;
             void* _streamCtx = nullptr;
+            size_t _streamHeaderSent = 0;
+            size_t _streamFooterSent = 0;
+            bool _streamBodyDone = false;
+
+            void clearBody();
+            void allocationFailed();
 
             // Segmente zeigen in _layoutHeader/_body/_layoutFooter, alles dieser Instanz
             std::string _layoutHeader;
