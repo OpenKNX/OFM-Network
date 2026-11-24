@@ -189,8 +189,7 @@ namespace OpenKNX
                 // KNX-Secure-Zertifikat: FDSK als Text und als QR-Code zum Scannen in der ETS.
                 // Den QR-Code rendert der externe Dienst api.qrserver.com, der Browser lädt ihn
                 // direkt; er enthält den FDSK ohne Bindestriche.
-                // std::string fdsk = OpenKNX::Fdsk::humanFdsk();
-                row("Zertifikat (FDSK)", OpenKNX::Fdsk::humanFdsk());
+                row("Gerätezertifikat", OpenKNX::Fdsk::getCertificate());
             }
 #endif
             page += "</tbody></table>";
