@@ -6,6 +6,9 @@
 #include "OpenKNX/Network/Module.h"
 #include "OpenKNX/Format/JSON/Writer.h"
 #include "OpenKNX/Helper.h"
+#ifdef USE_DATASECURE
+#include "OpenKNX/Fdsk.h"
+#endif
 #ifdef ARDUINO_ARCH_RP2040
 #include <lwip_wrap.h> // LWIPMutex: makes the ethernet IRQ defer
 #endif
@@ -181,6 +184,15 @@ namespace OpenKNX
             row("Name", HARDWARE_NAME);
 #endif
             row("Seriennummer", openknx.info.humanSerialNumber());
+#ifdef USE_DATASECURE
+            {
+                // KNX-Secure-Zertifikat: FDSK als Text und als QR-Code zum Scannen in der ETS.
+                // Den QR-Code rendert der externe Dienst api.qrserver.com, der Browser lädt ihn
+                // direkt; er enthält den FDSK ohne Bindestriche.
+                // std::string fdsk = OpenKNX::Fdsk::humanFdsk();
+                row("Zertifikat (FDSK)", OpenKNX::Fdsk::humanFdsk());
+            }
+#endif
             page += "</tbody></table>";
 
             // ── Firmware ───────────────────────────────────────────────────────

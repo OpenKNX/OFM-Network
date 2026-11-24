@@ -524,7 +524,7 @@ regardless of whether layout is active.
 
 | URI | Flag | Content |
 |-----|------|---------|
-| `/` | `OPENKNX_WEBSERVER` | Overview: device, firmware, network, uptime, versions |
+| `/` | `OPENKNX_WEBSERVER` | Overview: device (with `USE_DATASECURE` incl. KNX Secure certificate/FDSK as text), firmware, network, uptime, versions |
 | `/prog` (**POST**) | `OPENKNX_WEBSERVER` | Toggles the KNX programming mode, then `303` back to `/` |
 | `/console` | `OPENKNX_WEBCONSOLE` | WebSocket terminal — mirrors the serial logger |
 | `/groupmonitor` | `OPENKNX_WEBMONITOR` | Live KNX group/telegram monitor (TP only) |
